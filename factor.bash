@@ -36,18 +36,18 @@ set -e
 
 check_ret() { return $?; }
 refresh_image() {
-  ./$my_binary_name -i="$1" -script -e="USING: vocabs.loader vocabs.refresh system memory ; refresh-all save 0 exit"
+  ./$my_binary_name -i="$1" -e="USING: vocabs.loader vocabs.refresh system memory ; refresh-all save 0 exit"
 }
 make_boot_image() {
-  ./$my_binary_name -i"$1" -script -e="\"$MAKE_IMAGE_TARGET\" USING: system bootstrap.image memory ; make-image image-path save-image 0 exit"
+  ./$my_binary_name -i"$1" -e="\"$MAKE_IMAGE_TARGET\" USING: system bootstrap.image memory ; make-image image-path save-image 0 exit"
 }
 
-macos_notify() { osascript -e "display notification \"on $branchname\" with title \"$1\"" & }
-linux_notify() { notify-send -i gnome-terminal --hint int:transient:1 -u low "$1" "on $branchname" & }
+macos_notify() { osascript -e "display notification \"$$ on $branchname\" with title \"$1\"" & }
+linux_notify() { notify-send -i gnome-terminal --hint int:transient:1 -u low "$1" "$$ on $branchname" & }
 # NOTE: uses arguments #1=title #2=message
 # shellcheck disable=2155
 declare -r NOTIFY=$(case "$OS" in (macosx) echo macos_notify ;; (linux) echo linux_notify ;; (*) echo : ;; esac)
-_say() { echo "=== on $branchname: $1" >&2 ; } # output to stderr; argument #1=message
+_say() { echo "[$$] on $branchname: $1" >&2 ; } # output to stderr; argument #1=message
 declare -r SAY=_say
 
 declare -r SCRIPT_VERSION=0.1
@@ -55,9 +55,9 @@ declare -r SCRIPT_VERSION=0.1
 # shellcheck disable=2155
 declare -r FACTOR_VERSION=$(make -n | grep -m1 'FACTOR_VERSION' | sed -E 's/^.*FACTOR_VERSION=\"([0-9]+\.[0-9]+)\".*$/\1/')
 
-echo "=== $0 v$SCRIPT_VERSION "
-echo "=== Factor v$FACTOR_VERSION"
-echo "==="
+echo "[$$] $0 v$SCRIPT_VERSION "
+echo "[$$] Factor v$FACTOR_VERSION"
+echo "[$$]"
 
 # shellcheck disable=2155
 # user could `git checkout` another branch during execution but please don't do that
