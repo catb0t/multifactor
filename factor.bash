@@ -36,10 +36,10 @@ set -e
 
 check_ret() { return $?; }
 refresh_image() {
-  ./$my_binary_name -i="$1" -e="USING: vocabs.loader vocabs.refresh system memory ; refresh-all save 0 exit"
+  ./$my_binary_name -no-user-init -i="$1" -e="USING: vocabs.loader vocabs.refresh system memory ; refresh-all save 0 exit"
 }
 make_boot_image() {
-  ./$my_binary_name -i"$1" -e="\"$MAKE_IMAGE_TARGET\" USING: system bootstrap.image memory ; make-image image-path save-image 0 exit"
+  ./$my_binary_name -no-user-init -i"$1" -e="\"$MAKE_IMAGE_TARGET\" USING: system bootstrap.image memory ; make-image image-path save-image 0 exit"
 }
 
 macos_notify() { osascript -e "display notification \"$$ on $branchname\" with title \"$1\"" & }
@@ -78,7 +78,10 @@ my_exit() {
 run_factor() {
   $SAY "./$my_binary_name" "${ARGV[@]:1}" # omitting implied argument -i=$my_image_name
   ./$my_binary_name "${ARGV[@]:1}" &
-  disown $!
+  local -r pid=$!
+  disown $pid
+  $SAY "PID $pid"
+  $NOTIFY "started $pid"
   my_exit
 }
 
@@ -111,7 +114,7 @@ build_image() {
   $NOTIFY "image pass #1"
   $SAY "image pass #1"
   # NOTE: STEP 1: run from boot image
-  ./$my_binary_name "-i=$BOOT_IMAGE" # > /dev/null 2>&1 &
+  ./$my_binary_name -no-user-init "-i=$BOOT_IMAGE" # > /dev/null 2>&1 &
   # spinner $!
 
   # NOTE: STEP 2: `refresh-all` from newly compiled image
@@ -126,7 +129,7 @@ build_image() {
     $NOTIFY "image pass #$i"
 
     make_boot_image $my_image_name
-    ./$my_binary_name "-i=$BOOT_IMAGE"
+    ./$my_binary_name -no-user-init "-i=$BOOT_IMAGE"
 
     refresh_image $my_image_name
 
