@@ -47,7 +47,7 @@ linux_notify() { notify-send -i gnome-terminal --hint int:transient:1 -u low "$1
 # NOTE: uses arguments #1=title #2=message
 # shellcheck disable=2155
 declare -r NOTIFY=$(case "$OS" in (macosx) echo macos_notify ;; (linux) echo linux_notify ;; (*) echo : ;; esac)
-_say() { echo "[$$] on $branchname: $1" >&2 ; } # output to stderr; argument #1=message
+_say() { echo "[$$] on $branchname: $*" >&2 ; } # output to stderr; argument #1=message
 declare -r SAY=_say
 
 declare -r SCRIPT_VERSION=0.1
