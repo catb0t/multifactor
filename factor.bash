@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# factor.bash: manage as many Factor images as your hard drive can hold 
+# https://github.com/catb0t/factor.bash
+# 
 # Copyright 2018 catb0t / Cat Stevens
 
 #  This program is free software: you can redistribute it and/or modify
