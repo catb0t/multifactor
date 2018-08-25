@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# factor.bash: manage as many Factor images as your hard drive can hold 
+# factor.bash: manage as many Factor images as your hard drive can hold
 # https://github.com/catb0t/factor.bash
-# 
+#
 # Copyright 2018 catb0t / Cat Stevens
 
 #  This program is free software: you can redistribute it and/or modify
@@ -16,6 +16,8 @@
 
 #  You should have received a copy of the GNU General Public License
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.started_script=$(date +%s)
+
+started_script=$(date +%s)
 
 # Case insensitive string comparison
 shopt -s nocaseglob
@@ -64,8 +66,14 @@ linux_notify() { notify-send -i gnome-terminal --hint int:transient:1 -u low "$1
 declare -r NOTIFY=$(case "$OS" in (macosx) echo macos_notify ;; (linux) echo linux_notify ;; (*) echo : ;; esac)
 _say() { echo "[$$] on $branchname: $*" >&2 ; } # output to stderr; argument #1=message
 declare -r SAY=_say
+_sum() { sha224sum | cut -f1 -d' ' ; }
+declare -r SUM=_sum
+export SUM
 
 declare -r SCRIPT_VERSION=0.1
+
+TRIM_HASH_TO=12
+export TRIM_HASH_TO
 
 # shellcheck disable=2155
 declare -r FACTOR_VERSION=$(make -n | grep -m1 'FACTOR_VERSION' | sed -E 's/^.*FACTOR_VERSION=\"([0-9]+\.[0-9]+)\".*$/\1/')
@@ -76,11 +84,21 @@ echo "[$$]"
 
 # shellcheck disable=2155
 # user could `git checkout` another branch during execution but please don't do that
-declare -r branchname=$(current_git_branch)
-declare -r name_format="_$branchname""_$MAKE_IMAGE_TARGET""_v$FACTOR_VERSION"
-declare -r my_binary_name="$name_format""_$FACTOR_BINARY"
-declare -r my_image_name="$my_binary_name.image"
-declare -r my_boot_image_name="boot.$my_image_name"
+export branchname=$(current_git_branch)
+export name_format=
+export my_binary_name=
+export my_image_name=
+export my_boot_image_name=
+
+# SOURCE="${BASH_SOURCE[0]}"
+# while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
+#   DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null && pwd )"
+#   SOURCE="$(readlink "$SOURCE")"
+#   [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+# done
+# DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null && pwd )"
+# # shellcheck source=hashing.bash
+# source "$DIR/hashing.bash"
 
 my_exit() {
   local -r ended_script=$(date +%s)
@@ -171,11 +189,11 @@ get_file_mtime() {
 
 # NOTE: uses argument #1=filename and #2=directory and outputs to stdout
 # prints whether the file is outdated (older; smaller mtime) relative to the directory
-file_outdated_vs_directory() {
+_file_mtime_outdated_vs_directory() {
   $SAY "checking $1 is newer than files in $2"
   local -r file_mtime=$(get_file_mtime "$1")
 
-  for dir_entry in "$2"/*
+  for dir_entry in $(git ls-files -E "^$2/")
   do
     local dir_entry_mtime
     dir_entry_mtime=$(get_file_mtime "$dir_entry")
@@ -191,6 +209,89 @@ file_outdated_vs_directory() {
   done
   echo 0
   return 0
+}
+
+#!/usr/bin/env bash
+
+TRIM_HASH_TO=${TRIM_HASH_TO:-12}
+
+# 1 arg
+git_directory_files() {
+  git ls-files | egrep "^$1/"
+}
+
+# 1 arg
+hash_directory_filenames() {
+  git_directory_files "$1" | $SUM
+}
+
+# 1 arg
+hash_directory_contents() {
+  git_directory_files "$1" | xargs cat | $SUM
+}
+
+# no args, reads STDIN
+trim_line() {
+  fold "-w$TRIM_HASH_TO" | head -n1
+}
+
+# 1 arg
+# output hash format: filenames-contents
+make_hash_names() {
+  echo -e "$(hash_directory_filenames "$1" | trim_line)-$(hash_directory_contents "$1" | trim_line)"
+}
+
+# 1 arg
+final_hash() {
+  case "$1" in
+    "image")  make_hash_names "(core|basis)" ;;
+    "binary") make_hash_names "vm" ;;
+  esac
+}
+
+# 1 arg, writes STDOUT
+file_hashes_from_name() {
+  echo "$1" | sed -E 's/.*\[(.+)-(.+)\]_\[(.+)-(.+)\].*/\1 \2 \3 \4/'
+}
+
+_file_hash_outdated_vs_directory() {
+  true
+}
+
+file_outdated_vs_directory() {
+  true
+}
+
+# 2 args: binary hash string, image hash string
+make_current_file_names() {
+ name_format="_$branchname""_$MAKE_IMAGE_TARGET""_v$FACTOR_VERSION"
+ my_basefilename="$name_format""_$FACTOR_BINARY"
+ my_boot_image_name="boot.$my_basefilename.image"
+
+ # hash format: [binary_filenames-binary_filecontents]_[image_filenames-image_filecontents]
+
+ my_binary_name="$name_format""_[$1]_[$2]_$FACTOR_BINARY"
+ my_image_name="$my_binary_name.image"
+
+ echo "name_format=        $name_format"
+ echo "my_basefilename=    $my_basefilename"
+ echo "my_boot_image_name= $my_boot_image_name"
+ echo "my_binary_name=     $my_binary_name"
+ echo "my_image_name=      $my_image_name"
+}
+
+current_files_missing() {
+  local -r binary_hash=$(final_hash "binary")
+  local -r image_hash=$(final_hash "image")
+
+  make_current_file_names $binary_hash $image_hash
+
+  if [[ ! -e "$my_binary_name" || ! -e "$my_image_name" ]]
+  then
+    echo 1
+  else
+    echo 0
+  fi
 }
 
 main() {
@@ -221,6 +322,7 @@ main() {
       local -r check_mtime=0
     else
       local -r check_mtime=1
+      make_clean
     fi
 
     if [[ "${ARGV[0]}" = "forcerebuild" ]]
@@ -276,4 +378,5 @@ main() {
   fi
 }
 
-main
+# main
+make_file_names "$(final_hash binary)" "$(final_hash image)"
