@@ -30,6 +30,7 @@ cd "$FACTOR_FOLDER"
 # the point of this is to prevent Factor's build.sh from reading our garbage arguments
 # argument list is saved
 ARGV=( $@ )
+ARGVS="$*"
 # everything (except $0) is gone
 shift $#
 
@@ -61,6 +62,14 @@ make_boot_image() {
   ./$my_binary_name -no-user-init -i"$1" -e="\"$MAKE_IMAGE_TARGET\" USING: system bootstrap.image memory ; make-image image-path save-image 0 exit"
 }
 
+require_file_names() {
+  if [[ -z "$my_binary_name" || -z "$my_image_name" ]]
+  then
+    $SAY "BUG: missing required call to make_current_file_names"
+    exit 2
+  fi
+}
+
 macos_notify() { osascript -e "display notification \"$$ on $branchname\" with title \"$1\"" & }
 linux_notify() { notify-send -i gnome-terminal --hint int:transient:1 -u low "$1" "$$ on $branchname" & }
 # NOTE: uses arguments #1=title #2=message
@@ -79,7 +88,7 @@ TRIM_HASH_TO=12
 export TRIM_HASH_TO
 
 # shellcheck disable=2155
-declare -r FACTOR_VERSION=$(make -n | grep -m1 'FACTOR_VERSION' | sed -E 's/^.*FACTOR_VERSION=\"([0-9]+\.[0-9]+)\".*$/\1/')
+declare -r FACTOR_VERSION=$(make -n 2>/dev/null | grep -m1 'FACTOR_VERSION' | sed -E 's/^.*FACTOR_VERSION=\"([0-9]+\.[0-9]+)\".*$/\1/')
 
 echo "[$$] $0 v$SCRIPT_VERSION "
 echo "[$$] Factor v$FACTOR_VERSION"
@@ -117,12 +126,14 @@ my_exit() {
 run_factor() {
   # omitting implied argument -i=$my_image_name because it is in the format Factor expects
   # due to the fact that juggling custom image names with recomplilation is a real PITA
+
+
   $SAY "./$my_binary_name" "${ARGV[@]:1}"
   ./$my_binary_name "${ARGV[@]:1}" &
   local -r pid=$!
   disown $pid
   $SAY "PID $pid"
-  $NOTIFY "started $pid"
+  $NOTIFY "started + disowned $pid"
   my_exit
 }
 
@@ -130,6 +141,7 @@ build_factor() {
   $SAY "missing or outdated binary"
   $NOTIFY "building $FACTOR_BINARY"
   $SAY "making $my_binary_name"
+  require_file_names
   make_clean_factor
   $MV "$FACTOR_BINARY" "$my_binary_name"
   $SAY "done"
@@ -141,6 +153,7 @@ build_image() {
   # (git branch -r | grep upstream | grep "$branchname" || true)
 
   $SAY "making $my_image_name"
+  require_file_names
   # code allows error exit codes
   # NOTE: just download a boot image
   # NOTE: this series of OR fallbacks is real fucking stupid
@@ -298,13 +311,22 @@ make_current_file_names() {
  echo "my_image_name=      $my_image_name"
 }
 
-current_files_missing() {
-  local -r binary_hash=$(final_hash "binary")
-  local -r image_hash=$(final_hash "image")
+# arg #1: "binary" or "image"
+# output: 1 for missing 0 for exists
+is_current_file_missing() {
+  require_file_names
+  local -r file_name_var_name="my_$1_image"
 
-  make_current_file_names $binary_hash $image_hash
+  if [[ -e "${!file_name_var_name}" ]]
+  then
+    echo 0
+  else
+    echo 1
+  fi
+}
 
-  if [[ ! -e "$my_binary_name" || ! -e "$my_image_name" ]]
+is_current_files_missing() {
+  if [[ $(is_current_file_missing "binary") -eq "1" || $(is_current_file_missing "image") -eq "1" ]]
   then
     echo 1
   else
@@ -313,18 +335,13 @@ current_files_missing() {
 }
 
 main() {
-  set +e
-  {
-    stat "$my_binary_name"
-    local -r my_binary_missing=$?
+  local -r my_binary_missing=$(is_current_file_missing "binary")
 
-    stat "$my_image_name"
-    local -r my_image_missing=$?
-  } > /dev/null 2>&1
-  set -e
+  local -r my_image_missing=$(is_current_file_missing "binary")
 
   # no first argument = do nothing
   # first arg is -- = do nothing
+  # -- means end our argument list and begin Factor's args
   if [[ ! -z "${ARGV[0]}" && "${ARGV[0]}" != "--" ]]
   then
 
@@ -385,7 +402,7 @@ main() {
   else
     $SAY "built nothing: empty \$ARGV"
     $NOTIFY "nothing built (empty ARGV)"
-    if [[ $my_binary_missing -eq 0 && $my_image_missing -eq 0 ]]
+    if [[ $(is_current_files_missing) -eq 0 ]]
     then
       $SAY "running factor"
       run_factor
@@ -395,6 +412,30 @@ main() {
     $SAY "done"
   fi
 }
+
+seen_args_end=0
+OUR_ARGS=()
+_FACTOR_ARGS=()
+
+for arg in "${ARGV[@]}"
+do
+  if [[ "$arg" = "--" && seen_args_end -eq 0 ]]
+  then
+    seen_args_end=1
+    echo "seen args end"
+    continue
+  fi
+  if [[ "$seen_args_end" -eq 0 ]]
+  then
+    OUR_ARGS+=("$arg")
+  else
+    _FACTOR_ARGS+=("$arg")
+  fi
+  echo -n "$arg" | od -vAn -tcx1
+done
+$SAY "OURS: ${OUR_ARGS[*]}"
+$SAY "FACTOR: ${_FACTOR_ARGS[*]}"
+exit
 
 make_current_file_names "$(final_hash binary)" "$(final_hash image)"
 main
