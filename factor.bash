@@ -34,6 +34,10 @@ ARGVS="$*"
 # everything (except $0) is gone
 shift $#
 
+# these come later
+OUR_ARGS=()
+_FACTOR_ARGS=()
+
 alias make="make -j"
 {
   # has empty argument list!
@@ -93,11 +97,11 @@ echo "[$$]"
 
 # shellcheck disable=2155
 # user could `git checkout` another branch during execution but please don't do that
-export branchname=$(current_git_branch)
-export name_format=
-export my_binary_name=
-export my_image_name=
-export my_boot_image_name=
+branchname=$(current_git_branch)
+name_format=
+my_binary_name=
+my_image_name=
+my_boot_image_name=
 
 # to resolve the path of this script from anywhere, for self-invocation
 # not actually usefull at the current junction
@@ -125,8 +129,8 @@ run_factor() {
   # due to the fact that juggling custom image names with recomplilation is a real PITA
 
 
-  $SAY "./$my_binary_name" "${ARGV[@]:1}"
-  ./$my_binary_name "${ARGV[@]:1}" &
+  $SAY "./$my_binary_name" "${_FACTOR_ARGS[@]}"
+  ./$my_binary_name "${_FACTOR_ARGS[@]}" &
   local -r pid=$!
   disown $pid
   $SAY "PID $pid"
@@ -310,7 +314,7 @@ make_current_file_names() {
 # output: 1 for missing 0 for exists
 is_current_file_missing() {
   require_file_names
-  local -r file_name_var_name="my_$1_image"
+  local -r file_name_var_name="my_$1_name"
 
   if [[ -e "${!file_name_var_name}" ]]
   then
@@ -330,6 +334,28 @@ is_current_files_missing() {
 }
 
 main() {
+  seen_args_end=0
+
+  for cmd_arg in "${ARGV[@]}"
+  do
+    if [[ "$cmd_arg" = "--" && seen_args_end -eq 0 ]]
+    then
+      seen_args_end=1
+      # echo "seen args end"
+      continue
+    fi
+    if [[ "$seen_args_end" -eq 0 ]]
+    then
+      OUR_ARGS+=("$cmd_arg")
+    else
+      _FACTOR_ARGS+=("$cmd_arg")
+    fi
+    # echo -n "$cmd_arg" | od -vAn -tcx1
+  done
+
+  $SAY "OUR ARGS: ${OUR_ARGS[*]}"
+  $SAY "FACTOR'S ARGS: ${_FACTOR_ARGS[*]}"
+
   local -r my_binary_missing=$(is_current_file_missing "binary")
 
   local -r my_image_missing=$(is_current_file_missing "binary")
@@ -337,25 +363,25 @@ main() {
   # no first argument = do nothing
   # first arg is -- = do nothing
   # -- means end our argument list and begin Factor's args
-  if [[ ! -z "${ARGV[0]}" && "${ARGV[0]}" != "--" ]]
+  if [[ ! -z "${OUR_ARGS[0]}" ]] # redundant: && "${ARGV[0]}" != "--"
   then
 
-    if [[ "${ARGV[0]}" = "noop" ]]
+    if [[ "${OUR_ARGS[0]}" = "noop" ]]
     then
       $SAY "doing literally nothing"
       my_exit
     fi
 
-    if [[ "${ARGV[0]}" = "nomtime" ]]
+    if [[ "${OUR_ARGS[0]}" = "nomtime" ]]
     then
       $SAY "not checking mtimes"
       local -r check_mtime=0
     else
       local -r check_mtime=1
-      make_clean
+      make_clean # returns fast
     fi
 
-    if [[ "${ARGV[0]}" = "forcerebuild" ]]
+    if [[ "${OUR_ARGS[0]}" = "forcerebuild" ]]
     then
       $SAY "forcing rebuild"
       build_factor
@@ -403,34 +429,12 @@ main() {
       run_factor
     else
       $SAY "nothing to run"
+      if [[ $(is_current_file_missing "image") -eq 1 ]]; then $SAY "missing image" ; fi
+      if [[ $(is_current_file_missing "binary") -eq 1 ]]; then $SAY "missing binary" ; fi
     fi
     $SAY "done"
   fi
 }
-
-seen_args_end=0
-OUR_ARGS=()
-_FACTOR_ARGS=()
-
-for arg in "${ARGV[@]}"
-do
-  if [[ "$arg" = "--" && seen_args_end -eq 0 ]]
-  then
-    seen_args_end=1
-    echo "seen args end"
-    continue
-  fi
-  if [[ "$seen_args_end" -eq 0 ]]
-  then
-    OUR_ARGS+=("$arg")
-  else
-    _FACTOR_ARGS+=("$arg")
-  fi
-  echo -n "$arg" | od -vAn -tcx1
-done
-$SAY "OURS: ${OUR_ARGS[*]}"
-$SAY "FACTOR: ${_FACTOR_ARGS[*]}"
-exit
 
 make_current_file_names "$(final_hash binary)" "$(final_hash image)"
 main
