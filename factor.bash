@@ -84,9 +84,6 @@ declare -r MV=_mv
 
 declare -r SCRIPT_VERSION=0.1
 
-TRIM_HASH_TO=12
-export TRIM_HASH_TO
-
 # shellcheck disable=2155
 declare -r FACTOR_VERSION=$(make -n 2>/dev/null | grep -m1 'FACTOR_VERSION' | sed -E 's/^.*FACTOR_VERSION=\"([0-9]+\.[0-9]+)\".*$/\1/')
 
@@ -240,8 +237,6 @@ _file_mtime_outdated_vs_directory() {
   echo 0
   return 0
 }
-
-#!/usr/bin/env bash
 
 TRIM_HASH_TO=${TRIM_HASH_TO:-12}
 
