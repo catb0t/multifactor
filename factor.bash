@@ -19,6 +19,8 @@
 
 started_script=$(date +%s)
 
+[[ "$0" != "${BASH_SOURCE[0]}" ]] && BEING_SOURCED=1 || BEING_SOURCED=0
+
 # Case insensitive string comparison
 shopt -s nocaseglob
 shopt -s nocasematch
@@ -29,8 +31,8 @@ cd "$FACTOR_FOLDER"
 
 # the point of this is to prevent Factor's build.sh from reading our garbage arguments
 # argument list is saved
+# shellcheck disable=2206
 ARGV=( $@ )
-ARGVS="$*"
 # everything (except $0) is gone
 shift $#
 
@@ -39,9 +41,16 @@ OUR_ARGS=()
 _FACTOR_ARGS=()
 
 alias make="make -j"
+set +e
 {
+  unalias rm
+  unset -f rm
+  unalias mv
+  unset -f mv
+  unalias cp
+  unset -f cp
   # has empty argument list!
-  source ./build.sh
+  . build.sh
 
   # borrow a lot of code from the build script
   set_downloader
@@ -76,22 +85,21 @@ require_file_names() {
 
 macos_notify() { osascript -e "display notification \"$$ on $branchname\" with title \"$1\"" & }
 linux_notify() { notify-send -i gnome-terminal --hint int:transient:1 -u low "$1" "$$ on $branchname" & }
+_say() { echo "[$$] on $branchname: $*" >&2 ; } # output to stderr; argument #1=message
+_sum() { sha224sum | cut -f1 -d' ' ; }
+_mv() { command mv -f "$@" ; }
+
 # NOTE: uses arguments #1=title #2=message
 # shellcheck disable=2155
-declare -r NOTIFY=$(case "$OS" in (macosx) echo macos_notify ;; (linux) echo linux_notify ;; (*) echo : ;; esac)
-_say() { echo "[$$] on $branchname: $*" >&2 ; } # output to stderr; argument #1=message
-declare -r SAY=_say
-_sum() { sha224sum | cut -f1 -d' ' ; }
-declare -r SUM=_sum
-_mv() { command mv -f "$@" ; }
-declare -r MV=_mv
-
-declare -r SCRIPT_VERSION=0.1
-
+[[ -v NOTIFY ]] || declare -r NOTIFY=$(case "$OS" in (macosx) echo macos_notify ;; (linux) echo linux_notify ;; (*) echo : ;; esac)
+[[ -v SAY ]] || declare -r SAY=_say
+[[ -v SUM ]] || declare -r SUM=_sum
+[[ -v MV ]] || declare -r MV=_mv
+[[ -v SCRIPT_VERSION ]] || declare -r SCRIPT_VERSION=0.2
 # shellcheck disable=2155
-declare -r FACTOR_VERSION=$(make -n 2>/dev/null | grep -m1 'FACTOR_VERSION' | sed -E 's/^.*FACTOR_VERSION=\"([0-9]+\.[0-9]+)\".*$/\1/')
+[[ -v FACTOR_VERSION ]] || declare -r FACTOR_VERSION="$(make -n 2>/dev/null | grep -m1 'FACTOR_VERSION' | sed -E 's/^.*FACTOR_VERSION=\"([0-9]+\.[0-9]+)\".*$/\1/')"
 
-echo "[$$] $0 v$SCRIPT_VERSION "
+echo "[$$] ${BASH_SOURCE[0]} v$SCRIPT_VERSION "
 echo "[$$] Factor v$FACTOR_VERSION"
 echo "[$$]"
 
@@ -117,11 +125,14 @@ my_boot_image_name=
 # source "$DIR/hashing.bash"
 
 my_exit() {
-  local -r ended_script=$(date +%s)
-  local -r elapsed_time=$(($ended_script - $started_script))
-  local -r min_sec=$(dc -e "$elapsed_time 60~rn[m ]Pn[s]P")
-  $SAY "done! in $min_sec"
-  exit
+  if [[ BEING_SOURCED -eq 0 ]]
+  then
+    local -r ended_script=$(date +%s)
+    local -r elapsed_time=$(($ended_script - $started_script))
+    local -r min_sec=$(dc -e "$elapsed_time 60~rn[m ]Pn[s]P")
+    $SAY "done! in $min_sec"
+    exit
+  fi
 }
 
 run_factor() {
@@ -303,17 +314,18 @@ make_current_file_names() {
  my_binary_name="$name_format""_[$1]_[$2]_$FACTOR_BINARY"
  my_image_name="$my_binary_name.image"
 
- echo "name_format=        $name_format"
- echo "my_basefilename=    $my_basefilename"
- echo "my_boot_image_name= $my_boot_image_name"
- echo "my_binary_name=     $my_binary_name"
- echo "my_image_name=      $my_image_name"
+ echo -e "name_format=        $name_format"
+ echo -e "my_basefilename=    $my_basefilename"
+ echo -e "my_boot_image_name= $my_boot_image_name"
+ echo -e "my_binary_name=     $my_binary_name"
+ echo -e "my_image_name=      $my_image_name"
 }
 
 # arg #1: "binary" or "image"
 # output: 1 for missing 0 for exists
 is_current_file_missing() {
   require_file_names
+  # variables can't start with a number so $1_name is actually "$1" + _name
   local -r file_name_var_name="my_$1_name"
 
   if [[ -e "${!file_name_var_name}" ]]
@@ -353,8 +365,8 @@ main() {
     # echo -n "$cmd_arg" | od -vAn -tcx1
   done
 
-  $SAY "OUR ARGS: ${OUR_ARGS[*]}"
-  $SAY "FACTOR'S ARGS: ${_FACTOR_ARGS[*]}"
+  # $SAY "OUR ARGS: ${OUR_ARGS[*]}"
+  # $SAY "FACTOR'S ARGS: ${_FACTOR_ARGS[*]}"
 
   local -r my_binary_missing=$(is_current_file_missing "binary")
 
@@ -437,4 +449,12 @@ main() {
 }
 
 make_current_file_names "$(final_hash binary)" "$(final_hash image)"
-main
+if [[ BEING_SOURCED -eq 0 ]]
+then
+  main
+fi
+
+cd -
+
+set +e
+set +x
