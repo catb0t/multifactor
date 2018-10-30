@@ -15,7 +15,7 @@
 #  GNU General Public License for more details.
 
 #  You should have received a copy of the GNU General Public License
-#  along with this program.  If not, see <https://www.gnu.org/licenses/>.started_script=$(date +%s)
+#  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 started_script=$(date +%s)
 
@@ -43,6 +43,7 @@ _FACTOR_ARGS=()
 alias make="make -j"
 set +e
 {
+  # sorry! build.sh does not use "command"
   unalias rm
   unset -f rm
   unalias mv
@@ -83,6 +84,20 @@ require_file_names() {
   fi
 }
 
+my_exit() {
+  chmod ug+w ".git"
+  if [[ BEING_SOURCED -eq 0 ]]
+  then
+    local -r ended_script=$(date +%s)
+    local -r elapsed_time=$(($ended_script - $started_script))
+    local -r min_sec=$(dc -e "$elapsed_time 60~rn[m ]Pn[s]P")
+    $SAY "done! in $min_sec"
+    exit
+  fi
+}
+trap my_exit EXIT INT TERM
+chmod a-w ".git"
+
 macos_notify() { osascript -e "display notification \"$$ on $branchname\" with title \"$1\"" & }
 linux_notify() { notify-send -i gnome-terminal --hint int:transient:1 -u low "$1" "$$ on $branchname" & }
 _say() { echo "[$$] on $branchname: $*" >&2 ; } # output to stderr; argument #1=message
@@ -91,7 +106,7 @@ _mv() { command mv -f "$@" ; }
 
 # NOTE: uses arguments #1=title #2=message
 # shellcheck disable=2155
-[[ -v NOTIFY ]] || declare -r NOTIFY=$(case "$OS" in (macosx) echo macos_notify ;; (linux) echo linux_notify ;; (*) echo : ;; esac)
+[[ -v NOTIFY ]] || declare -r NOTIFY="$(case "$OS" in (macosx) echo macos_notify ;; (linux) echo linux_notify ;; (*) echo : ;; esac)"
 [[ -v SAY ]] || declare -r SAY=_say
 [[ -v SUM ]] || declare -r SUM=_sum
 [[ -v MV ]] || declare -r MV=_mv
@@ -104,8 +119,10 @@ echo "[$$] Factor v$FACTOR_VERSION"
 echo "[$$]"
 
 # shellcheck disable=2155
-# user could `git checkout` another branch during execution but please don't do that
-branchname=$(current_git_branch)
+# user could `git checkout` another branch during execution but please don't do that!
+# currently the .git folder is made read-only for the duration of the script
+# if you insist, make it writable `chmod ug+w` again
+branchname="$(current_git_branch)"
 name_format=
 my_binary_name=
 my_image_name=
@@ -113,7 +130,6 @@ my_boot_image_name=
 
 # to resolve the path of this script from anywhere, for self-invocation
 # not actually usefull at the current junction
-
 # SOURCE="${BASH_SOURCE[0]}"
 # while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
 #   DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null && pwd )"
@@ -124,21 +140,9 @@ my_boot_image_name=
 # # shellcheck source=hashing.bash
 # source "$DIR/hashing.bash"
 
-my_exit() {
-  if [[ BEING_SOURCED -eq 0 ]]
-  then
-    local -r ended_script=$(date +%s)
-    local -r elapsed_time=$(($ended_script - $started_script))
-    local -r min_sec=$(dc -e "$elapsed_time 60~rn[m ]Pn[s]P")
-    $SAY "done! in $min_sec"
-    exit
-  fi
-}
-
 run_factor() {
   # omitting implied argument -i=$my_image_name because it is in the format Factor expects
   # due to the fact that juggling custom image names with recomplilation is a real PITA
-
 
   $SAY "./$my_binary_name" "${_FACTOR_ARGS[@]}"
   ./$my_binary_name "${_FACTOR_ARGS[@]}" &
@@ -295,10 +299,12 @@ file_hashes_from_name() {
   echo "$1" | sed -E 's/.*\[(.+)-(.+)\]_\[(.+)-(.+)\].*/\1 \2 \3 \4/'
 }
 
+# unused
 _file_hash_outdated_vs_directory() {
   true
 }
 
+# unused
 file_outdated_vs_directory() {
   true
 }
