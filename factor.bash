@@ -96,6 +96,24 @@ my_exit() {
   fi
 }
 trap my_exit EXIT INT TERM
+# requires testing
+new_branch="$(yad --on-top --mouse --title="factor.bash: Choose Branch" --text="Choose the branch from which to build/run Factor" --form --field="Branch name")"
+if [[ "$new_branch" = "|" ]] # output always contains a trailing |
+then
+  new_branch="$(current_git_branch)" # never mind, use the current branch
+else
+  new_branch="${new_branch::-1}" # chop off the trailing | and use this
+  set +e
+  command git checkout "$new_branch"
+  if [[ $? -ne 0 ]]
+  then
+    $SAY "requested non-existent branch: '$new_branch'"
+    $NOTIFY "FAILED" "no branch named $new_branch"
+    my_exit
+  fi
+  set -e
+fi
+# NOW we can make git readonly
 chmod a-w ".git"
 
 macos_notify() { osascript -e "display notification \"$$ on $branchname\" with title \"$1\"" & }
@@ -122,7 +140,7 @@ echo "[$$]"
 # user could `git checkout` another branch during execution but please don't do that!
 # currently the .git folder is made read-only for the duration of the script
 # if you insist, make it writable `chmod ug+w` again
-branchname="$(current_git_branch)"
+branchname="$new_branch"
 name_format=
 my_binary_name=
 my_image_name=

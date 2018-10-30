@@ -29,12 +29,12 @@ Linux / Unix only currently (it might work on mac os, haven't ported to Windows 
 it will only rebuild the binary when
 
 1. it gets at least 1 argument that isn't `--` or `noop`, and
-2. the binary is older than any file in `resource:vm/` and the argument wasn't `nomtime` [no modified time]
+2. the hash in the binary's filename is different than the hash created from files in `resource:vm/` <!-- and the argument wasn't `nomtime` [no modified time]-->
 
 it will only rebuild the image when
 
 1. it gets at least 1 argument that isn't `--` or `noop`, and
-2. the image is older than any file in `resource:basis/` or `resource:core/` and the argument wasn't `nomtime` or
+2. the hash in the image's filename is different than the hash created from files in `resource:basis/` and `resource:core/` or <!--and the argument wasn't `nomtime` or-->
 3. `refresh-all` fails due to inconsistency between the image, and the source files in `resource:basis/` or `resource:core/`
 
 use `factor.bash forcerebuild` to trigger a branch rebuild regardless of existing files or modified times
