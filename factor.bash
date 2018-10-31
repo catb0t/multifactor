@@ -20,6 +20,7 @@
 started_script=$(date +%s)
 
 [[ "$0" != "${BASH_SOURCE[0]}" ]] && BEING_SOURCED=1 || BEING_SOURCED=0
+[[ TRC -eq 1 ]] && set -x
 
 # Case insensitive string comparison
 shopt -s nocaseglob
@@ -80,7 +81,7 @@ require_file_names() {
   if [[ -z "$my_binary_name" || -z "$my_image_name" ]]
   then
     $SAY "BUG: missing required call to make_current_file_names"
-    exit 2
+    return 78
   fi
 }
 
@@ -92,29 +93,32 @@ my_exit() {
     local -r elapsed_time=$(($ended_script - $started_script))
     local -r min_sec=$(dc -e "$elapsed_time 60~rn[m ]Pn[s]P")
     $SAY "done! in $min_sec"
-    exit
+    exit # $1
   fi
 }
-trap my_exit EXIT INT TERM
+# trap my_exit EXIT INT TERM
+
+_err_bad_hashtype() { echo "invalid hash type: not image or binary" ; }
+
+new_branch="$(current_git_branch)"
 # requires testing
-new_branch="$(yad --on-top --mouse --title="factor.bash: Choose Branch" --text="Choose the branch from which to build/run Factor" --form --field="Branch name")"
-if [[ "$new_branch" = "|" ]] # output always contains a trailing |
-then
-  new_branch="$(current_git_branch)" # never mind, use the current branch
-else
-  new_branch="${new_branch::-1}" # chop off the trailing | and use this
-  set +e
-  command git checkout "$new_branch"
-  if [[ $? -ne 0 ]]
-  then
-    $SAY "requested non-existent branch: '$new_branch'"
-    $NOTIFY "FAILED" "no branch named $new_branch"
-    my_exit
-  fi
-  set -e
-fi
-# NOW we can make git readonly
-chmod a-w ".git"
+# set +e
+# new_branch="$(command yad --on-top --mouse --title="factor.bash: Choose Branch" --text="Choose the branch from which to build/run Factor" --form --field="Branch name")"
+# if [[ $? -gt 0 || "$new_branch" = "" || "$new_branch" = "|" ]] # output always contains a trailing | unless ESC was pressed
+# then
+#   new_branch="$(current_git_branch)" # never mind, use the current branch
+# else
+#   new_branch="${new_branch::-1}" # chop off the trailing | and use this
+#   command git checkout "$new_branch"
+#   if [[ $? -ne 0 ]]
+#   then
+#     $SAY "requested non-existent branch: '$new_branch'"
+#     $NOTIFY "FAILED" "no branch named $new_branch"
+#     my_exit
+#   fi
+# fi
+# set -e
+# chmod a-w ".git" # NOW we can make git readonly
 
 macos_notify() { osascript -e "display notification \"$$ on $branchname\" with title \"$1\"" & }
 linux_notify() { notify-send -i gnome-terminal --hint int:transient:1 -u low "$1" "$$ on $branchname" & }
@@ -131,6 +135,11 @@ _mv() { command mv -f "$@" ; }
 [[ -v SCRIPT_VERSION ]] || declare -r SCRIPT_VERSION=0.2
 # shellcheck disable=2155
 [[ -v FACTOR_VERSION ]] || declare -r FACTOR_VERSION="$(make -n 2>/dev/null | grep -m1 'FACTOR_VERSION' | sed -E 's/^.*FACTOR_VERSION=\"([0-9]+\.[0-9]+)\".*$/\1/')"
+# which dirs build the image?
+[[ -v _IMAGE_DIR_REGEX ]] || declare -r _IMAGE_DIR_REGEX="(core|basis)"
+# which dirs build the binary?
+[[ -v _BINARY_DIR_REGEX ]] || declare -r _BINARY_DIR_REGEX="vm"
+
 
 echo "[$$] ${BASH_SOURCE[0]} v$SCRIPT_VERSION "
 echo "[$$] Factor v$FACTOR_VERSION"
@@ -142,9 +151,9 @@ echo "[$$]"
 # if you insist, make it writable `chmod ug+w` again
 branchname="$new_branch"
 name_format=
-my_binary_name=
-my_image_name=
-my_boot_image_name=
+export my_binary_name=
+export my_image_name=
+export my_boot_image_name=
 
 # to resolve the path of this script from anywhere, for self-invocation
 # not actually usefull at the current junction
@@ -202,10 +211,11 @@ build_image() {
   } >/dev/null 2>&1
   if [[ $get_failed -eq 1 || $(stat "$BOOT_IMAGE" >/dev/null 2>&1; echo $?) == "1" ]]
   then
+    $NOTIFY "FAILED" "unable to find or download boot image"
     $SAY
     $SAY "Bootstrap: no prior boot image ($BOOT_IMAGE) (sorry!)"
     $SAY "  there is no net service to download one :("
-    exit 2
+    return 78
   fi
 
   $NOTIFY "image pass #1"
@@ -219,7 +229,7 @@ build_image() {
   image_fails_refresh=$?
   local i=2
 
-  # NOTE: STEP 3: re-bootstrap and refresh until it doesn't break (20 re-compiles should be enough....)
+  # NOTE: STEP 3: re-bootstrap and refresh until it doesn't break (25 re-compiles should be enough....)
   while [[ $image_fails_refresh -gt 0 && 1 -eq $((i < 25)) ]]
   do
     $SAY "refresh #$i failed! bootstrapping again..."
@@ -231,7 +241,7 @@ build_image() {
     refresh_image $my_image_name
 
     image_fails_refresh=$?
-    i=$((i+1)) # avoid exit code
+    i=$((i+1))
   done
 
   set -e
@@ -251,38 +261,39 @@ get_file_mtime() {
   stat -c%Y "$1"
 }
 
+# NOTE: UNUSED: REASON: git updates file mtimes on branch checkout, they are unreliable
 # NOTE: uses argument #1=filename and #2=directory and outputs to stdout
 # prints whether the file is outdated (older; smaller mtime) relative to the directory
-_file_mtime_outdated_vs_directory() {
-  $SAY "checking $1 is newer than files in $2"
-  local -r file_mtime=$(get_file_mtime "$1")
-
-  for dir_entry in $(git ls-files -E "^$2/")
-  do
-    local dir_entry_mtime
-    dir_entry_mtime=$(get_file_mtime "$dir_entry")
-    if [[
-      # $(bc <<< "$file_mtime < $dir_entry_mtime") -eq 1
-      $(dc -e "[1p]sm$file_mtime $dir_entry_mtime>m") -eq 1 # slightly faster
-    ]]
-    then
-      # NOTE: this file is outdated compared to directory file
-      echo 1
-      return 0
-    fi
-  done
-  echo 0
-  return 0
-}
+# _file_mtime_outdated_vs_directory() {
+#   $SAY "checking $1 is newer than files in $2"
+#   local -r file_mtime=$(get_file_mtime "$1")
+#
+#   for dir_entry in $(git ls-files -E "^$2/")
+#   do
+#     local dir_entry_mtime
+#     dir_entry_mtime=$(get_file_mtime "$dir_entry")
+#     if [[
+#       # $(bc <<< "$file_mtime < $dir_entry_mtime") -eq 1
+#       $(dc -e "[1p]sm$file_mtime $dir_entry_mtime>m") -eq 1 # slightly faster
+#     ]]
+#     then
+#       # NOTE: this file is outdated compared to directory file
+#       echo 1
+#       return 0
+#     fi
+#   done
+#   echo 0
+#   return 0
+# }
 
 TRIM_HASH_TO=${TRIM_HASH_TO:-12}
 
-# 1 arg
+# 1 arg: regex to find directories
 git_directory_files() {
   git ls-files | egrep "^$1/"
 }
 
-# 1 arg
+# 1 arg: see git_directory_files
 hash_directory_filenames() {
   git_directory_files "$1" | $SUM
 }
@@ -297,34 +308,92 @@ trim_line() {
   fold "-w$TRIM_HASH_TO" | head -n1
 }
 
-# 1 arg
+# 1 arg: regex
 # output hash format: filenames-contents
 make_hash_names() {
   echo -e "$(hash_directory_filenames "$1" | trim_line)-$(hash_directory_contents "$1" | trim_line)"
 }
 
-# 1 arg
+# 1 arg: (image|binary)
 final_hash() {
-  case "$1" in
-    "image")  make_hash_names "(core|basis)" ;;
-    "binary") make_hash_names "vm" ;;
-  esac
+  local -r type="$(sed -nE 's/^(image|binary)$/\U&/p' <<< "$1")"
+  [[ -z "$type" ]] && { _err_bad_hashtype ; return 78; }
+
+  local -r type_variable="_$type""_DIR_REGEX"
+
+  # the following are equivalent
+  make_hash_names "${!type_variable}"
+  # case "$1" in
+  #   "image")  make_hash_names "$_IMAGE_DIR_REGEX" ;;
+  #   "binary") make_hash_names "$_BINARY_DIR_REGEX" ;;
+  # esac
 }
 
 # extract the parts of the filename generated by make_hash_names / make_current_file_names
-# 1 arg, writes STDOUT
+# 1 arg: filename, writes STDOUT with delimited hashes:
+# vm/ filenames vm/ file contents;core+basis filenames core+basis contents
+# binary is built from 1+2, image is built from 3+4
 file_hashes_from_name() {
-  echo "$1" | sed -E 's/.*\[(.+)-(.+)\]_\[(.+)-(.+)\].*/\1 \2 \3 \4/'
+  sed -nE 's/.*\[(.+)-(.+)\]_\[(.+)-(.+)\].*/\1 \2;\3 \4/p' <<< "$1"
 }
 
-# unused
+# not called anywhere, might be used later
 _file_hash_outdated_vs_directory() {
   true
 }
 
+# 1 arg: (image|binary)
+_hash_position() {
+  local -r type=$(sed -nE 's/^(image|binary)$/\1/p' <<< "$1")
+  [[ -z "$type" ]] && { _err_bad_hashtype ; return 78; }
+
+  # these are used via indirection
+
+  # shellcheck disable=2034
+  local -r binary_hash_pos="1"
+  # shellcheck disable=2034
+  local -r image_hash_pos="2"
+
+  local -r type_variable="$type""_hash_pos"
+
+  echo "${!type_variable}"
+}
+
 # unused
+# arg #1: (image|binary), arg #2: filename
 file_outdated_vs_directory() {
-  true
+  require_file_names
+  local -r type=$(sed -nE 's/^(image|binary)$/\U&/p' <<< "$1") # local -r type="$(tr '[:lower:]' '[:upper:]' <<< "$1")"
+  [[ -z "$type" ]] && { _err_bad_hashtype ; return 78; }
+
+  local -r type_variable="_$type""_DIR_REGEX"
+
+  # we'll just trim the hashes to $TRIM_HASH_TO, instead of string_startswith
+
+  local -r hash_current_filenames=$(hash_directory_filenames "${!type_variable}" | trim_line)
+  local -r hash_current_contents=$(hash_directory_contents "${!type_variable}"   | trim_line)
+
+  # the following two strings are already $TRIM_HASH_TO long
+
+  # filename comes first: -f1
+  local -r hash_built_filenames="$(file_hashes_from_name "$2" | cut -d';' -f"$(_hash_position "$1")" | cut -d' ' -f1)"
+  # -f2 is the contents hash
+  local -r hash_built_contents="$(file_hashes_from_name "$2" | cut -d';' -f"$(_hash_position "$1")" | cut -d' ' -f2)"
+
+  echo "hash_built_filenames=   $hash_built_filenames"
+  echo "hash_current_filenames= $hash_current_filenames"
+  echo "hash_built_contents=    $hash_built_contents"
+  echo "hash_current_contents=  $hash_current_contents"
+
+  if [[
+    "$hash_built_filenames" != "$hash_current_filenames"
+    || "$hash_built_contents" != "$hash_current_contents"
+  ]]
+  then
+    echo 1 # the hashes do not match, needs  to be rebuilt
+  else
+    echo 0 # matching hashes, do not rebuild
+  fi
 }
 
 # 2 args: binary hash string, image hash string
@@ -338,11 +407,16 @@ make_current_file_names() {
  my_binary_name="$name_format""_[$1]_[$2]_$FACTOR_BINARY"
  my_image_name="$my_binary_name.image"
 
+ echo "CURRENT VARS"
  echo -e "name_format=        $name_format"
  echo -e "my_basefilename=    $my_basefilename"
  echo -e "my_boot_image_name= $my_boot_image_name"
  echo -e "my_binary_name=     $my_binary_name"
  echo -e "my_image_name=      $my_image_name"
+}
+
+easy_make_current_filenames() {
+  make_current_file_names "$(final_hash "binary")" "$(final_hash "image")"
 }
 
 # arg #1: "binary" or "image"
@@ -361,7 +435,8 @@ is_current_file_missing() {
 }
 
 is_current_files_missing() {
-  if [[ $(is_current_file_missing "binary") -eq "1" || $(is_current_file_missing "image") -eq "1" ]]
+  require_file_names
+  if [[ $(is_current_file_missing "binary") -eq 1 || $(is_current_file_missing "image") -eq 1 ]]
   then
     echo 1
   else
@@ -394,7 +469,7 @@ main() {
 
   local -r my_binary_missing=$(is_current_file_missing "binary")
 
-  local -r my_image_missing=$(is_current_file_missing "binary")
+  local -r my_image_missing=$(is_current_file_missing "image")
 
   # no first argument = do nothing
   # first arg is -- = do nothing
@@ -408,13 +483,9 @@ main() {
       my_exit
     fi
 
-    if [[ "${OUR_ARGS[0]}" = "nomtime" ]]
+    if [[ "${OUR_ARGS[0]}" != "noclean" ]]
     then
-      $SAY "not checking mtimes"
-      local -r check_mtime=0
-    else
-      local -r check_mtime=1
-      make_clean # returns fast
+      make_clean
     fi
 
     if [[ "${OUR_ARGS[0]}" = "forcerebuild" ]]
@@ -426,11 +497,8 @@ main() {
     fi
 
     if [[
-      $my_binary_missing -gt 0 || (
-        $check_mtime -eq 1
-        && $my_binary_missing -eq 0
-        && $(file_outdated_vs_directory "$my_binary_name" "vm") -eq 1
-      )
+      $my_binary_missing -gt 0
+      || $(file_outdated_vs_directory "binary" "$my_binary_name") -eq 1
     ]]
     then
       build_factor
@@ -440,12 +508,8 @@ main() {
     fi
 
     if [[
-      $my_image_missing -gt 0 || (
-        $check_mtime -eq 1
-        && $my_image_missing -eq 0
-        && $(file_outdated_vs_directory "$my_image_name" "core") -eq 1
-        && $(file_outdated_vs_directory "$my_image_name" "basis") -eq 1
-      )
+      $my_image_missing -gt 0
+      || $(file_outdated_vs_directory "image" "$my_image_name") -eq 1
     ]]
     then
       build_image
@@ -472,13 +536,15 @@ main() {
   fi
 }
 
-make_current_file_names "$(final_hash binary)" "$(final_hash image)"
+easy_make_current_filenames
 if [[ BEING_SOURCED -eq 0 ]]
 then
   main
+else
+  true
 fi
 
-cd -
+cd - >/dev/null 2>&1
 
 set +e
 set +x
