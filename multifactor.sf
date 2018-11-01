@@ -1,0 +1,26 @@
+#! sidef -WkP12
+
+# basic variable definitions
+module Factor {
+  const RC_FILE = Dir.home+"/.factor-rc"
+
+  func find_config (name) {
+    var regex = Regex("^! multifactor:#{name} (.*)")
+    File(RC_FILE).open_r.lines.each { |line|
+      if (line =~ regex) { |m| return m }
+    }
+    die "Config 'multifactor:#{name}' not found in #{Factor::RC_FILE}"
+  }
+
+  const REPO = find_config("repo").to_str
+  const VERSION = File(REPO+"/GNUmakefile").open_r.slurp.match(/VERSION = ([0-9]+\.[0-9]+)/)
+}
+
+# `build.sh` bash functions re-written in Sidef
+module BuildSh {
+
+}
+
+say Factor::RC_FILE
+say Factor::REPO
+say Factor::VERSION

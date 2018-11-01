@@ -1,10 +1,10 @@
-# factor.bash v0.2
+# multifactor v0.3
 
 no more sneaky bugs from having a single [Factor](https://github.com/factor/factor) binary and `factor.image` for every branch you work on!
 
 ---
 
-* put this executable script somewhere in your `$PATH`
+* put this executable script somewhere in your `$PATH` (optional: name it `factor`)
 
 * `export FACTOR_FOLDER` as the path to your [factor/factor](https://github.com/factor/factor) git repository in your `.bashrc`, and `source ~/.bashrc`
 
@@ -37,9 +37,9 @@ it will only rebuild the image when
 2. the hash in the image's filename is different than the hash created from files in `resource:basis/` and `resource:core/` or <!--and the argument wasn't `nomtime` or-->
 3. `refresh-all` fails due to inconsistency between the image, and the source files in `resource:basis/` or `resource:core/`
 
-use `factor.bash forcerebuild` to trigger a branch rebuild regardless of existing files or modified times
+use `multifactor --force-rebuild` to trigger a branch rebuild regardless of existing files or modified times
 
-use `factor.bash noop` to print information and do nothing
+use `multifactor --no-op` to print information and do nothing
 
 arguments after `--` will be passed to the final Factor VM (if it runs successfully)
 
