@@ -105,11 +105,10 @@ class ArgParse (argv: Array) {
       if (negate && short_name=="H")
 
     func required_negated (Bool negate_branch) {
-      given (required.class) {
-        when (Pair.class) { required[negate_branch] }
-        when (Bool.class) { required }
+      given (required) {
+        when (Pair) { required[negate_branch] }
+        when (Bool) { required }
         default { die "argument 'required': type mismatch" } }
-      # if (required.class == Pair) { required[negate_branch] } else { required }
     }
 
     if (negate) {
@@ -136,15 +135,38 @@ class ArgParse (argv: Array) {
     self
   }
 
+  # just the usage line
+  method usage_short {
+    var name = self.prog_info(){:name}
+    "Usage: #{name} [options]"
+  }
+
+  # entire help output
+  method help_me {
+    var h = gather {
+      take(self.usage_short)
+      var (name, ver, doc) = self.prog_info(){:name, :version, :doc}
+      take("#{name} v#{ver}: #{doc}\n")
+
+      take("Positional parameters")
+      take(self.prog_args.sort{|a, b| a.lc <=> b.lc }.map{ |v| (v[1]).to_s }.join("\n"))
+
+      take("Options")
+      take(self.prog_opts.sort{|a, b| a.lc <=> b.lc }.map{ |v| (v[1]).to_s }.join("\n"))
+    }
+    #say h.map{ _ : _.kind_of(String) }
+    h.join("\n")
+  }
+
   method go () {
     self.prog_opts
   }
 }
 
 func main () {
-  say Factor::RC_FILE
-  say Factor::REPO
-  say Factor::VERSION
+  # say Factor::RC_FILE
+  # say Factor::REPO
+  # say Factor::VERSION
   var parser = ArgParse(ARGV) \
     .info(SCRIPT) \
     .option("force", "f", doc: "Force a rebuild in any case") \
@@ -154,11 +176,12 @@ func main () {
     .option("db", "d", param: "file":".multi", doc: "Use this database instead") \
     .enable_option_terminator \
     .arg("args", doc: "Arguments to the final Factor VM")
-  say "Positional parameters"
-  parser.prog_args.sort{|a, b| a.lc <=> b.lc }.each{ |v| say v[1] }
+  say parser.help_me
 
-  say "Options"
-  parser.prog_opts.sort{|a, b| a.lc <=> b.lc }.each{ |v| say v[1] }
+  #say "Positional parameters"
+  #parser.prog_args.sort{|a, b| a.lc <=> b.lc }.each{ |v| say v[1] }
+  #say "Options"
+  #parser.prog_opts.sort{|a, b| a.lc <=> b.lc }.each{ |v| say v[1] }
 }
 
 if (__FILE__ == __MAIN__) {
