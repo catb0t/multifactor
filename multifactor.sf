@@ -1,8 +1,20 @@
 #! sidef -WkP12
 
-# basic variable definitions
+define Hash SCRIPT = :(
+  "version" => "0.3",
+  "name" => "multifactor",
+  "doc" => "meta build system for Factor core development"
+)
+
+class Array {
+  method first { return self[0] }
+  method second { return self[1] }
+  method third { return self[2] }
+}
+
+# basic variable definitions for working with Factor
 module Factor {
-  const RC_FILE = Dir.home+"/.factor-rc"
+  const String RC_FILE = Dir.home+"/.factor-rc"
 
   func find_config (name) {
     var regex = Regex("^! multifactor:#{name} (.*)")
@@ -12,15 +24,143 @@ module Factor {
     die "Config 'multifactor:#{name}' not found in #{Factor::RC_FILE}"
   }
 
-  const REPO = find_config("repo").to_str
-  const VERSION = File(REPO+"/GNUmakefile").open_r.slurp.match(/VERSION = ([0-9]+\.[0-9]+)/)
+  const String REPO = find_config("repo").to_str
+  const Regex VERSION_REGEX = /VERSION = ([0-9]+\.[0-9]+)/
+  # .open_r.slurp.match(/VERSION = ([0-9]+\.[0-9]+)/)
+  const String VERSION = File(REPO+"/GNUmakefile").open_r.lines \
+    .find { |line| line =~ VERSION_REGEX } \
+    .match(VERSION_REGEX)
 }
 
-# `build.sh` bash functions re-written in Sidef
-module BuildSh {
+# `build.sh` bash functions re-written in Sidef (??)
+module BuildSh { }
 
+
+class ArgParse (argv: Array) {
+
+  class Option (long, short, req, param, doc) {
+
+    # needs to be rewritten to handle tab alignment properly
+    method to_s {
+      var short_dash = "-#{self.short}" if (self.short)
+      var param_fmt = "=<#{self.param.first}>" if (self.param)
+      var param_def = "\ndefault value: \'#{self.param.second}\'" if (self.param)
+      var commasp = ", " if (self.short)
+      self.doc += param_def if (self.param)
+      var doc_fixup = self.doc.gsub(/\n/, "\n\t\t\t\t")
+      var str = "\t#{short_dash}#{commasp}"
+
+      str += "--#{self.long}#{param_fmt}\t\t#{doc_fixup}"
+    }
+
+    method short_fmt {
+      return nil if (!self.short)
+    }
+  }
+
+  class Arg (name, example_val, doc) {
+
+    # also doesn't tab align correctly
+    method to_s {
+      var exval = "\t\t\te.g. #{self.example_val}" if (self.example_val)
+      "\t#{self.name}\t\t#{self.doc}\n#{exval}"
+    }
+  }
+
+  has Hash prog_opts = Hash()
+  has Hash prog_args = Hash()
+  has Hash prog_info = Hash()
+
+  method get_argv { self.argv }
+
+  method info (info_obj) {
+    self.prog_info += info_obj
+    self
+  }
+
+  method option (
+    String long_name,
+    String short_name = false,
+    Pair required = false,
+    Pair negate = false,
+    Pair param = nil,
+    String doc = long_name.gsub(/-/, " ").tclc
+  ) {
+    die "short name isn't 1 character: #{short_name}" if (short_name && short_name.len>1)
+    die "short name isn't a name: #{short_name}" if (short_name && ["-"].any{ _ == short_name })
+
+    die "already registered argument or option with name #{long_name}" \
+      if ( self.prog_args.contains(long_name) )
+
+    negate && negate.flatten!.any { _ == nil } \
+      && die "non-nil 'negate' must have non-nil values: #{negate}"
+
+    param && param.flatten!.any { _ == nil } \
+      && die "non-nil 'param' must have non-nil values: #{param}"
+
+    die "options 'help' and 'h' are reserved to show the help: #{long_name} #{short_name}" \
+      if ( %w(h help).contains_any(long_name, short_name) )
+
+    die "can't use negatable option H, because h is reserved for showing the help: #{short_name}" \
+      if (negate && short_name=="H")
+
+    func required_negated (Bool negate_branch) {
+      given (required.class) {
+        when (Pair.class) { required[negate_branch] }
+        when (Bool.class) { required }
+        default { die "argument 'required': type mismatch" } }
+      # if (required.class == Pair) { required[negate_branch] } else { required }
+    }
+
+    if (negate) {
+      var long_neg = "no-"+long_name
+      var doc_neg = negate.second+" "+doc.lc
+      doc = "[auto] "+negate.first+" "+doc.lc
+      var short_neg = short_name.uc
+      self.prog_opts\{long_neg} = Option(long_neg, short_neg, required_negated(false), param, doc_neg)
+    }
+    self.prog_opts\{long_name} = Option(long_name, short_name, required_negated(true), param, doc)
+    self
+  }
+
+  method enable_option_terminator {
+    var name = self.prog_info\{:name}
+    self.option("", doc: "End #{name}'s argument list\nFurther arguments are given to Factor")
+    self
+  }
+
+  method arg (name, example_val = nil, String doc) {
+    die "already registered argument or option with name #{name}" \
+      if ( self.prog_args.contains(name) )
+    self.prog_args\{name} = Arg(name, example_val, doc)
+    self
+  }
+
+  method go () {
+    self.prog_opts
+  }
 }
 
-say Factor::RC_FILE
-say Factor::REPO
-say Factor::VERSION
+func main () {
+  say Factor::RC_FILE
+  say Factor::REPO
+  say Factor::VERSION
+  var parser = ArgParse(ARGV) \
+    .info(SCRIPT) \
+    .option("force", "f", doc: "Force a rebuild in any case") \
+    .option("dry-run", "n", doc: "Print configuration; commit no changes") \
+    .option("clean", "c", negate: "Always":"Never", doc: "'make clean'") \
+    .option("sums", "s",  negate: "Always":"Never", doc: "use checksums") \
+    .option("db", "d", param: "file":".multi", doc: "Use this database instead") \
+    .enable_option_terminator \
+    .arg("args", doc: "Arguments to the final Factor VM")
+  say "Positional parameters"
+  parser.prog_args.sort{|a, b| a.lc <=> b.lc }.each{ |v| say v[1] }
+
+  say "Options"
+  parser.prog_opts.sort{|a, b| a.lc <=> b.lc }.each{ |v| say v[1] }
+}
+
+if (__FILE__ == __MAIN__) {
+  main()
+}
