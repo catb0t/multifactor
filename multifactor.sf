@@ -14,6 +14,11 @@ class Array {
   method third { return self[2] }
 }
 
+class String {
+  method second { return self.char(1) }
+  method third { return self.char(2) }
+}
+
 # basic variable definitions for working with Factor
 module Factor {
   const String RC_FILE = Dir.home+"/.factor-rc"
@@ -227,9 +232,12 @@ class ArgParse (argv: Array) {
       take(quarks_to_formatted_lines(self.prog_opts))
 
       take("")
+      take("Command-line config:")
 
       var Str uk_fail = (self.unknown_is_error ? "an error" : "ignored")
-      take("Unknown options are " + uk_fail)
+      take("#{self.leading_alignment}Unknown options are #{uk_fail}")
+
+      take("#{self.leading_alignment}Mandatory arguments to long options are mandatory for short options too")
     }.join("\n")
   }
 
@@ -237,33 +245,35 @@ class ArgParse (argv: Array) {
     var (reading_opts, got_stdin) = (true, false)
     var in_opts = Hash()
     var in_args = Hash()
-    var Array glob_args = []
+    var glob_args = []
 
     # self.argv.each { |arg| given (arg) { } }
     for arg in self.argv() {
       # special option checks
-      if (arg==self.OPT_TERM && self.prog_opts\{""}!=nil) {
+      if ( (arg == self.OPT_TERM) && (self.prog_opts\{""} != nil) ) {
         reading_opts = false
         next
-      } elsif (arg==self.ARG_TERM && self.prog_args\{self.ARG_TERM}!=nil) {
+      } elsif ( (arg == self.ARG_TERM) && (self.prog_args\{self.ARG_TERM} != nil) ) {
         got_stdin = true
         next
-      } elsif (arg == self.GLOB_ARG && self.prog_args\{self.GLOB_ARG}!=nil ) {
+      } elsif ( (arg == self.GLOB_ARG) && (self.prog_args\{self.GLOB_ARG} != nil) ) {
         # take the rest of the arguments and stash them as an array
         glob_args.append(self.argv[ self.argv->index(arg) + 1 .. self.argv.len-1 ])
         break
       }
 
+      # NOTE: use regex here
       # ok, read an option
       if (reading_opts && arg.first=="-" && arg.len>1) {
         # long options
         if (arg.second == "-") {
-          var arg_name = arg[ 2..arg.len-1 ]
-
+          var arg_name = arg[ 2 .. arg.len-1 ]
+          say arg
+          say arg_name
+          # make these more configurable
           if ( arg_name == self.VER_NAME ) {
             say self.version_me
             Sys.exit(0)
-
           } elsif ( arg_name == self.HELP_NAME ) {
             STDERR.say(self.help_me)
             Sys.exit(self.EXIT_ERROR)
@@ -273,7 +283,7 @@ class ArgParse (argv: Array) {
 
         # short options
         } else {
-          in_opts += :(arg, nil)
+          in_opts += :(arg, true)
         }
       } else {
         in_args += :(arg, true)
@@ -302,11 +312,11 @@ func main () {
     .option("db", "d", param: "file":".multi", doc: "Use this database instead") \
     .use_option_terminator("Further arguments are given to Factor") \
     # .use_stdin_file_arg \
-    # .use_arg_list_terminator \
+    .use_arg_list_terminator \
     # .ignore_unknowns \
     .arg("args", doc: "Arguments to the final Factor VM")
 
-  say parser.help_me
+  # say parser.help_me
 
   say parser.go
 }
