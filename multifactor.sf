@@ -26,17 +26,16 @@ module Factor {
   func find_config (name) {
     var regex = Regex("^! multifactor:#{name} (.*)")
     File(RC_FILE).open_r.lines.each { |line|
-      if (line =~ regex) { |m| return m }
+      if (line =~ regex->captures.first) { |m| return m } # NOTE: figure out why _ isn't available here
     }
     die "Config 'multifactor:#{name}' not found in #{Factor::RC_FILE}"
   }
 
   const String REPO = find_config("repo").to_str
   const Regex VERSION_REGEX = /VERSION = ([0-9]+\.[0-9]+)/
-  # .open_r.slurp.match(/VERSION = ([0-9]+\.[0-9]+)/)
-  const String VERSION = File(REPO+"/GNUmakefile").open_r.lines \
-    .find { |line| line =~ VERSION_REGEX } \
-    .match(VERSION_REGEX)
+  const String VERSION = VERSION_REGEX=~( File(REPO+"/GNUmakefile")\
+    .open_r.lines \
+    .find { |line| line =~ VERSION_REGEX })
 }
 
 # `build.sh` bash functions re-written in Sidef (??)
@@ -48,7 +47,7 @@ class ArgParse (argv: Array) {
   class Option (long, short, req, param, doc, leading_alignment = "\t") {
 
     # NOTE: needs to be renamed, rewritten to handle tab alignment properly
-    # a hash with pairs like:
+    # by returning a hash with pairs like:
     # "-d, --db=<file>":["Use this database instead", "default value: '.multi'"]
     method to_s {
       var short_dash = "-#{self.short}" if (self.short)
@@ -84,6 +83,8 @@ class ArgParse (argv: Array) {
   has String VER_NAME = Pair("version", "v")
   has String HELP_NAME = Pair("help", "h")
 
+  has Number EXIT_ERROR = 2
+
   has String leading_alignment = "\t"
   has Bool unknown_is_error = true
   has Hash prog_opts = Hash()
@@ -110,16 +111,17 @@ class ArgParse (argv: Array) {
   }
 
   # TODO: fixup -o FILE vs -o=FILE vs -oFILE etc for param
+  # TODO: add --Wl,linker arg1, linker arg2
   method option (
     String long_name,
     String short_name = false,
     Pair required = false,
     Pair negate = false,
     Pair param = nil,
-    String doc = long_name.gsub(/-/, " ").tclc
+    String doc = long_name.tclc
   ) {
     die "option names can't start with - or --" \
-      if ([long_name, short_name].any{ _ ~~ String && _.match(/^-+/) })
+      if ([long_name, short_name].any{ _ =~ /^-+/ })
     die "short name isn't: #{short_name}" if (short_name && short_name.len>1)
     die "long name isn't: #{long_name}" if (long_name.len == 1)
     # die "short name isn't a name: #{short_name}" if (short_name && ["-"].any{ _ == short_name })
@@ -174,21 +176,17 @@ class ArgParse (argv: Array) {
   }
 
   method use_option_terminator (doc = "") {
-    var name = self.prog_info\{:name}
-    doc.prepend!("\n") if doc
-    self._option("", d: "End #{name}'s argument list#{doc}")
+    self._option("", d: "End #{ self.prog_info\{:name} }'s argument list#{doc+'\n' if doc}")
     self
   }
 
   method use_stdin_file_arg (doc = "") {
-    doc.prepend!("\n") if doc
-    self._arg(self.ARG_TERM, d: "Read standard input as though it were a file#{doc}")
+    self._arg(self.ARG_TERM, d: "Read standard input as though it were a file#{doc+'\n' if doc}")
     self
   }
 
   method use_arg_list_terminator (doc = "") {
-    doc.prepend!("\n") if doc
-    self._arg(self.GLOB_ARG, d: "Begin a list of arbitrary arguments#{doc}")
+    self._arg(self.GLOB_ARG, d: "Begin a list of arbitrary arguments#{doc+'\n' if doc}")
     self
   }
 
@@ -204,11 +202,10 @@ class ArgParse (argv: Array) {
 
   # just the usage line
   method usage_short {
-    var name = self.prog_info(){:name}
-    "Usage: #{name} [options] [args]"
+    "Usage: #{ self.prog_info\{:name} } [options] [args]"
   }
 
-  method version_me {
+  method version_me () is cached {
     var (name, ver, doc) = self.prog_info\{:name, :version, :doc}
     "#{name} v#{ver}: #{doc}"
   }
@@ -232,7 +229,7 @@ class ArgParse (argv: Array) {
       take(quarks_to_formatted_lines(self.prog_opts))
 
       take("")
-      take("Command-line config:")
+      # take("Command-line config:")
 
       var Str uk_fail = (self.unknown_is_error ? "an error" : "ignored")
       take("#{self.leading_alignment}Unknown options are #{uk_fail}")
@@ -241,6 +238,8 @@ class ArgParse (argv: Array) {
     }.join("\n")
   }
 
+  # in a future iteration there could be a method for calling user-defined functions
+  # rather than just returning the found arguments like ArgParse
   method go {
     var (reading_opts, got_stdin) = (true, false)
     var in_opts = Hash()
@@ -264,29 +263,34 @@ class ArgParse (argv: Array) {
 
       # NOTE: use regex here
       # ok, read an option
-      if (reading_opts && arg.first=="-" && arg.len>1) {
+      if (reading_opts && arg =~ /^-.+/) {
+
         # long options
-        if (arg.second == "-") {
-          var arg_name = arg[ 2 .. arg.len-1 ]
-          say arg
-          say arg_name
+        # -- as a terminator was already handled above
+        if (arg=~/^--([^-]+)$/->captures.first) { |arg_rest|
+
           # make these more configurable
-          if ( arg_name == self.VER_NAME ) {
+          if ( arg_rest == self.VER_NAME.first ) {
             say self.version_me
             Sys.exit(0)
-          } elsif ( arg_name == self.HELP_NAME ) {
+
+          } elsif ( arg_rest == self.HELP_NAME.first ) {
             STDERR.say(self.help_me)
             Sys.exit(self.EXIT_ERROR)
           }
 
           # rest of long option processing
 
+          # handle parameters
+
+          in_opts += arg.:true
+
         # short options
         } else {
-          in_opts += :(arg, true)
+          in_opts += arg.:true
         }
       } else {
-        in_args += :(arg, true)
+        in_args += arg.:true
       }
     }
 
@@ -312,7 +316,7 @@ func main () {
     .option("db", "d", param: "file":".multi", doc: "Use this database instead") \
     .use_option_terminator("Further arguments are given to Factor") \
     # .use_stdin_file_arg \
-    .use_arg_list_terminator \
+    # .use_arg_list_terminator \
     # .ignore_unknowns \
     .arg("args", doc: "Arguments to the final Factor VM")
 
