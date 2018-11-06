@@ -1,0 +1,285 @@
+#! sidef -WkP12
+
+
+class ArgParse (argv: Array) {
+
+  class Option (long, short, req, param, doc, leading_alignment = "\t") {
+
+    # NOTE: needs to be renamed, rewritten to handle tab alignment properly
+    # by returning a hash with pairs like:
+    # "-d, --db=<file>":["Use this database instead", "default value: '.multi'"]
+    method to_s {
+      var short_dash = "-#{self.short}" if (self.short)
+      var param_fmt = "=<#{self.param.first}>" if (self.param)
+      var param_def = "\ndefault value: \'#{self.param.second}\'" if (self.param)
+      var commasp = ", " if (self.short)
+      self.doc += param_def if (self.param)
+      var doc_fixup = self.doc.gsub(/\n/, "\n\t\t\t\t")
+      var str = "#{self.leading_alignment}#{short_dash}#{commasp}"
+
+      str += "--#{self.long}#{param_fmt}\t\t#{doc_fixup}"
+    }
+
+    method short_fmt {
+      return nil if (!self.short)
+    }
+  }
+
+  class Arg (name, example_val, doc) {
+
+    # also doesn't tab align correctly
+    method to_s {
+      var exval = "\n\t\t\te.g. #{self.example_val}" if (self.example_val)
+      "\t#{self.name}\t\t#{self.doc}#{exval}"
+    }
+  }
+
+  # mutable
+  has String OPT_TERM = "--"
+  has String ARG_TERM = "-"
+  has String GLOB_ARG = "==="
+
+  has String VER_NAME = Pair("version", "v")
+  has String HELP_NAME = Pair("help", "h")
+
+  has Number EXIT_ERROR = 2
+
+  has String leading_alignment = "\t"
+  has Bool unknown_is_error = true
+  has Hash prog_opts = Hash()
+  has Hash prog_args = Hash()
+  has Hash prog_info = Hash()
+
+  method get_argv { self.argv }
+
+  method info (info_obj) {
+    self.prog_info += info_obj
+    self._option(self.HELP_NAME.first, self.HELP_NAME.second, d: "Show this help")
+    self._option(self.VER_NAME.first, self.VER_NAME.second, d: "Print version and exit")
+    self
+  }
+
+  method set_leading_alignment (Str s) {
+    self.leading_alignment = s
+    self
+  }
+
+  method _option (l, s = false, r = false, p = nil, d) {
+    self.prog_opts\{l} = Option(l, s, r, p, d, self.leading_alignment)
+    self
+  }
+
+  # TODO: fixup -o FILE vs -o=FILE vs -oFILE etc for param
+  # TODO: add --Wl,linker arg1, linker arg2
+  method option (
+    String long_name,
+    String short_name = false,
+    Pair required = false,
+    Pair negate = false,
+    Pair param = nil,
+    String doc = long_name.tclc
+  ) {
+    die "option names can't start with - or --" \
+      if ([long_name, short_name].any{ _ =~ /^-+/ })
+    die "short name isn't: #{short_name}" if (short_name && short_name.len>1)
+    die "long name isn't: #{long_name}" if (long_name.len == 1)
+    # die "short name isn't a name: #{short_name}" if (short_name && ["-"].any{ _ == short_name })
+
+    die "already registered argument or option with name #{long_name}" \
+      if ( self.prog_args.contains(long_name) )
+
+    negate && negate.flatten!.any { _ == nil } \
+      && die "non-nil 'negate' must have non-nil values: #{negate}"
+
+    param && param.flatten!.any { _ == nil } \
+      && die "non-nil 'param' must have non-nil values: #{param}"
+
+    die "empty string as parameter" if (long_name == "" || short_name == "")
+
+    # parameterise this
+    var (_help, _h, _ver, _v) = (self.HELP_NAME..., self.VER_NAME...)
+    die "options '#{_help}' '#{_h}' '#{_ver}' '#{_v}' are reserved options: #{long_name} #{short_name}" \
+      if ( [_help, _h, _ver, _v].contains_any(long_name, short_name) )
+
+    die "can't use negatable option #{short_name}, because h is reserved for showing the help: #{short_name}" \
+      if (negate && short_name==_v.uc)
+
+    func required_negated (Bool negate_branch) {
+      given (required) {
+        when (Pair) { required[negate_branch] }
+        when (Bool) { required }
+        default { die "argument 'required': type mismatch" } }
+    }
+
+    if (negate) {
+      var long_neg = "no-"+long_name
+      var doc_neg = negate.second+" "+doc.lc
+      doc = "[auto] "+negate.first+" "+doc.lc
+      var short_neg = short_name.uc
+      self._option(long_neg, short_neg, required_negated(false), param, doc_neg)
+    }
+    self._option(long_name, short_name, required_negated(true), param, doc)
+    self
+  }
+
+  method _arg (n, e = nil, d) {
+    self.prog_args\{n} = Arg(n, e, d)
+    self
+  }
+
+  method arg (name, example_val = nil, String doc) {
+    die "already registered argument or option with name #{name}" \
+      if ( self.prog_args.contains(name) )
+    die "empty name" if (name == "")
+    self._arg(name, example_val, doc)
+  }
+
+  method use_option_terminator (doc = "") {
+    self._option("", d: "End #{ self.prog_info\{:name} }'s argument list#{doc+'\n' if doc}")
+    self
+  }
+
+  method use_stdin_file_arg (doc = "") {
+    self._arg(self.ARG_TERM, d: "Read standard input as though it were a file#{doc+'\n' if doc}")
+    self
+  }
+
+  method use_arg_list_terminator (doc = "") {
+    self._arg(self.GLOB_ARG, d: "Begin a list of arbitrary arguments#{doc+'\n' if doc}")
+    self
+  }
+
+  method ignore_unknowns {
+    self.unknown_is_error = false
+    self
+  }
+
+  method error_unknowns {
+    self.unknown_is_error = true
+    self
+  }
+
+  # just the usage line
+  method usage_short {
+    "Usage: #{ self.prog_info\{:name} } [options] [args]"
+  }
+
+  method version_me () is cached {
+    var (name, ver, doc) = self.prog_info\{:name, :version, :doc}
+    "#{name} v#{ver}: #{doc}"
+  }
+
+  # entire help output
+  method help_me {
+    gather {
+      # NOTE: will need to change
+      func quarks_to_formatted_lines (Hash qs) {
+        qs.sort{|a, b| a.lc <=> b.lc }.map{ _[1].to_s }.join("\n")
+      }
+      take(self.usage_short)
+      take(self.version_me + "\n")
+
+      take("Positional parameters")
+      take(quarks_to_formatted_lines(self.prog_args))
+
+      take("")
+
+      take("Options")
+      take(quarks_to_formatted_lines(self.prog_opts))
+
+      take("")
+      # take("Command-line config:")
+
+      var Str uk_fail = (self.unknown_is_error ? "an error" : "ignored")
+      take("#{self.leading_alignment}Unknown options are #{uk_fail}")
+
+      take("#{self.leading_alignment}Mandatory arguments to long options are mandatory for short options too")
+    }.join("\n")
+  }
+
+  # in a future iteration there could be a method for calling user-defined functions
+  # rather than just returning the found arguments like ArgParse
+  method go {
+    var (reading_opts, got_stdin) = (true, false)
+    var in_opts = Hash()
+    var in_args = Hash()
+    var glob_args = []
+
+    # self.argv.each { |arg| given (arg) { } }
+    for arg in self.argv() {
+      # special option checks
+      if ( (arg == self.OPT_TERM) && (self.prog_opts\{""} != nil) ) {
+        reading_opts = false
+        next
+      } elsif ( (arg == self.ARG_TERM) && (self.prog_args\{self.ARG_TERM} != nil) ) {
+        got_stdin = true
+        next
+      } elsif ( (arg == self.GLOB_ARG) && (self.prog_args\{self.GLOB_ARG} != nil) ) {
+        # take the rest of the arguments and stash them as an array
+        glob_args.append(self.argv[ self.argv->index(arg) + 1 .. self.argv.len-1 ])
+        break
+      }
+
+      # ok, read an option
+      if (reading_opts && arg ~~ /^-.+/) {
+
+        # long options
+        # -- as a terminator was already handled above
+        if (arg=~/^--([^-]+)$/->captures.first) { |arg_rest|
+
+          # make these more configurable
+          if ( arg_rest == self.VER_NAME.first ) {
+            say self.version_me
+            Sys.exit(0)
+
+          } elsif ( arg_rest == self.HELP_NAME.first ) {
+            STDERR.say(self.help_me)
+            Sys.exit(self.EXIT_ERROR)
+          }
+
+          # rest of long option processing
+
+          # handle parameters
+
+          in_opts += arg.:true
+
+        # short options
+        } else {
+          in_opts += arg.:true
+        }
+      } else {
+        in_args += arg.:true
+      }
+    }
+
+    # NOTE:
+    # MISSING: combined short options (needs re-processing)
+    # MISSING: context for options with parameters with space delimeters
+    # MISSING: parameter support in combined short options
+
+    [in_opts, in_args, glob_args]
+  }
+}
+
+func test () {
+  var parser = ArgParse(ARGV) \
+    .info(:(name => "argparse", version => "1", doc => "argparse test")) \
+    .option("force", "f", doc: "Force a rebuild in any case") \
+    .option("dry-run", "n", doc: "Print configuration; commit no changes") \
+    .option("clean", "c", negate: "Always":"Never", doc: "'make clean'") \
+    .option("sums", "s",  negate: "Always":"Never", doc: "use checksums") \
+    .option("db", "d", param: "file":".multi", doc: "Use this database instead") \
+    .use_option_terminator("Further arguments are given to Factor") \
+    # .use_stdin_file_arg \
+    # .use_arg_list_terminator \
+    # .ignore_unknowns \
+    .arg("args", doc: "Arguments to the final Factor VM")
+
+  say parser.help_me
+
+  say parser.go
+}
+
+if (__FILE__ == __MAIN__) {
+  test
+}
