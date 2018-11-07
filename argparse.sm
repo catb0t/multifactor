@@ -1,6 +1,5 @@
 #! sidef -WkP12
 
-
 class ArgParse (argv: Array) {
 
   class Option (long, short, req, param, doc, leading_alignment = "\t") {
@@ -33,6 +32,9 @@ class ArgParse (argv: Array) {
       "\t#{self.name}\t\t#{self.doc}#{exval}"
     }
   }
+
+  has const opt_long_re = /^--([^-][^:=]+)[:=]?(.*)$/
+  has const opt_short_re = /^-([^-][^:=]+)[:=]?(.*)$/
 
   # mutable
   has String OPT_TERM = "--"
@@ -197,6 +199,18 @@ class ArgParse (argv: Array) {
     }.join("\n")
   }
 
+  # do NOT continue when printing version
+  method dospecial_version {
+    say self.version_me
+    Sys.exit(0)
+  }
+
+  # help goes to STDERR, exits with error, and does NOT continue
+  method dospecial_help {
+    STDERR.say(self.help_me)
+    Sys.exit(self.EXIT_ERROR)
+  }
+
   # in a future iteration there could be a method for calling user-defined functions
   # rather than just returning the found arguments like ArgParse
   method go {
@@ -205,47 +219,91 @@ class ArgParse (argv: Array) {
     var in_args = Hash()
     var glob_args = []
 
-    # self.argv.each { |arg| given (arg) { } }
-    for arg in self.argv() {
+    # -> zipper (arr) { [arr, ^(@arr->last_index)].zip }
+    -> unknown_option (length, nr, name) {
+      var (erroring, err) = (
+        self.unknown_is_error,
+        "[#{ erroring ? \"ERROR\" : \"INFO\" }] ArgParse got unrecognised #{length} option \##{nr}: #{name}"
+      )
+      if (erroring) {
+        die err
+      } else {
+        say err
+        say "[Now continuing due to backward compatibility and excessive paranoia.]"
+      }
+    }
+
+    for param, current_index in self.argv.zip_indices() {
       # special option checks
-      if ( (arg == self.OPT_TERM) && (self.prog_opts\{""} != nil) ) {
+      if ( (param == self.OPT_TERM) && defined(self.prog_opts\{""}) ) {
         reading_opts = false
         next
-      } elsif ( (arg == self.ARG_TERM) && (self.prog_args\{self.ARG_TERM} != nil) ) {
+      } elsif ( (param == self.ARG_TERM) && defined(self.prog_args\{self.ARG_TERM}) ) {
         got_stdin = true
         next
-      } elsif ( (arg == self.GLOB_ARG) && (self.prog_args\{self.GLOB_ARG} != nil) ) {
+      } elsif ( (param == self.GLOB_ARG) && defined(self.prog_args\{self.GLOB_ARG}) ) {
         # take the rest of the arguments and stash them as an array
-        glob_args.append(self.argv[ self.argv->index(arg) + 1 .. self.argv.len-1 ])
+        glob_args.append(self.argv[ current_index .. self.argv.last_index ])
         break
       }
 
       # ok, read an option
-      if (reading_opts && arg ~~ /^-.+/) {
+      if (reading_opts && param ~~ /^-.+/) {
 
         # long options
         # -- as a terminator was already handled above
-        if (arg=~/^--([^-]+)$/->captures.first) { |arg_rest|
+        if ( (param =~ self.opt_long_re).captures) {
+            |param_parts|
 
-          # make these more configurable
-          if ( arg_rest == self.VER_NAME.first ) {
-            say self.version_me
-            Sys.exit(0)
+          var (opt_name, value) = param_parts[0, 1]...
 
-          } elsif ( arg_rest == self.HELP_NAME.first ) {
-            STDERR.say(self.help_me)
-            Sys.exit(self.EXIT_ERROR)
+          # make these actions more configurable
+
+          # do NOT continue when printing version
+          if ( opt_name == self.VER_NAME.first ) {
+            self.dospecial_version
+          # help goes to STDERR, exits with error, and does NOT continue
+          } elsif ( opt_name == self.HELP_NAME.first ) {
+            self.dospecial_help
+          # we don't know any argument by that name
+          } elsif ( ! defined(self.prog_opts\{opt_name}) ) {
+            unknown_option(:long, current_index + 1, opt_name)
+            next
           }
 
           # rest of long option processing
 
           # handle parameters
 
-          in_opts += arg.:true
+          in_opts += opt_name.:value
 
         # short options
+        } elsif ((param =~ self.opt_short_re).captures) {
+            |param_parts|
+
+          var (opts, value) = param_parts[0, 1]...
+
+          if ( opt_name == self.VER_NAME.second ) {
+            self.dospecial_version
+          } elsif ( opt_name == self.HELP_NAME.second ) {
+            self.dospecial_help
+          }
+
+          # unpack the list of short options
+          for short_opt in opt_name.chars.zip_indices() {
+
+            # might also find -v / -h here, cover that case
+
+            # we don't know any argument by that name
+            if ( ! self.is_known_short_option(short_opt) ) ) {
+              unknown_option(:short, current_index + 1, opt_name)
+              next
+            }
+          }
+
+          in_opts += opts.:value
         } else {
-          in_opts += arg.:true
+
         }
       } else {
         in_args += arg.:true

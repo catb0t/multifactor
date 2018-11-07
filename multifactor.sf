@@ -47,14 +47,19 @@ module CSV { }
 # words to checksum directory file contents and file names goes here
 module GlobSum { }
 
-class MultiFactor {
+class MultiFactor (
+    Hash options,
+    Array factor_arguments
+    # not using globbed arguments
+  ) {
+
   # actually implement the data model
-  class BlobDatabase (disk_name = ".multifactor.db") {
+  class BlobDatabase (disk_name) {
 
     has disk_file = -> { File( Factor::REPO + self.disk_name ) }
 
-
   }
+
 }
 
 func main () {
@@ -68,16 +73,16 @@ func main () {
     .option("dry-run", "n", doc: "Print configuration; commit no changes") \
     .option("clean", "c", negate: "Always":"Never", doc: "'make clean'") \
     .option("sums", "s",  negate: "Always":"Never", doc: "use checksums") \
-    .option("db", "d", param: "file":".multi", doc: "Use this database instead") \
+    .option("db", "d", param: "file":".multifactor.db", doc: "Use this database instead") \
     .use_option_terminator("Further arguments are given to Factor") \
     # .use_stdin_file_arg \
     # .use_arg_list_terminator \
     # .ignore_unknowns \
     .arg("args", doc: "Arguments to the final Factor VM")
 
-  # say parser.help_me
 
-  # say parser.go
+  var (opts, args) = parser.go...
+  say "#{opts} #{args}"
 }
 
 if (__FILE__ == __MAIN__) {
