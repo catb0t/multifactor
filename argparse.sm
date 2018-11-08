@@ -1,4 +1,14 @@
-#! sidef -WkP12
+#! sidef -WkP8
+
+class Array {
+  method second { return self.item(1) }
+  method third { return self.item(2) }
+}
+
+class String {
+  method second { return self.char(1) }
+  method third { return self.char(2) }
+}
 
 class ArgParse (argv: Array) {
 
@@ -20,7 +30,7 @@ class ArgParse (argv: Array) {
     }
 
     method short_fmt {
-      return nil if (!self.short)
+      nil if (!self.short)
     }
   }
 
@@ -33,8 +43,8 @@ class ArgParse (argv: Array) {
     }
   }
 
-  has const opt_long_re = /^--([^-][^:=]+)[:=]?(.*)$/
-  has const opt_short_re = /^-([^-][^:=]+)[:=]?(.*)$/
+  has const opt_long_re = /^--([^-][^:= ]+)[:= ]?(.*)$/
+  has const opt_short_re = /^-([^-][^:= ]+)[:= ]?(.*)$/
 
   # mutable
   has String OPT_TERM = "--"
@@ -46,8 +56,14 @@ class ArgParse (argv: Array) {
 
   has Number EXIT_ERROR = 2
 
+  # line leading alignment when printing the help
   has String leading_alignment = "\t"
+  # are unknown options ignored
   has Bool unknown_is_error = true
+  # numeric short option names like -1
+  # enabling this removes support for non-separated parameters to short options
+  # NOTE: actually mostly unimplemented
+  has Bool numeric_short_names = false
   has Hash prog_opts = Hash()
   has Hash prog_args = Hash()
   has Hash prog_info = Hash()
@@ -87,16 +103,22 @@ class ArgParse (argv: Array) {
     die "long name isn't: #{long_name}" if (long_name.len == 1)
     # die "short name isn't a name: #{short_name}" if (short_name && ["-"].any{ _ == short_name })
 
-    die "already registered argument or option with name #{long_name}" \
-      if ( self.prog_args.contains(long_name) )
+    die "already registered option with long name #{long_name}" \
+      if ( self.prog_opts.contains(long_name) )
 
-    negate && negate.flatten!.any { _ == nil } \
+    die "already registered option with short name #{short_name}" \
+      if ( self.long_name_from_short(short_name) )
+
+    die "parser configuration disallows numeric short names: #{short_name}" \
+      if ( (! self.numeric_short_names) && short_name.is_numeric )
+
+    negate && negate.flatten!.any { ! defined(_) } \
       && die "non-nil 'negate' must have non-nil values: #{negate}"
 
-    param && param.flatten!.any { _ == nil } \
+    param && param.flatten!.any { ! defined(_) } \
       && die "non-nil 'param' must have non-nil values: #{param}"
 
-    die "empty string as parameter" if (long_name == "" || short_name == "")
+    die "empty string as parameter" if ( [long_name, short_name].contains("") )
 
     # parameterise this
     var (_help, _h, _ver, _v) = (self.HELP_NAME..., self.VER_NAME...)
@@ -137,28 +159,33 @@ class ArgParse (argv: Array) {
   }
 
   method use_option_terminator (doc = "") {
-    self._option("", d: "End #{ self.prog_info\{:name} }'s argument list#{doc+'\n' if doc}")
+    self._option("", d: "End #{ self.prog_info\{:name} }'s argument list#{\"\n\"+doc if doc}")
     self
   }
 
   method use_stdin_file_arg (doc = "") {
-    self._arg(self.ARG_TERM, d: "Read standard input as though it were a file#{doc+'\n' if doc}")
+    self._arg(self.ARG_TERM, d: "Read standard input as though it were a file#{\"\n\"+doc if doc}")
     self
   }
 
   method use_arg_list_terminator (doc = "") {
-    self._arg(self.GLOB_ARG, d: "Begin a list of arbitrary arguments#{doc+'\n' if doc}")
+    self._arg(self.GLOB_ARG, d: "Begin a list of arbitrary arguments#{\"\n\"+doc if doc}")
     self
   }
 
-  method ignore_unknowns {
-    self.unknown_is_error = false
-    self
-  }
+  method ignore_unknowns { self.unknown_is_error = false; self }
+  method error_unknowns { self.unknown_is_error = true; self }
 
-  method error_unknowns {
-    self.unknown_is_error = true
-    self
+  method use_numeric_short_names { self.numeric_short_names = true; self }
+  method no_numeric_short_names { self.numeric_short_names = false; self }
+
+  method long_name_from_short (name) {
+    for k, v in self.prog_opts() {
+      if (v.short == name) {
+        return k
+      }
+    }
+    nil
   }
 
   # just the usage line
@@ -192,10 +219,10 @@ class ArgParse (argv: Array) {
       take("")
       # take("Command-line config:")
 
-      var Str uk_fail = (self.unknown_is_error ? "an error" : "ignored")
-      take("#{self.leading_alignment}Unknown options are #{uk_fail}")
+      take("#{self.leading_alignment}Unknown options are #{self.unknown_is_error ? \"an error\" : \"ignored\"}")
+      take("#{self.leading_alignment}Numeric short names like -2 are #{self.numeric_short_names ? \"en\" : \"dis\"}abled")
 
-      take("#{self.leading_alignment}Mandatory arguments to long options are mandatory for short options too")
+      take("#{self.leading_alignment}Mandatory arguments to long options are mandatory for short options too.")
     }.join("\n")
   }
 
@@ -219,21 +246,21 @@ class ArgParse (argv: Array) {
     var in_args = Hash()
     var glob_args = []
 
-    # -> zipper (arr) { [arr, ^(@arr->last_index)].zip }
-    -> unknown_option (length, nr, name) {
+    -> unknown_option (length, nr, name, short_pos = 0, short_char = "") {
+      name = "char \##{short_pos}:#{short_char}" if ( [short_pos, short_char].any{ _ } )
       var (erroring, err) = (
         self.unknown_is_error,
-        "[#{ erroring ? \"ERROR\" : \"INFO\" }] ArgParse got unrecognised #{length} option \##{nr}: #{name}"
+        "[#{ erroring ? \"ERROR\" : \"INFO\" }] ArgParse: don't know #{length} option \##{nr}: #{name}"
       )
       if (erroring) {
         die err
       } else {
-        say err
-        say "[Now continuing due to backward compatibility and excessive paranoia.]"
+        STDERR.say err
+        STDERR.say "[Now continuing due to backward compatibility and excessive paranoia.]"
       }
     }
 
-    for param, current_index in self.argv.zip_indices() {
+    for current_index, param in self.argv.zip_indices() {
       # special option checks
       if ( (param == self.OPT_TERM) && defined(self.prog_opts\{""}) ) {
         reading_opts = false
@@ -248,14 +275,14 @@ class ArgParse (argv: Array) {
       }
 
       # ok, read an option
-      if (reading_opts && param ~~ /^-.+/) {
-
+      # note that this regex excludes the - STDIN file argument
+      if (reading_opts && (param~~/^-.+/)) {
         # long options
         # -- as a terminator was already handled above
-        if ( (param =~ self.opt_long_re).captures) {
+        if (param =~ self.opt_long_re) {
             |param_parts|
 
-          var (opt_name, value) = param_parts[0, 1]...
+          var (opt_name, value) = param_parts[0, 1]
 
           # make these actions more configurable
 
@@ -272,41 +299,66 @@ class ArgParse (argv: Array) {
           }
 
           # rest of long option processing
-
-          # handle parameters
+          # handle parameters here
 
           in_opts += opt_name.:value
 
         # short options
-        } elsif ((param =~ self.opt_short_re).captures) {
+        } elsif (param =~ self.opt_short_re) {
             |param_parts|
 
-          var (opts, value) = param_parts[0, 1]...
+          var (opts, value) = param_parts[0, 1]
 
-          if ( opt_name == self.VER_NAME.second ) {
+          if ( opts == self.VER_NAME.second ) {
             self.dospecial_version
-          } elsif ( opt_name == self.HELP_NAME.second ) {
+          } elsif ( opts == self.HELP_NAME.second ) {
             self.dospecial_help
           }
 
           # unpack the list of short options
-          for short_opt in opt_name.chars.zip_indices() {
+          for short_opt, opt_index in opts.chars.zip_indices() {
 
             # might also find -v / -h here, cover that case
+            # loop is exited if these pass
+            if ( short_opt == self.VER_NAME.second ) {
+              self.dospecial_version
+            } elsif ( short_opt == self.HELP_NAME.second ) {
+              self.dospecial_help
+            }
+
+            var long_name_of = self.long_name_from_short(short_opt) # prog_opts().grep_val{ .short == short_opt }
 
             # we don't know any argument by that name
-            if ( ! self.is_known_short_option(short_opt) ) ) {
-              unknown_option(:short, current_index + 1, opt_name)
+            if ( ! long_name_of ) {
+              unknown_option(:short, current_index + 1, opts, short_pos: opt_index, short_char: short_opt)
               next
+
+            # allow -WkP12 and -WkP12t (short option names cannot be numeric)
+            } elsif ( short_opt.is_numeric ) {
+              # parse backwards and forwards to find the last non-nr and the end of the current nr
+              opts[-(opt_index-1) .. 0] # reversed previous section of the opt
+              opts[opt_index+1 .. opts.last_index] # next section of the opt
+              in_opts += Pair(long_name_of, 12)
+
+            } else {
+              # remember to use value if the current char is the last one
+              # so that -WkP=12 etc works
+              in_opts += Pair(long_name_of, if (opt_index == opts.last_index) {
+                value
+              } else {
+                nil
+              })
             }
+
           }
 
-          in_opts += opts.:value
+          # not necessary here, we already did each part
+          # in_opts += opts.:value
         } else {
 
         }
       } else {
-        in_args += arg.:true
+        in_args += param.:true
       }
     }
 
@@ -319,7 +371,8 @@ class ArgParse (argv: Array) {
   }
 }
 
-func test () {
+func test {
+  say "ok"
   var parser = ArgParse(ARGV) \
     .info(:(name => "argparse", version => "1", doc => "argparse test")) \
     .option("force", "f", doc: "Force a rebuild in any case") \
@@ -328,8 +381,8 @@ func test () {
     .option("sums", "s",  negate: "Always":"Never", doc: "use checksums") \
     .option("db", "d", param: "file":".multi", doc: "Use this database instead") \
     .use_option_terminator("Further arguments are given to Factor") \
-    # .use_stdin_file_arg \
-    # .use_arg_list_terminator \
+    .use_stdin_file_arg \
+    .use_arg_list_terminator \
     # .ignore_unknowns \
     .arg("args", doc: "Arguments to the final Factor VM")
 
@@ -339,5 +392,5 @@ func test () {
 }
 
 if (__FILE__ == __MAIN__) {
-  test
+  test()
 }

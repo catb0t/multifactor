@@ -1,4 +1,4 @@
-#! sidef -WkP12
+#! sidef -WkP8
 
 define Hash SCRIPT = :(
   "version" => "0.3",
@@ -7,17 +7,6 @@ define Hash SCRIPT = :(
   "bug" => "github.com/catb0t/multifactor/issues",
   "license" => "GPL v3+"
 )
-
-class Array {
-  method first { return self[0] }
-  method second { return self[1] }
-  method third { return self[2] }
-}
-
-class String {
-  method second { return self.char(1) }
-  method third { return self.char(2) }
-}
 
 # basic variable definitions for working with Factor
 module Factor {
