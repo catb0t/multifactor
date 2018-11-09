@@ -34,17 +34,23 @@ class ArgParse (argv: Array) {
     }
   }
 
-  class Arg (name, example_val, doc) {
+  class Arg (name, example_val, repeatable, doc) {
 
     # also doesn't tab align correctly
     method to_s {
       var exval = "\n\t\t\te.g. #{self.example_val}" if (self.example_val)
-      "\t#{self.name}\t\t#{self.doc}#{exval}"
+      "\t#{self.name}#{self.repeatable_str}\t\t#{self.doc}#{exval}"
+    }
+
+    method repeatable_str {
+      self.repeatable ? "..." : ""
     }
   }
 
-  has const opt_long_re = /^--([^-][^:= ]+)[:= ]?(.*)$/
-  has const opt_short_re = /^-([^-][^:= ]+)[:= ]?(.*)$/
+  # long option RE allows for --h so that these are caught
+  # as illegal long options           ---V
+  has const opt_long_re = /^--([^-][^:= ]*)[:= ]?(.*)$/
+  has const opt_short_re = /^-([^-][^:= ]*)[:= ]?(.*)$/
 
   # mutable
   has String OPT_TERM = "--"
@@ -68,8 +74,6 @@ class ArgParse (argv: Array) {
   has Hash prog_args = Hash()
   has Hash prog_info = Hash()
 
-  method get_argv { self.argv }
-
   method info (info_obj) {
     self.prog_info += info_obj
     self._option(self.HELP_NAME.first, self.HELP_NAME.second, d: "Show this help")
@@ -89,6 +93,8 @@ class ArgParse (argv: Array) {
 
   # TODO: fixup -o FILE vs -o=FILE vs -oFILE etc for param
   # TODO: add --Wl,linker arg1, linker arg2
+  # TODO: add ability to prevent re-specified option
+  # TODO: allow exclusive options, which prevent / negate other options
   method option (
     String long_name,
     String short_name = false,
@@ -146,16 +152,20 @@ class ArgParse (argv: Array) {
     self
   }
 
-  method _arg (n, e = nil, d) {
-    self.prog_args\{n} = Arg(n, e, d)
+  method _arg (n, e = nil, r = false, d) {
+    self.prog_args\{n} = Arg(n, e, r, d)
     self
   }
 
-  method arg (name, example_val = nil, String doc) {
+  method arg (name, example_val = nil, repeatable = false, String doc) {
     die "already registered argument or option with name #{name}" \
       if ( self.prog_args.contains(name) )
     die "empty name" if (name == "")
-    self._arg(name, example_val, doc)
+
+    var changed
+    name =  if ( !repeatable && name=~/^([^.]+)\.\.\.$/) { |n| changed = true; n[0] }
+            else { name }
+    self._arg(name, example_val, repeatable || changed, doc)
   }
 
   method use_option_terminator (doc = "") {
@@ -190,7 +200,12 @@ class ArgParse (argv: Array) {
 
   # just the usage line
   method usage_short {
-    "Usage: #{ self.prog_info\{:name} } [options] [args]"
+    var (opts, args) = (
+      gather { for _, v in self.prog_opts.sort() { take(v.short) if (v.short) } }.join(""),
+      gather { for _, v in self.prog_args.sort() { take("[#{v.name}#{v.repeatable_str}]") } }.join(" ")
+    )
+
+    "Usage: #{ self.prog_info\{:name} } [-#{opts}] #{args}"
   }
 
   method version_me () is cached {
@@ -246,18 +261,30 @@ class ArgParse (argv: Array) {
     var in_args = Hash()
     var glob_args = []
 
-    -> unknown_option (length, nr, name, short_pos = 0, short_char = "") {
-      name = "char \##{short_pos}:#{short_char}" if ( [short_pos, short_char].any{ _ } )
-      var (erroring, err) = (
-        self.unknown_is_error,
-        "[#{ erroring ? \"ERROR\" : \"INFO\" }] ArgParse: don't know #{length} option \##{nr}: #{name}"
-      )
-      if (erroring) {
-        die err
+    -> unknown_option (length, nr, name, Number short_pos = 0, String short_char = "") {
+      name = if ( [short_pos, short_char].any{ _ } ) {
+        "char \##{short_pos}: '#{short_char}'"
       } else {
-        STDERR.say err
-        STDERR.say "[Now continuing due to backward compatibility and excessive paranoia.]"
+        "'#{name}'"
       }
+      var (lead, err) = (
+        "[#{ self.unknown_is_error ? \"ERROR\" : \"INFO\" }]"
+        "ArgParse: don't know #{length} option (\##{nr}): #{name}"
+      )
+
+      if (self.unknown_is_error) {
+        die "#{lead} #{err}"
+      } else {
+        STDERR.say("#{lead} #{err}")
+        STDERR.say("#{lead}  \t[Now continuing due to backward compatibility and excessive paranoia.]")
+      }
+    }
+
+    -> unknown_argument (name, nr) {
+      STDERR.say(
+        "[INFO] ArgParse: too many non-option arguments (want exactly #{self.prog_args.len}) (\##{nr}): #{name}"
+      )
+      STDERR.say("[INFO]  \t[Now continuing due to backward compatibility and excessive paranoia.]")
     }
 
     for current_index, param in self.argv.zip_indices() {
@@ -276,7 +303,7 @@ class ArgParse (argv: Array) {
 
       # ok, read an option
       # note that this regex excludes the - STDIN file argument
-      if (reading_opts && (param~~/^-.+/)) {
+      if (reading_opts && (param ~~ /^-.+/) ) {
         # long options
         # -- as a terminator was already handled above
         if (param =~ self.opt_long_re) {
@@ -301,7 +328,7 @@ class ArgParse (argv: Array) {
           # rest of long option processing
           # handle parameters here
 
-          in_opts += opt_name.:value
+          in_opts += Pair(opt_name, value ? value : true)
 
         # short options
         } elsif (param =~ self.opt_short_re) {
@@ -316,7 +343,7 @@ class ArgParse (argv: Array) {
           }
 
           # unpack the list of short options
-          for short_opt, opt_index in opts.chars.zip_indices() {
+          for opt_index, short_opt in opts.chars.zip_indices() {
 
             # might also find -v / -h here, cover that case
             # loop is exited if these pass
@@ -333,21 +360,23 @@ class ArgParse (argv: Array) {
               unknown_option(:short, current_index + 1, opts, short_pos: opt_index, short_char: short_opt)
               next
 
-            # allow -WkP12 and -WkP12t (short option names cannot be numeric)
-            } elsif ( short_opt.is_numeric ) {
+            # allow -WkP12 and -WkP12t when short option names are not numeric
+            } elsif ( self.numeric_short_names && short_opt.is_numeric ) {
+
               # parse backwards and forwards to find the last non-nr and the end of the current nr
               opts[-(opt_index-1) .. 0] # reversed previous section of the opt
-              opts[opt_index+1 .. opts.last_index] # next section of the opt
+              opts[opt_index+1 .. @opts->last_index] # next section of the opt
               in_opts += Pair(long_name_of, 12)
 
             } else {
               # remember to use value if the current char is the last one
               # so that -WkP=12 etc works
-              in_opts += Pair(long_name_of, if (opt_index == opts.last_index) {
-                value
-              } else {
-                nil
-              })
+              in_opts += Pair(
+                long_name_of,
+                opt_index==(@opts).last_index && value
+                  ? value
+                  : true
+              )
             }
 
           }
@@ -358,6 +387,17 @@ class ArgParse (argv: Array) {
 
         }
       } else {
+        var expect_no_args = self.prog_args.is_empty
+        # unexpected arguments are filtered out, the point is to only give the wanted data
+        if (
+            expect_no_args \ # if we wanted 0 but got N
+            || (self.prog_args.len >= in_args.len) \ # if we already have the expected ones
+            || (! self.prog_args.grep_val{ .repeatable }) # but not if we wanted infinite arguments
+        ) {
+          unknown_argument(param, current_index + 1)
+          next
+        }
+
         in_args += param.:true
       }
     }
@@ -372,7 +412,6 @@ class ArgParse (argv: Array) {
 }
 
 func test {
-  say "ok"
   var parser = ArgParse(ARGV) \
     .info(:(name => "argparse", version => "1", doc => "argparse test")) \
     .option("force", "f", doc: "Force a rebuild in any case") \

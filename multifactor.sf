@@ -1,4 +1,10 @@
 #! sidef -WkP8
+# /usr/bin/env
+#`(not a shell program) {
+  eval 'exec sidef $0 ${1+"$@"}'
+}
+
+include argparse
 
 define Hash SCRIPT = :(
   "version" => "0.3",
@@ -26,9 +32,6 @@ module Factor {
     .open_r.lines \
     .find { |line| line =~ VERSION_REGEX })
 }
-
-include argparse
-# import argparse::ArgParse
 
 # `build.sh` bash functions re-written in Sidef (??)
 module BuildSh { }
@@ -67,7 +70,7 @@ func main () {
     # .use_stdin_file_arg \
     # .use_arg_list_terminator \
     # .ignore_unknowns \
-    .arg("args", doc: "Arguments to the final Factor VM")
+    .arg("arg...", doc: "Arguments to the final Factor VM")
 
 
   var (opts, args) = parser.go...
