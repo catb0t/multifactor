@@ -27,36 +27,28 @@ class String {
 
 class ArgParse (argv: Array) {
 
-  class Option (long, short, req, param, doc, leading_alignment = "\t") {
+  class Option (long, short, req, param, doc) {
 
-    # NOTE: needs to be renamed, rewritten to handle tab alignment properly
-    # by returning a hash with pairs like:
-    # "-d, --db=<file>":["Use this database instead", "default value: '.multi'"]
-    method to_s {
-      var short_dash = "-#{self.short}" if (self.short)
-      var param_fmt = "=<#{self.param.first}>" if (self.param)
-      var param_def = "\ndefault value: \'#{self.param.second}\'" if (self.param)
-      var commasp = ", " if (self.short)
-      self.doc += param_def if (self.param)
-      var doc_fixup = self.doc.gsub(/\n/, "\n\t\t\t\t")
-      var str = "#{self.leading_alignment}#{short_dash}#{commasp}"
+    method string_parts {
+      var (
+        short_name = (self.short ? "-#{self.short}," : " "*3),
+        param_name = (self.param ? "=<#{self.param.first}>" : nil),
+        param_default = (self.param ? "default value: \'#{self.param.second}\'" : nil),
+      )
 
-      str += "--#{self.long}#{param_fmt}\t\t#{doc_fixup}"
+      [short_name, "--#{self.long}#{param_name}", self.doc.split("\n")..., param_default]
     }
 
-    method short_fmt {
-      nil if (!self.short)
-    }
+    method name { self.long }
   }
 
   class Arg (name, example_val, repeatable, doc) {
 
-    # also doesn't tab align correctly
-    method to_s {
-      var exval = "\n\t\t\te.g. #{self.example_val}" if (self.example_val)
-      "\t#{self.name}#{self.repeatable_str}\t\t#{self.doc}#{exval}"
-    }
+    method string_parts {
+      var exval = "e.g. #{self.example_val}" if (self.example_val)
 
+      [self.name + self.repeatable_str, "", self.doc.split("\n")..., exval]
+    }
     method repeatable_str {
       self.repeatable ? "..." : ""
     }
@@ -102,7 +94,7 @@ class ArgParse (argv: Array) {
   }
 
   method _option (l, s = false, r = false, p = nil, d) {
-    self.prog_opts\{l} = Option(l, s, r, p, d, self.leading_alignment)
+    self.prog_opts\{l} = Option(l, s, r, p, d)
     self
   }
 
@@ -111,6 +103,12 @@ class ArgParse (argv: Array) {
   # TODO: add ability to prevent re-specified option
   # TODO: allow exclusive options, which prevent / negate other options
   # TODO: positional options
+  # TODO: missing support for positional, named arguments like in "git commit"
+  # currently only supports nonpositional arguments that don't start with - or --
+  # we have 2 kinds of object: option, arg
+  # we need to split these into
+  #   (named option, any-name option)
+  #   (named positional arg, named arg, positional arg, non-named non-positional)
   method option (
     String long_name,
     String short_name = false,
@@ -216,10 +214,10 @@ class ArgParse (argv: Array) {
   }
 
   # just the usage line
-  method usage_short {
-    var (opts, args) = (
-      gather { for _, v in self.prog_opts.sort() { take(v.short) if (v.short) } }.join(""),
-      gather { for _, v in self.prog_args.sort() { take("[#{v.name}#{v.repeatable_str}]") } }.join(" ")
+  method usage_short () is cached {
+    var (
+      opts = gather { for _, v in self.prog_opts.sort() { take(v.short) if (v.short) } }.join(""),
+      args = gather { for _, v in self.prog_args.sort() { take("[#{v.name}#{v.repeatable_str}]") } }.join(" ")
     )
 
     "Usage: #{ self.prog_info(){:name} } [-#{opts}] #{args}"
@@ -233,27 +231,54 @@ class ArgParse (argv: Array) {
   # entire help output
   method help_me {
     gather {
-      # NOTE: will need to change
-      func quarks_to_formatted_lines (Hash qs) {
-        qs.sort{|a, b| a.lc <=> b.lc }.map{ _[1].to_s }.join("\n")
+      # this is like, really bad code
+      func quarks_to_formatted_lines (Hash qs) -> String {
+        var (
+          sorted_qs     = qs.sort{|a, b| a.lc <=> b.lc }.map{ _[1].string_parts },
+          padding_size  = sorted_qs.map{ _[0] }.max.len,
+          first_space   = 1,
+          first_padding = 16
+        )
+
+        # TODO: make -c,--clone (no space) possible, currently it isn't even with first_space = 0
+        gather {
+          for quark in sorted_qs {
+            var (first, second, doc_first, *rest) = quark...
+            take("#{self.leading_alignment}%s%s%-*s%-*s%s".sprintf(
+                # 4 is the magic length of a short option + a comma + 1
+                # as if the rest of this isn't also magic
+                first + (" " * (4 - first.len)), " " * first_space, first_padding, second, padding_size, doc_first
+              )
+            )
+            for line in rest {
+              # say (first.len + first_space + first_padding + second.len + padding_size)
+              take("#{self.leading_alignment}%s%-*s".sprintf(
+                # + 1 here because it's 3+1 above, otherwise 4-char arg names are handled wrong
+                  " " * (first_space + first_padding + padding_size + 1), padding_size, line
+                )
+              )
+            }
+          }
+        }.join("\n")
       }
       take(self.usage_short)
-      take(self.version_me + "\n")
+      take(self.version_me)
 
+      take("")
       take("Arguments")
       take(quarks_to_formatted_lines(self.prog_args))
 
       take("")
-
       take("Options")
       take(quarks_to_formatted_lines(self.prog_opts))
 
       take("")
-      # take("Command-line config:")
+      take("Config")
 
       take("#{self.leading_alignment}Unknown options are #{self.unknown_is_error ? \"an error\" : \"ignored\"}")
-      take("#{self.leading_alignment}Numeric short names like -2 are #{self.numeric_short_names ? \"en\" : \"dis\"}abled")
+      take("#{self.leading_alignment}Numeric short names like '-2' are #{self.numeric_short_names ? \"en\" : \"dis\"}abled")
 
+      take("#{self.leading_alignment}Positional arguments and options are not currently supported.")
       take("#{self.leading_alignment}Mandatory arguments to long options are mandatory for short options too.")
     }.join("\n")
   }
@@ -273,20 +298,23 @@ class ArgParse (argv: Array) {
   # in a future iteration there could be a method for calling user-defined functions
   # rather than just returning the found arguments like ArgParse
   method go {
-    var (reading_opts, got_stdin) = (true, false)
-    var in_opts = Hash()
-    var in_args = Hash()
-    var glob_args = []
+    var (
+      reading_opts = true,
+      got_stdin = false,
+      in_opts = Hash(),
+      in_args = Hash(),
+      glob_args = []
+    )
 
-    -> unknown_option (length, nr, name, Number short_pos = 0, String short_char = "") {
+    -> unknown_option (String length, Number nr, String name, Number short_pos = 0, String short_char = "") {
       name = if ( [short_pos, short_char].any{ _ } ) {
         "char \##{short_pos}: '#{short_char}'"
       } else {
         "'#{name}'"
       }
-      var (lead, err) = (
-        "[#{ self.unknown_is_error ? \"ERROR\" : \"INFO\" }]"
-        "ArgParse: don't know #{length} option (\##{nr}): #{name}"
+      var (
+        lead = "[#{ self.unknown_is_error ? \"ERROR\" : \"INFO\" }]",
+        err = "#{lead} ArgParse: don't know #{length} option (\##{nr}): #{name}"
       )
 
       if (self.unknown_is_error) {
@@ -297,7 +325,7 @@ class ArgParse (argv: Array) {
       }
     }
 
-    -> unknown_argument (name, nr) {
+    -> unknown_argument (String name, Number nr) {
       STDERR.say(
         "[INFO] ArgParse: too many non-option arguments (want exactly #{self.prog_args.len}) (\##{nr}): #{name}"
       )
