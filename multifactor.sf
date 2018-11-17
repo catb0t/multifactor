@@ -1,7 +1,7 @@
 #! sidef -WkP8
 # /usr/bin/env
 #`(exit the shell) {
-  eval 'exec sidef $0 ${1+"$@"}'
+  eval 'exec sidef -WkP8 $0 ${1+"$@"}'
 }
 
 ##  MultiFactor, meta build system for Factor core development
@@ -31,25 +31,121 @@ define Hash SCRIPT = :(
 
 # basic variable definitions for working with Factor
 module Factor {
-  const String RC_FILE = Dir.home+"/.factor-rc"
+  const String RC_FILE = Dir.home+File(".factor-rc")
 
   func find_config (name) {
     var regex = Regex("^! multifactor:#{name} (.*)")
-    File(RC_FILE).open_r.lines.each { |line|
-      if (line =~ regex->captures.first) { |m| return m } # NOTE: figure out why _ isn't available here
+    File(RC_FILE).open_r.lines.each {
+      with ( .match(regex)[0] ) { return _ }
     }
     die "Config 'multifactor:#{name}' not found in #{Factor::RC_FILE}"
   }
 
-  const String REPO = find_config("repo").to_str
+  const Dir REPO = Dir(find_config("repo"))
   const Regex VERSION_REGEX = /VERSION = ([0-9]+\.[0-9]+)/
-  const String VERSION = VERSION_REGEX=~( File(REPO+"/GNUmakefile")\
-    .open_r.lines \
-    .find { |line| line =~ VERSION_REGEX })
+  const String VERSION = (
+    VERSION_REGEX =~ (
+      REPO+%f(GNUmakefile)->open_r.lines.find { |l| l ~~ VERSION_REGEX }
+    )
+  )[0]
+}
+
+module Command {
+  func ql (args) {
+    args.map{ "'#{_}' "}.join
+  }
+  func make (*args) {
+    `make -j #{ql(args)}`
+  }
+  func rm (opts = [], *args) {
+    `rm #{ql(opts)} #{ql(args)}`
+  }
+  func mv (opts = [], from, to) {
+    `cp #{ql(opts)} '#{from}' '#{to}'`
+  }
+  func cp (opts = [], from, to) {
+    `cp #{ql(opts)} '#{from}' '#{to}'`
+  }
 }
 
 # `build.sh` bash functions re-written in Sidef (??)
-module BuildSh { }
+module BuildSh {
+  include Command
+  -> downloader {
+    'LWP::UserAgent'.require.new(show_progress => 1)
+  }
+  -> find_programs (String kind, Array ps) -> Array {
+    say "Look for '#{kind}': #{ps.join(', ')}..."
+    # could probably optimise this by just returning the first match
+    var results = ps.map{
+        |p|
+      p.quotemeta!
+      var s = `which #{p}`.chomp
+      if (Number($?) == 0) { say "\tfound #{p}: #{s}"; s }
+    }.flatten.grep{_}
+
+    (results.is_empty ? die "no #{kind}" : results)
+  }
+  # TODO: not *required*
+  -> check_cc_version (String name) -> Bool {
+    Bool(name)
+    ...
+  }
+  -> cc {
+    BuildSh::find_programs(:cc, %w(clang gcc cc)).first
+  }
+  -> cxx {
+    BuildSh::find_programs(:cxx, ['clang++', 'g++', 'c++', 'cpp']).first
+  }
+  # NOTE: using Sys.osname in place of uname until it causes a problem
+  -> arch_name {
+    if ([:ppc64, "Power Macintosh"].contains(`uname -m`.chomp)) {
+      :ppc
+    } else {
+      :x86
+    }
+  }
+  -> c_word_size {
+    var File ws_name = %f(factor_word_size)
+    `echo '#include <stdio.h>
+echo "int main(){printf(\"%ld\",(long)(8*sizeof(void*)));}' | #{BuildSh::cc()} -xc -o#{ws_name} -`
+    if (Number($?) != 0) {
+      die "couldn't call the C compiler"
+    }
+    var ws = `./#{ws_name}`
+    if (Number($?) != 0) {
+      Command::rm(ws_name)
+      die "couldn\'t run the word size program"
+    }
+    Command::rm(ws_name)
+    ws
+  }
+  -> intel_macosx_word_size () {
+    var s = BuildSh::find_programs(:sysctl, ["sysctl"]).first
+    `#{s} machdep.cpu.extfeatures | grep EM64T >/dev/null`
+    if (Number($?) == 0) {
+      "64"
+    } else {
+      "32"
+    }
+  }
+  -> word_size {
+    if (Sys.osname~~"macos" && BuildSh::arch_name()~~:x86) {
+      BuildSh::intel_macosx_word_size()
+    } else {
+      BuildSh::c_word_size()
+    }
+  }
+
+  func make_http_request (url) {
+    var resp = BuildSh::downloader().get(url)
+
+    if (resp.is_success) {
+      resp.decoded_content
+    }
+    false
+  }
+}
 module CSV { }
 # words to checksum directory file contents and file names goes here
 module GlobSum { }
@@ -70,9 +166,12 @@ class MultiFactor (
 }
 
 func main () {
-  # say Factor::RC_FILE
-  # say Factor::REPO
-  # say Factor::VERSION
+  say Factor::RC_FILE
+  say Factor::REPO
+  say Factor::VERSION
+  say Dir.cwd
+  # say Dir.chdir(Factor::REPO)
+  # say Dir.cwd
 
   var parser = argparse::ArgParse(ARGV) \
     .info(SCRIPT) \
@@ -90,6 +189,9 @@ func main () {
 
   var (opts, args) = parser.go...
   say "#{opts} #{args}"
+
+  say BuildSh::cc()
+  say BuildSh::cxx()
 }
 
 if (__FILE__ == __MAIN__) {
