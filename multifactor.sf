@@ -34,7 +34,7 @@ module Factor {
   const String RC_FILE = Dir.home+File(".factor-rc")
 
   func find_config (name) {
-    var regex = Regex("^! multifactor:#{name} (.*)")
+    const regex = Regex("^! multifactor:#{name} (.*)")
     File(RC_FILE).open_r.lines.each {
       with ( .match(regex)[0] ) { return _ }
     }
@@ -51,33 +51,44 @@ module Factor {
 }
 
 module Command {
-  func ql (args) {
+  func ql (Array args) -> String {
     args.map{ "'#{_}' "}.join
   }
   func make (*args) {
     `make -j #{ql(args)}`
   }
-  func rm (opts = [], *args) {
+  func rm (Array args, Array opts = []) {
+    # say args.dump
+    # say opts.dump
     `rm #{ql(opts)} #{ql(args)}`
   }
-  func mv (opts = [], from, to) {
+  func mv (from, to, Array opts = []) {
     `cp #{ql(opts)} '#{from}' '#{to}'`
   }
-  func cp (opts = [], from, to) {
+  func cp (from, to, Array opts = []) {
     `cp #{ql(opts)} '#{from}' '#{to}'`
   }
 }
 
-# `build.sh` bash functions re-written in Sidef (??)
+# `build.sh` bash functions
+# THEIR utilities, re-implemented in Sidef
 module BuildSh {
   include Command
-  -> downloader {
+  -> downloader{
     'LWP::UserAgent'.require.new(show_progress => 1)
   }
-  -> find_programs (String kind, Array ps) -> Array {
+  func make_http_request (url) {
+    var resp = BuildSh::downloader().get(url)
+
+    if (resp.is_success) {
+      resp.decoded_content
+    }
+    false
+  }
+  -> find_programs (String kind, Array ps) is cached -> Array {
     say "Look for '#{kind}': #{ps.join(', ')}..."
     # could probably optimise this by just returning the first match
-    var results = ps.map{
+    const results = ps.map{
         |p|
       p.quotemeta!
       var s = `which #{p}`.chomp
@@ -87,49 +98,46 @@ module BuildSh {
     (results.is_empty ? die "no #{kind}" : results)
   }
   # TODO: not *required*
-  -> check_cc_version (String name) -> Bool {
+  -> check_cc_version (String name) is cached -> Bool {
     Bool(name)
     ...
   }
-  -> cc {
+  -> cc () is cached {
     BuildSh::find_programs(:cc, %w(clang gcc cc)).first
   }
-  -> cxx {
+  -> cxx () is cached {
     BuildSh::find_programs(:cxx, ['clang++', 'g++', 'c++', 'cpp']).first
   }
   # NOTE: using Sys.osname in place of uname until it causes a problem
-  -> arch_name {
+  -> arch_name () is cached {
     if ([:ppc64, "Power Macintosh"].contains(`uname -m`.chomp)) {
       :ppc
     } else {
       :x86
     }
   }
-  -> c_word_size {
-    var File ws_name = %f(factor_word_size)
+  -> c_word_size () is cached {
+    const File ws_name = %f(factor_word_size)
     `echo '#include <stdio.h>
-echo "int main(){printf(\"%ld\",(long)(8*sizeof(void*)));}' | #{BuildSh::cc()} -xc -o#{ws_name} -`
+int main(){printf(\"%ld\",(long)(8*sizeof(void*)));}' | #{BuildSh::cc()} -xc -o#{ws_name} -`
+
+    die "couldn't call the C compiler" \
+      if (Number($?) != 0)
+
+    const ws = `./#{ws_name}`
     if (Number($?) != 0) {
-      die "couldn't call the C compiler"
-    }
-    var ws = `./#{ws_name}`
-    if (Number($?) != 0) {
-      Command::rm(ws_name)
+      Command::rm([ws_name])
       die "couldn\'t run the word size program"
     }
-    Command::rm(ws_name)
+    Command::rm([ws_name])
     ws
   }
-  -> intel_macosx_word_size () {
-    var s = BuildSh::find_programs(:sysctl, ["sysctl"]).first
+  -> intel_macosx_word_size () is cached {
+    const s = BuildSh::find_programs(:sysctl, ["sysctl"]).first
     `#{s} machdep.cpu.extfeatures | grep EM64T >/dev/null`
-    if (Number($?) == 0) {
-      "64"
-    } else {
-      "32"
-    }
+    (Number($?)==0 ? "64" : "32")
   }
-  -> word_size {
+  -> word_size () is cached {
     if (Sys.osname~~"macos" && BuildSh::arch_name()~~:x86) {
       BuildSh::intel_macosx_word_size()
     } else {
@@ -137,16 +145,32 @@ echo "int main(){printf(\"%ld\",(long)(8*sizeof(void*)));}' | #{BuildSh::cc()} -
     }
   }
 
-  func make_http_request (url) {
-    var resp = BuildSh::downloader().get(url)
-
-    if (resp.is_success) {
-      resp.decoded_content
-    }
-    false
+  # format: OS-ARCH.BITS
+  -> generate_make_targets () is cached {
+    const (
+      os = Sys.osname,
+      an = BuildSh::arch_name(),
+      ws = BuildSh::word_size()
+    )
+    Hash(
+      :make_image => "#{os}-#{an}.#{ws}",            # MAKE_IMAGE_TARGET
+      :make_binary => "#{os}-#{an}-#{ws}",           # MAKE_TARGET
+      :boot_image => "boot.#{os}-#{an}.#{ws}.image", # BOOT_IMAGE
+    )
   }
+
+  -> current_git_branch () is cached {
+    const branch = `git rev-parse --abbrev-ref HEAD`
+    (Number($?)==0 ? branch : :master)
+  }
+
 }
-module CSV { }
+
+# factor.bash bash functions
+# OUR utilities, re-implemented in Sidef
+module FactorBash {
+}
+
 # words to checksum directory file contents and file names goes here
 module GlobSum { }
 
@@ -162,10 +186,13 @@ class MultiFactor (
     has disk_file = -> { File( Factor::REPO + self.disk_name ) }
 
   }
-
 }
 
+func usec { Time.micro*10_000 }
+func usec (Number n) { Time.micro*10_000 - n }
+
 func main () {
+  var us = usec()
   say Factor::RC_FILE
   say Factor::REPO
   say Factor::VERSION
@@ -192,6 +219,11 @@ func main () {
 
   say BuildSh::cc()
   say BuildSh::cxx()
+  say BuildSh::arch_name()
+  say BuildSh::word_size()
+  say BuildSh::generate_make_targets()
+
+  say "\tΔ#{usec(us)}"
 }
 
 if (__FILE__ == __MAIN__) {
