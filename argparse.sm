@@ -146,7 +146,7 @@ class ArgParse (argv: Array) {
       if ( [_help, _h, _ver, _v].contains_any(long_name, short_name) )
 
     die "can't use negatable option #{short_name}, because h is reserved for showing the help: #{short_name}" \
-      if (negate && short_name==_v.uc)
+      if (negate && short_name==_h.uc)
 
     func required_negated (Bool negate_branch) {
       given (required) {
@@ -156,9 +156,9 @@ class ArgParse (argv: Array) {
     }
 
     if (negate) {
-      var long_neg = "no-"+long_name
-      var doc_neg = negate.second+" "+doc.lc
-      doc = "[auto] "+negate.first+" "+doc.lc
+      var long_neg = "no-#{long_name}"
+      var doc_neg = "#{negate.second} #{doc.lc}"
+      doc = "[auto] #{negate.first} #{doc.lc}"
       var short_neg = short_name.uc
       self._option(long_neg, short_neg, required_negated(false), param, doc_neg)
     }
@@ -172,7 +172,7 @@ class ArgParse (argv: Array) {
   }
 
   # TODO: positional arguments
-  method arg (name, example_val = nil, repeatable = false, String doc) {
+  method arg (String name, example_val = nil, Bool repeatable = false, String doc) {
     die "already registered argument or option with name #{name}" \
       if ( self.prog_args.contains(name) )
     die "empty name" if (name == "")
@@ -183,12 +183,12 @@ class ArgParse (argv: Array) {
     self._arg(name, example_val, repeatable || changed, doc)
   }
 
-  method use_option_terminator (doc = "") {
+  method use_option_terminator (String doc = "") {
     self._option("", d: "End #{ self.prog_info\{:name} }'s argument list#{\"\n\"+doc if doc}")
     self
   }
 
-  method use_stdin_file_arg (doc = "") {
+  method use_stdin_file_arg (String doc = "") {
     self._arg(self.ARG_TERM, d: "Read standard input as though it were a file#{\"\n\"+doc if doc}")
     self
   }
@@ -214,7 +214,7 @@ class ArgParse (argv: Array) {
   }
 
   # just the usage line
-  method usage_short () is cached {
+  method usage_short () is cached -> String {
     var (
       opts = gather { for _, v in self.prog_opts.sort() { take(v.short) if (v.short) } }.join(""),
       args = gather { for _, v in self.prog_args.sort() { take("[#{v.name}#{v.repeatable_str}]") } }.join(" ")
@@ -240,7 +240,7 @@ class ArgParse (argv: Array) {
           first_padding = 16
         )
 
-        # TODO: make -c,--clone (no space) possible, currently it isn't even with first_space = 0
+        # TODO: make '-c,--clone' (no space) possible, currently it isn't even with first_space = 0
         gather {
           for quark in sorted_qs {
             var (first, second, doc_first, *rest) = quark...
@@ -250,6 +250,7 @@ class ArgParse (argv: Array) {
                 first + (" " * (4 - first.len)), " " * first_space, first_padding, second, padding_size, doc_first
               )
             )
+            # everything after the first doc line
             for line in rest {
               # say (first.len + first_space + first_padding + second.len + padding_size)
               take("#{self.leading_alignment}%s%-*s".sprintf(
@@ -436,7 +437,7 @@ class ArgParse (argv: Array) {
         # unexpected arguments are filtered out, the point is to only give the wanted data
         if (
             expect_no_args \ # if we wanted 0 but got N
-            || (self.prog_args.len >= in_args.len) \ # if we already have the expected ones
+            || (in_args.len >= self.prog_args.len) \ # if we already have the expected ones
             || (! self.prog_args.grep_val{ .repeatable }) # but not if we wanted infinite arguments
         ) {
           unknown_argument(param, current_index + 1)

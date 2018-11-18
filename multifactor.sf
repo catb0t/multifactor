@@ -20,6 +20,7 @@
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 include argparse
+include shell_words
 
 define Hash SCRIPT = :(
   "version" => "0.3",
@@ -31,7 +32,7 @@ define Hash SCRIPT = :(
 
 # basic variable definitions for working with Factor
 module Factor {
-  const String RC_FILE = Dir.home+File(".factor-rc")
+  const String RC_FILE = Dir.home+%f(.factor-rc)
 
   func find_config (name) {
     const regex = Regex("^! multifactor:#{name} (.*)")
@@ -49,130 +50,6 @@ module Factor {
     )
   )[0]
 }
-
-module Command {
-  func ql (Array args) -> String {
-    args.map{ "'#{_}' "}.join
-  }
-  func make (*args) {
-    `make -j #{ql(args)}`
-  }
-  func rm (Array args, Array opts = []) {
-    # say args.dump
-    # say opts.dump
-    `rm #{ql(opts)} #{ql(args)}`
-  }
-  func mv (from, to, Array opts = []) {
-    `cp #{ql(opts)} '#{from}' '#{to}'`
-  }
-  func cp (from, to, Array opts = []) {
-    `cp #{ql(opts)} '#{from}' '#{to}'`
-  }
-}
-
-# `build.sh` bash functions
-# THEIR utilities, re-implemented in Sidef
-module BuildSh {
-  include Command
-  -> downloader{
-    'LWP::UserAgent'.require.new(show_progress => 1)
-  }
-  func make_http_request (url) {
-    var resp = BuildSh::downloader().get(url)
-
-    if (resp.is_success) {
-      resp.decoded_content
-    }
-    false
-  }
-  -> find_programs (String kind, Array ps) is cached -> Array {
-    say "Look for '#{kind}': #{ps.join(', ')}..."
-    # could probably optimise this by just returning the first match
-    const results = ps.map{
-        |p|
-      p.quotemeta!
-      var s = `which #{p}`.chomp
-      if (Number($?) == 0) { say "\tfound #{p}: #{s}"; s }
-    }.flatten.grep{_}
-
-    (results.is_empty ? die "no #{kind}" : results)
-  }
-  # TODO: not *required*
-  -> check_cc_version (String name) is cached -> Bool {
-    Bool(name)
-    ...
-  }
-  -> cc () is cached {
-    BuildSh::find_programs(:cc, %w(clang gcc cc)).first
-  }
-  -> cxx () is cached {
-    BuildSh::find_programs(:cxx, ['clang++', 'g++', 'c++', 'cpp']).first
-  }
-  # NOTE: using Sys.osname in place of uname until it causes a problem
-  -> arch_name () is cached {
-    if ([:ppc64, "Power Macintosh"].contains(`uname -m`.chomp)) {
-      :ppc
-    } else {
-      :x86
-    }
-  }
-  -> c_word_size () is cached {
-    const File ws_name = %f(factor_word_size)
-    `echo '#include <stdio.h>
-int main(){printf(\"%ld\",(long)(8*sizeof(void*)));}' | #{BuildSh::cc()} -xc -o#{ws_name} -`
-
-    die "couldn't call the C compiler" \
-      if (Number($?) != 0)
-
-    const ws = `./#{ws_name}`
-    if (Number($?) != 0) {
-      Command::rm([ws_name])
-      die "couldn\'t run the word size program"
-    }
-    Command::rm([ws_name])
-    ws
-  }
-  -> intel_macosx_word_size () is cached {
-    const s = BuildSh::find_programs(:sysctl, ["sysctl"]).first
-    `#{s} machdep.cpu.extfeatures | grep EM64T >/dev/null`
-    (Number($?)==0 ? "64" : "32")
-  }
-  -> word_size () is cached {
-    if (Sys.osname~~"macos" && BuildSh::arch_name()~~:x86) {
-      BuildSh::intel_macosx_word_size()
-    } else {
-      BuildSh::c_word_size()
-    }
-  }
-
-  # format: OS-ARCH.BITS
-  -> generate_make_targets () is cached {
-    const (
-      os = Sys.osname,
-      an = BuildSh::arch_name(),
-      ws = BuildSh::word_size()
-    )
-    Hash(
-      :make_image => "#{os}-#{an}.#{ws}",            # MAKE_IMAGE_TARGET
-      :make_binary => "#{os}-#{an}-#{ws}",           # MAKE_TARGET
-      :boot_image => "boot.#{os}-#{an}.#{ws}.image", # BOOT_IMAGE
-    )
-  }
-
-  -> current_git_branch () is cached {
-    const branch = `git rev-parse --abbrev-ref HEAD`
-    (Number($?)==0 ? branch : :master)
-  }
-
-}
-
-# factor.bash bash functions
-# OUR utilities, re-implemented in Sidef
-module FactorBash {
-}
-
-# words to checksum directory file contents and file names goes here
-module GlobSum { }
 
 class MultiFactor (
     Hash options,
@@ -193,10 +70,10 @@ func usec (Number n) { Time.micro*10_000 - n }
 
 func main () {
   var us = usec()
-  say Factor::RC_FILE
-  say Factor::REPO
-  say Factor::VERSION
-  say Dir.cwd
+  # say Factor::RC_FILE
+  # say Factor::REPO
+  # say Factor::VERSION
+  # say Dir.cwd
   # say Dir.chdir(Factor::REPO)
   # say Dir.cwd
 
@@ -204,8 +81,11 @@ func main () {
     .info(SCRIPT) \
     .option("force", "f", doc: "Force a rebuild in any case") \
     .option("dry-run", "n", doc: "Print configuration; commit no changes") \
+    .option("verbose", "V", doc: "Be verbose") \
+    .option("trace", "t", doc: "An unreasonable amount of debug tracing") \
     .option("clean", "c", negate: "Always":"Never", doc: "'make clean'") \
     .option("sums", "s",  negate: "Always":"Never", doc: "use checksums") \
+    .option("sum-len", "l", param: "len":"12", doc: "Shorten checksums to this length") \
     .option("db", "d", param: "file":".multifactor.db", doc: "Use this database instead") \
     .use_option_terminator("Further arguments are given to Factor") \
     # .use_stdin_file_arg \
@@ -217,11 +97,14 @@ func main () {
   var (opts, args) = parser.go...
   say "#{opts} #{args}"
 
-  say BuildSh::cc()
-  say BuildSh::cxx()
-  say BuildSh::arch_name()
-  say BuildSh::word_size()
+  # say BuildSh::cc()
+  # say BuildSh::cxx()
+  # say BuildSh::arch_name()
+  # say BuildSh::word_size()
   say BuildSh::generate_make_targets()
+
+  say FactorBash::sum_git_names_matching(/\.s(?:m|f)/)
+  say FactorBash::sum_git_contents_matching(/\.s(?:m|f)/)
 
   say "\tΔ#{usec(us)}"
 }
