@@ -77,7 +77,24 @@ module BuildSh {
   -> cxx () is cached -> String {
     BuildSh::find_programs(:cxx, %w(clang++ g++ c++ cpp))
   }
-  # NOTE: using Sys.osname in place of uname until it causes a problem
+  # NOTE: os_type is distinct to osname
+  -> os_name () is cached -> String {
+    given (Sys.osname) {
+      when (/(?:windows|cygwin)/) { :windows }
+      when (:darwin) { continue }
+      when (:macos) { :macos }
+      when (:linux) { :linux }
+      when (/bsd/i) { :bsd }
+      default { die "Unknown osname: #{Sys.osname}" }
+    }
+  }
+  -> os_type () is cached -> String {
+    given (Sys.osname) {
+      when (/(?:linux|darwin|macos|bsd|mingw)/) { :unix }
+      when (/(?:windows|cygwin)/) { :windows }
+      default { die "Can't convert osname to os_type: #{Sys.osname}" }
+    }
+  }
   -> arch_name () is cached -> String {
     if ([:ppc64, "Power Macintosh"].contains(`uname -m`.chomp)) {
       :ppc
@@ -116,7 +133,7 @@ int main(){printf(\"%ld\",(long)(8*sizeof(void*)));}' | #{BuildSh::cc()} -xc -o#
   # format: OS-ARCH.BITS
   -> generate_make_targets () is cached {
     const (
-      os = Sys.osname,
+      os = BuildSh::os_type(),
       an = BuildSh::arch_name(),
       ws = BuildSh::word_size()
     )
@@ -142,11 +159,12 @@ module FactorBash {
     `git ls-files`.lines.grep{ _ ~~ r}
   }
   -> sum_git_names_matching (Regex r) {
+    # allow utf-8 with SHA
     FactorBash::git_files_matching(r).join("\n").bytes.map{.chr}.join.sha256
   }
   -> sum_git_contents_matching (Regex r) {
     FactorBash::git_files_matching(r).map{
-      File(_).open_r.slurp.bytes.map{.chr}.join
+      File(_).open_r.slurp.bytes.map{.chr}.join # allow utf-8 with SHA
     }.join("\n").sha256
   }
 }

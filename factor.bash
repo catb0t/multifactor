@@ -570,7 +570,7 @@ main() {
 easy_make_current_filenames
 if [[ BEING_SOURCED -eq 0 ]]
 then
-  main
+  # main
   built_images=()
   built_binaries=()
   for f in $name_format*

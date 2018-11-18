@@ -51,6 +51,57 @@ module Factor {
   )[0]
 }
 
+class BuiltObj (
+  String _id,
+  String _git_branch,
+  String _git_hash, # git rev-parse HEAD
+  String _os_type,
+  String _os_name,
+  String _arch_name,
+  String _word_size,
+  String _sum_vm_names,
+  String _sum_vm_contents,
+  String _sum_image_names,
+  String _sum_image_contents,
+  String _vm_blob_sum,
+  String _image_blob_sum,
+  String _vm_base_name = :factor,  # usually "factor"
+  String _image_ext = ".image",    # usually ".image"
+  Bool   _lk = false               # object locking
+) {
+  -> lk (Bool l) -> BuiltObj { self._lk = l ; self }
+  -> id () -> String { self.id }
+  -> id (String id) -> BuiltObj { if (!self._lk) { self._id = id }; self }
+  -> git_branch () -> String { self._git_branch }
+  -> git_branch (String gb) -> BuiltObj { if (!self._lk) { self._git_branch = gb }; self }
+  -> git_hash () -> String { self._git_hash }
+  -> git_hash (String hs) -> BuiltObj { if (!self._lk) { self._git_hash = hs }; self }
+  -> os_type () -> String { self._os_type }
+  -> os_type (String os) -> BuiltObj { if (!self._lk) { self._os_type = os }; self }
+  -> os_name () -> String { self._os_name }
+  -> os_name (String os) -> BuiltObj { if (!self._lk) { self._os_name = os }; self }
+  -> arch_name () -> String { self._arch_name }
+  -> arch_name (String an) -> BuiltObj { if (!self._lk) { self._arch_name = an }; self }
+  -> word_size () -> String { self._arch_name }
+  -> word_size (String ws) -> BuiltObj { if (!self._lk) { self._word_size = ws }; self }
+  -> sum_vm_names () -> String {  self._sum_vm_names }
+  -> sum_vm_names (String x) -> BuiltObj { if (!self._lk) { self._sum_vm_names = x }; self }
+  -> sum_vm_contents () -> String {  self._sum_vm_contents }
+  -> sum_vm_contents (String x) -> BuiltObj { if (!self._lk) { self._sum_vm_contents = x }; self }
+  -> sum_image_names () -> String {  self._sum_image_names }
+  -> sum_image_names (String x) -> BuiltObj { if (!self._lk) { self._sum_image_names = x }; self }
+  -> sum_image_contents () -> String {  self._sum_image_contents }
+  -> sum_image_contents (String x) -> BuiltObj { if (!self._lk) { self._sum_image_contents = x }; self }
+  -> vm_blob_sum () -> String { self._vm_blob_sum }
+  -> vm_blob_sum (String x) -> BuiltObj { if (!self._lk) { self._vm_blob_sum = x }; self }
+  -> image_blob_sum () -> String {  self._image_blob_sum }
+  -> image_blob_sum (String x) -> BuiltObj { if (!self._lk) { self._image_blob_sum = x }; self }
+  -> vm_base_name () -> String {  self._vm_base_name }
+  -> vm_base_name (String x) -> BuiltObj { if (!self._lk) { self._vm_base_name = x }; self }
+  -> image_ext () -> String { self._image_ext }
+  -> image_ext (String x) -> BuiltObj { if (!self._lk) { self._image_ext = x }; self }
+}
+
 class MultiFactor (
     Hash options,
     Array factor_arguments
