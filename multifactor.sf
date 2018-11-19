@@ -51,68 +51,265 @@ module Factor {
   )[0]
 }
 
-class BuiltObj (
-  String _id,
-  String _git_branch,
-  String _git_hash, # git rev-parse HEAD
-  String _os_type,
-  String _os_name,
-  String _arch_name,
-  String _word_size,
-  String _sum_vm_names,
-  String _sum_vm_contents,
-  String _sum_image_names,
-  String _sum_image_contents,
-  String _vm_blob_sum,
-  String _image_blob_sum,
-  String _vm_base_name = :factor,  # usually "factor"
-  String _image_ext = ".image",    # usually ".image"
-  Bool   _lk = false               # object locking
-) {
-  -> lk (Bool l) -> BuiltObj { self._lk = l ; self }
-  -> id () -> String { self.id }
-  -> id (String id) -> BuiltObj { if (!self._lk) { self._id = id }; self }
-  -> git_branch () -> String { self._git_branch }
-  -> git_branch (String gb) -> BuiltObj { if (!self._lk) { self._git_branch = gb }; self }
-  -> git_hash () -> String { self._git_hash }
-  -> git_hash (String hs) -> BuiltObj { if (!self._lk) { self._git_hash = hs }; self }
-  -> os_type () -> String { self._os_type }
-  -> os_type (String os) -> BuiltObj { if (!self._lk) { self._os_type = os }; self }
-  -> os_name () -> String { self._os_name }
-  -> os_name (String os) -> BuiltObj { if (!self._lk) { self._os_name = os }; self }
-  -> arch_name () -> String { self._arch_name }
-  -> arch_name (String an) -> BuiltObj { if (!self._lk) { self._arch_name = an }; self }
-  -> word_size () -> String { self._arch_name }
-  -> word_size (String ws) -> BuiltObj { if (!self._lk) { self._word_size = ws }; self }
-  -> sum_vm_names () -> String {  self._sum_vm_names }
-  -> sum_vm_names (String x) -> BuiltObj { if (!self._lk) { self._sum_vm_names = x }; self }
-  -> sum_vm_contents () -> String {  self._sum_vm_contents }
-  -> sum_vm_contents (String x) -> BuiltObj { if (!self._lk) { self._sum_vm_contents = x }; self }
-  -> sum_image_names () -> String {  self._sum_image_names }
-  -> sum_image_names (String x) -> BuiltObj { if (!self._lk) { self._sum_image_names = x }; self }
-  -> sum_image_contents () -> String {  self._sum_image_contents }
-  -> sum_image_contents (String x) -> BuiltObj { if (!self._lk) { self._sum_image_contents = x }; self }
-  -> vm_blob_sum () -> String { self._vm_blob_sum }
-  -> vm_blob_sum (String x) -> BuiltObj { if (!self._lk) { self._vm_blob_sum = x }; self }
-  -> image_blob_sum () -> String {  self._image_blob_sum }
-  -> image_blob_sum (String x) -> BuiltObj { if (!self._lk) { self._image_blob_sum = x }; self }
-  -> vm_base_name () -> String {  self._vm_base_name }
-  -> vm_base_name (String x) -> BuiltObj { if (!self._lk) { self._vm_base_name = x }; self }
-  -> image_ext () -> String { self._image_ext }
-  -> image_ext (String x) -> BuiltObj { if (!self._lk) { self._image_ext = x }; self }
+module FactorBash {
+  define Regex VM_DIR_REGEX = /vm/
+  define Regex IMAGE_DIR_REGEX = /(?:core|basis)/
+  -> make_uuid (len = 32) -> String {
+    `tr -dc 'a-zA-Z0-9\-_=,' < /dev/urandom | fold -w#{len} | head -n1`
+  }
+  -> git_files_matching (Regex r) {
+    `git ls-files`.lines.grep{ _ ~~ r}
+  }
+  -> sum_git_names_matching (Regex r) {
+    # allow utf-8 with SHA
+    FactorBash::git_files_matching(r).join("\n").bytes.map{.chr}.join.sha256
+  }
+  -> sum_git_contents_matching (Regex r) {
+    FactorBash::git_files_matching(r).map{
+      File(_).open_r.slurp.bytes.map{.chr}.join # allow utf-8 with SHA
+    }.join("\n").sha256
+  }
 }
 
-class MultiFactor (
+module MultiFactor {
+  # accessors are a necessity
+  class BuiltObj (
+    String _id,
+    String _git_branch,
+    String _git_hash, # git rev-parse HEAD
+    String _os_type,
+    String _os_name,
+    String _arch_name,
+    String _word_size,
+    String _sum_vm_names,
+    String _sum_vm_contents,
+    String _sum_image_names,
+    String _sum_image_contents,
+    String _vm_blob_sum,
+    String _image_blob_sum,
+    String _vm_base_name = :factor,  # usually "factor"
+    String _image_ext = ".image",    # usually ".image"
+    Bool   _lk = false               # object locking
+  ) {
+      -> lock () -> BuiltObj { self._lk = true; self }
+      # -> unlock () -> BuiltObj { self._lk = false; self }
+      -> id () -> String { self.id }
+      -> git_branch () -> String { self._git_branch }
+      -> git_hash () -> String { self._git_hash }
+      -> os_type () -> String { self._os_type }
+      -> os_name () -> String { self._os_name }
+      -> arch_name () -> String { self._arch_name }
+      -> word_size () -> String { self._arch_name }
+      -> sum_vm_names () -> String {  self._sum_vm_names }
+      -> sum_vm_contents () -> String {  self._sum_vm_contents }
+      -> sum_image_names () -> String {  self._sum_image_names }
+      -> sum_image_contents () -> String {  self._sum_image_contents }
+      -> vm_blob_sum () -> String { self._vm_blob_sum }
+      -> image_blob_sum () -> String {  self._image_blob_sum }
+      -> vm_base_name () -> String {  self._vm_base_name }
+      -> image_ext () -> String { self._image_ext }
+
+      -> id (String id) -> BuiltObj { if (!self._lk) { self._id = id }; self }
+      -> git_branch (String gb) -> BuiltObj { if (!self._lk) { self._git_branch = gb }; self }
+      -> git_hash (String hs) -> BuiltObj { if (!self._lk) { self._git_hash = hs }; self }
+      -> os_type (String os) -> BuiltObj { if (!self._lk) { self._os_type = os }; self }
+      -> os_name (String os) -> BuiltObj { if (!self._lk) { self._os_name = os }; self }
+      -> arch_name (String an) -> BuiltObj { if (!self._lk) { self._arch_name = an }; self }
+      -> word_size (String ws) -> BuiltObj { if (!self._lk) { self._word_size = ws }; self }
+      -> sum_vm_names (String x) -> BuiltObj { if (!self._lk) { self._sum_vm_names = x }; self }
+      -> sum_vm_contents (String x) -> BuiltObj { if (!self._lk) { self._sum_vm_contents = x }; self }
+      -> sum_image_names (String x) -> BuiltObj { if (!self._lk) { self._sum_image_names = x }; self }
+      -> sum_image_contents (String x) -> BuiltObj { if (!self._lk) { self._sum_image_contents = x }; self }
+      -> vm_blob_sum (String x) -> BuiltObj { if (!self._lk) { self._vm_blob_sum = x }; self }
+      -> image_blob_sum (String x) -> BuiltObj { if (!self._lk) { self._image_blob_sum = x }; self }
+      -> vm_base_name (String x) -> BuiltObj { if (!self._lk) { self._vm_base_name = x }; self }
+      -> image_ext (String x) -> BuiltObj { if (!self._lk) { self._image_ext = x }; self }
+  }
+
+  include Factor
+  include FactorBash
+
+  define String temp_read_ext = "\.tmp_read"
+  define String temp_write_ext = "\.tmp_write"
+
+  -> temp_read_target (File name) is cached -> File { File(name + MultiFactor::temp_read_ext + FactorBash::make_uuid() ) }
+  -> temp_write_target (File name) is cached -> File { File(name + MultiFactor::temp_write_ext + FactorBash::make_uuid() ) }
+
+  # NOTE: NOT instance-specific, i.e doesn't use *OUR* UUID in name
+  # this copies a file to a temporary for reading
+  func temp_r (File name) -> File {
+    die "Cannot stat #{name}" if (! name.exists)
+    const File target = MultiFactor::temp_read_target(name)
+    if (! name.copy(target) ) {
+      die "Copy file #{name} to #{target}: failed, $!"
+    }
+    target
+  }
+  # this makes a temp file for writing, which can be rename()d over `name`
+  func temp_w (File name) -> File {
+    const File target = MultiFactor::temp_write_target(name)
+    if (! target.exists) {
+      die "Create file #{target}: file exists"
+    }
+    target
+  }
+
+  # argument is used literally
+  func finalise_temp_r (File target) {
+    die "Cannot stat #{target}" if (! target.exists)
+    if (! target.remove) {
+      die "Can't remove #{target}: $!"
+    }
+  }
+
+  # requires literal argument due to UUID
+  func finalise_temp_w (File name, File target) {
+    die "Cannot stat #{target}" if (! target.exists)
+    if (! target.mv(name)) {
+      die "Can't move #{target} over #{name}: $!"
+    }
+  }
+
+  # these are actually the interfaces to the above words
+  # this returns a filehandle to in-memory string
+  func atomic_read (File name) -> FileHandle {
+    const File tmp = MultiFactor::temp_r(name)
+    const tmp_fh = tmp.open_w
+    const String contents = tmp_fh.open_r.slurp
+    # check error here?
+    tmp_fh.close
+    MultiFactor::finalise_temp_r(tmp)
+    contents.open_r
+  }
+
+  func atomic_write (File name, String contents) -> nil {
+    const File tmp = MultiFactor::temp_w(name)
+    const tmp_fh = tmp.open_w
+    const Bool res = tmp_fh.spurt(contents)
+    if (! res) {
+      die "Couldn't write #{contents.len} to #{tmp}: $!"
+    }
+    tmp_fh.close
+    MultiFactor::finalise_temp_w(name, tmp)
+    nil
+  }
+
+  func _read_disk_db (File name) is cached -> Array {
+    # look for the database file
+    # if it doesn't exist, stop
+    # otherwise, open it
+    const contents_fh = MultiFactor::atomic_read(name).open_r
+    const contents = contents_fh.slurp
+
+    # if it's empty, get a new one -> []
+    contents_fh.close
+    if (! contents) {
+      return []
+    }
+    const eval_contents = eval(contents)
+    # if it's not empty, but contains invalid / throwing code, THAT's an error!
+    if (! defined(eval_contents)) {
+      die "Malformed db: #{name} (it failed to eval): #{contents}"
+    }
+    # if it contains only [], it's also empty -> []
+    if (! eval_contents) {
+      return []
+    }
+    # if it contains [BuiltObj()...], it's nonempty -> [BuiltObj()...]
+    eval_contents.all{_ ~~ BuiltObj} || die "Found garbage in #{name}: #{contents}"
+    return eval_contents
+  }
+
+  func _write_disk_db (File name, Array new_data) {
+    const String new_contents = new_data.dump # safe ???
+    # look for the database file
+    # if it doesn't exist, stop
+    # otherwise, open it
+    MultiFactor::atomic_write(name, new_contents)
+  }
+
+  class Runtime (
     Hash options,
     Array factor_arguments
-    # not using globbed arguments
   ) {
+    has Bool _config_setup_done = false # whether the following variables have been written
 
-  # actually implement the data model
-  class BlobDatabase (disk_name) {
+    has Bool force
+    has Bool trace
+    has Bool verbose
+    has Bool info
+    has Bool dry_run
+    has Bool clean
+    has Bool sums
 
-    has disk_file = -> { File( Factor::REPO + self.disk_name ) }
+    has Number sum_len
+    has File db
 
+    has String _UUID
+    -> UUID () -> String { self._UUID }
+    -> UUID (String u) -> MultiFactor::Runtime { self._UUID = u; self }
+
+    method config_setup {
+      if (! self._config_setup_done) {
+        self.UUID(FactorBash::make_uuid())
+
+        self.force = Bool(self.options\{:force})
+        self.trace = Bool(self.options\{:trace})
+        self.verbose = Bool(self.options\{:verbose})
+        self.info = Bool(self.options\{:info})
+        self.dry_run = Bool(self.options\{'dry-run'})
+
+        # TODO: argparse needs to auto-fill the defaults
+        # for non-provided options with default values
+        # and correctly fill out non-provided negatable booleans
+        self.clean = Bool(self.options\{:clean})
+        self.sums = Bool(self.options\{:sums})
+        self.db = File(self.options\{:db}||'.multifactor.db')
+
+        self._config_setup_done = true
+      }
+    }
+
+    method show_info {
+      self.config_setup
+      say 'MultiFactor options'
+      say "\tverbose: #{self.verbose}\tinfo: #{self.info}\ttrace: #{self.trace}\tdry_run: #{self.dry_run}"
+      say "\tclean: #{self.clean}\tsums: #{self.sums}\tdb: #{self.db}"
+      say "\tFactor arguments: #{self.factor_arguments}"
+    }
+
+    method read_disk_db () is cached -> Array {
+      MultiFactor::_read_disk_db(self.db)
+    }
+
+    method write_disk_db (Array new_data) {
+      if (defined(new_data) && Bool(new_data) && new_data.all{_ ~~ BuiltObj}) {
+        MultiFactor::_write_disk_db(self.db, new_data)
+      } else {
+        die "#{__METHOD__}: garbage argument #{new_data}"
+      }
+    }
+
+    # NOTE: this ensures "we are a running process and we must be the only such running process"
+    # different from the tmp_file implementation above
+    # database "locking" should consist primarily in rename()
+    # NOTE: NIH: want to avoid CPAN deps
+    method do_lock_file () {
+      # if it doesn't exist, create it with our UUID
+
+      # otherwise, and if the contained UUID is ours, it must be ours (right?)
+      # do nothing, but warn
+
+      # otherwise, if the file is empty or lacks a UUID, it's not ours
+      # we should die
+    }
+
+    # multifactor's actual entry point
+    method go {
+      self.config_setup
+      self.do_lock_file
+      var db = self.read_disk_config
+    }
   }
 }
 
@@ -125,18 +322,24 @@ func main () {
   # say Factor::REPO
   # say Factor::VERSION
   # say Dir.cwd
-  # say Dir.chdir(Factor::REPO)
   # say Dir.cwd
+  Dir.chdir(Factor::REPO)
+  say BuildSh::generate_make_targets()
+  say FactorBash::sum_git_names_matching(/\.s(?:m|f)/)
+  say FactorBash::sum_git_contents_matching(/\.s(?:m|f)/)
+  say MultiFactor::BuiltObj(([""] * 15)..., false ).dump.len
 
   var parser = argparse::ArgParse(ARGV) \
     .info(SCRIPT) \
     .option("force", "f", doc: "Force a rebuild in any case") \
-    .option("dry-run", "n", doc: "Print configuration; commit no changes") \
-    .option("verbose", "V", doc: "Be verbose") \
     .option("trace", "t", doc: "An unreasonable amount of debug tracing") \
+    .option("verbose", "V", doc: "Be verbose") \
+    .option("info", "i", doc: "Just show configuration information") \
+    .option("dry-run", "n", doc: "Change no disk files") \
     .option("clean", "c", negate: "Always":"Never", doc: "'make clean'") \
     .option("sums", "s",  negate: "Always":"Never", doc: "use checksums") \
-    .option("sum-len", "l", param: "len":"12", doc: "Shorten checksums to this length") \
+    # probably don't need this, or set it in config file
+    # .option("sum-len", "l", param: "len":"12", doc: "Shorten checksums to this length") \
     .option("db", "d", param: "file":".multifactor.db", doc: "Use this database instead") \
     .use_option_terminator("Further arguments are given to Factor") \
     # .use_stdin_file_arg \
@@ -144,20 +347,14 @@ func main () {
     # .ignore_unknowns \
     .arg("arg...", doc: "Arguments to the final Factor VM")
 
-
-  var (opts, args) = parser.go...
+  var (opts, args, *_) = parser.go...
   say "#{opts} #{args}"
 
-  # say BuildSh::cc()
-  # say BuildSh::cxx()
-  # say BuildSh::arch_name()
-  # say BuildSh::word_size()
-  say BuildSh::generate_make_targets()
+  const r = MultiFactor::Runtime(opts, args.keys)
 
-  say FactorBash::sum_git_names_matching(/\.s(?:m|f)/)
-  say FactorBash::sum_git_contents_matching(/\.s(?:m|f)/)
+  r.show_info()
 
-  say "\tΔ#{usec(us)}"
+  say "\n\tΔ#{usec(us)}"
 }
 
 if (__FILE__ == __MAIN__) {

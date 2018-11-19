@@ -47,7 +47,7 @@ class ArgParse (argv: Array) {
     method string_parts {
       var exval = "e.g. #{self.example_val}" if (self.example_val)
 
-      [self.name + self.repeatable_str, "", self.doc.split("\n")..., exval]
+      ["", self.name + self.repeatable_str, self.doc.split("\n")..., exval]
     }
     method repeatable_str {
       self.repeatable ? "..." : ""
@@ -231,7 +231,10 @@ class ArgParse (argv: Array) {
   # entire help output
   method help_me {
     gather {
-      # this is like, really bad code
+
+      # unfortunately, aligning the argument and option docs requires an all-at-once
+      #   solution, which isn't this
+      # this is like, really bad
       func quarks_to_formatted_lines (Hash qs) -> String {
         var (
           sorted_qs     = qs.sort{|a, b| a.lc <=> b.lc }.map{ _[1].string_parts },
@@ -247,15 +250,16 @@ class ArgParse (argv: Array) {
             take("#{self.leading_alignment}%s%s%-*s%-*s%s".sprintf(
                 # 4 is the magic length of a short option + a comma + 1
                 # as if the rest of this isn't also magic
-                first + (" " * (4 - first.len)), " " * first_space, first_padding, second, padding_size, doc_first
+                first + (" " * (first.len - 4)),
+                " " * first_space,
+                first_padding, second, padding_size, doc_first
               )
             )
             # everything after the first doc line
             for line in rest {
               # say (first.len + first_space + first_padding + second.len + padding_size)
               take("#{self.leading_alignment}%s%-*s".sprintf(
-                # + 1 here because it's 3+1 above, otherwise 4-char arg names are handled wrong
-                  " " * (first_space + first_padding + padding_size + 1), padding_size, line
+                  " " * (first_space + first_padding + padding_size), padding_size, line
                 )
               )
             }
@@ -307,6 +311,10 @@ class ArgParse (argv: Array) {
       glob_args = []
     )
 
+    # TODO: need to auto-fill the defaults
+    # for non-provided options with default values
+    # (could do that right here)
+
     -> unknown_option (String length, Number nr, String name, Number short_pos = 0, String short_char = "") {
       name = if ( [short_pos, short_char].any{ _ } ) {
         "char \##{short_pos}: '#{short_char}'"
@@ -319,9 +327,9 @@ class ArgParse (argv: Array) {
       )
 
       if (self.unknown_is_error) {
-        die "#{lead} #{err}"
+        die "#{err}"
       } else {
-        STDERR.say("#{lead} #{err}")
+        STDERR.say("#{err}")
         STDERR.say("#{lead}  \t[Now continuing due to backward compatibility and excessive paranoia.]")
       }
     }

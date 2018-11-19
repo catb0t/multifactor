@@ -107,16 +107,19 @@ module BuildSh {
     `echo '#include <stdio.h>
 int main(){printf(\"%ld\",(long)(8*sizeof(void*)));}' | #{BuildSh::cc()} -xc -o#{ws_name} -`
 
-    die "couldn't call the C compiler" \
+    die "couldn't call the C compiler: $!" \
       if (Number($?) != 0)
 
     # NOTE: can't be const, or else the value will be discarded
     var String ws = `./#{ws_name}`
     if (Number($?) != 0) {
-      Command::rm([ws_name])
-      die "couldn\'t run the word size program"
+      var e = $!
+      ws_name.remove
+      # Command::rm([ws_name])
+      die "couldn\'t run the word size program: $!"
     }
-    Command::rm([ws_name])
+    ws_name.remove
+    # Command::rm([ws_name])
     ws
   }
   -> intel_macosx_word_size () is cached -> String {
@@ -146,25 +149,5 @@ int main(){printf(\"%ld\",(long)(8*sizeof(void*)));}' | #{BuildSh::cc()} -xc -o#
   -> current_git_branch () is cached {
     const branch = `git rev-parse --abbrev-ref HEAD`
     (Number($?)==0 ? branch : :master)
-  }
-}
-
-module FactorBash {
-  define Regex VM_DIR_REGEX = /vm/
-  define Regex IMAGE_DIR_REGEX = /(?:core|basis)/
-  -> make_uuid (len = 32) -> String {
-    `tr -dc 'a-zA-Z0-9\-_=,' < /dev/urandom | fold -w#{len} | head -n1`
-  }
-  -> git_files_matching (Regex r) {
-    `git ls-files`.lines.grep{ _ ~~ r}
-  }
-  -> sum_git_names_matching (Regex r) {
-    # allow utf-8 with SHA
-    FactorBash::git_files_matching(r).join("\n").bytes.map{.chr}.join.sha256
-  }
-  -> sum_git_contents_matching (Regex r) {
-    FactorBash::git_files_matching(r).map{
-      File(_).open_r.slurp.bytes.map{.chr}.join # allow utf-8 with SHA
-    }.join("\n").sha256
   }
 }
