@@ -73,6 +73,10 @@ class ArgParse (argv: Array) {
   has String leading_alignment = "\t"
   # are unknown options ignored
   has Bool unknown_is_error = true
+  # otherwise, goes to STDOUT
+  has Bool help_on_stderr = true
+  # return code for --help
+  has Number help_exits_with   = 0
   # numeric short option names like -1
   # enabling this removes support for non-separated parameters to short options
   # NOTE: actually mostly unimplemented
@@ -198,11 +202,16 @@ class ArgParse (argv: Array) {
     self
   }
 
-  method ignore_unknowns { self.unknown_is_error = false; self }
-  method error_unknowns { self.unknown_is_error = true; self }
+  -> ignore_unknowns { self.unknown_is_error = false; self }
+  -> error_unknowns { self.unknown_is_error = true; self }
 
-  method use_numeric_short_names { self.numeric_short_names = true; self }
-  method no_numeric_short_names { self.numeric_short_names = false; self }
+  -> use_numeric_short_names { self.numeric_short_names = true; self }
+  -> no_numeric_short_names { self.numeric_short_names = false; self }
+
+  # TODO: implement these
+  -> help_exit_code (Number code) { self.help_exit = code; self }
+  -> use_stderr_help { self.help_on_stderr = true; self }
+  -> no_stderr_help { self.help_on_stderr = false; self }
 
   method long_name_from_short (name) {
     for k, v in self.prog_opts() {
@@ -281,9 +290,10 @@ class ArgParse (argv: Array) {
       take("Config")
 
       take("#{self.leading_alignment}Unknown options are #{self.unknown_is_error ? \"an error\" : \"ignored\"}")
+      take("#{self.leading_alignment}Help output is printed on STDERR")
       take("#{self.leading_alignment}Numeric short names like '-2' are #{self.numeric_short_names ? \"en\" : \"dis\"}abled")
-
-      take("#{self.leading_alignment}Positional arguments and options are not currently supported.")
+      take("#{self.leading_alignment}Positional arguments and options are not currently supported")
+      take("")
       take("#{self.leading_alignment}Mandatory arguments to long options are mandatory for short options too.")
     }.join("\n")
   }

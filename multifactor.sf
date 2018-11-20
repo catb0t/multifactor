@@ -20,7 +20,7 @@
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 include argparse
-include shell_words
+include("shell_words.sm")
 
 define Hash SCRIPT = :(
   "version" => "0.3",
@@ -49,26 +49,6 @@ module Factor {
       REPO+%f(GNUmakefile)->open_r.lines.find { |l| l ~~ VERSION_REGEX }
     )
   )[0]
-}
-
-module FactorBash {
-  define Regex VM_DIR_REGEX = /vm/
-  define Regex IMAGE_DIR_REGEX = /(?:core|basis)/
-  -> make_uuid (len = 32) -> String {
-    `tr -dc 'a-zA-Z0-9\-_=,' < /dev/urandom | fold -w#{len} | head -n1`
-  }
-  -> git_files_matching (Regex r) {
-    `git ls-files`.lines.grep{ _ ~~ r}
-  }
-  -> sum_git_names_matching (Regex r) {
-    # allow utf-8 with SHA
-    FactorBash::git_files_matching(r).join("\n").bytes.map{.chr}.join.sha256
-  }
-  -> sum_git_contents_matching (Regex r) {
-    FactorBash::git_files_matching(r).map{
-      File(_).open_r.slurp.bytes.map{.chr}.join # allow utf-8 with SHA
-    }.join("\n").sha256
-  }
 }
 
 module MultiFactor {
@@ -162,7 +142,7 @@ module MultiFactor {
     }
   }
 
-  # requires literal argument due to UUID
+  # requires literal arguments due to UUID
   func finalise_temp_w (File name, File target) {
     die "Cannot stat #{target}" if (! target.exists)
     if (! target.mv(name)) {
@@ -233,6 +213,8 @@ module MultiFactor {
     Array factor_arguments
   ) {
     has Bool _config_setup_done = false # whether the following variables have been written
+    has Str lock_ext = ".multifactor_lock"
+    has Str lock_name
 
     has Bool force
     has Bool trace
@@ -249,44 +231,83 @@ module MultiFactor {
     -> UUID () -> String { self._UUID }
     -> UUID (String u) -> MultiFactor::Runtime { self._UUID = u; self }
 
+    -> trc (fun, *args) { say "[TRACE]\t#{fun}: #{args.join(' ')}" if (self.trace) }
+    -> vbs (fun, *args) { say "[VBOSE]\t#{fun}: #{args.join(' ')}" if (self.verbose) }
+
     method config_setup {
       if (! self._config_setup_done) {
         self.UUID(FactorBash::make_uuid())
 
         self.force = Bool(self.options\{:force})
-        self.trace = Bool(self.options\{:trace})
-        self.verbose = Bool(self.options\{:verbose})
+        self.dry_run = Bool(self.options(){'dry-run'})
+        self.trace = Bool(self.options\{:trace} || self.dry_run)
+        self.verbose = (Bool(self.options\{:verbose}) || self.trace || self.dry_run)
         self.info = Bool(self.options\{:info})
-        self.dry_run = Bool(self.options\{'dry-run'})
 
         # TODO: argparse needs to auto-fill the defaults
         # for non-provided options with default values
         # and correctly fill out non-provided negatable booleans
         self.clean = Bool(self.options\{:clean})
         self.sums = Bool(self.options\{:sums})
-        self.db = File(self.options\{:db}||'.multifactor.db')
+        self.db = File(self.options\{:db} || '.multifactor.db')
+
+        self.lock_name = File(self.db+self.lock_ext)
 
         self._config_setup_done = true
+        self.vbs(__METHOD_NAME__, "finished configuration")
       }
     }
 
     method show_info {
       self.config_setup
-      say 'MultiFactor options'
+      say "MultiFactor #{self.UUID} options"
       say "\tverbose: #{self.verbose}\tinfo: #{self.info}\ttrace: #{self.trace}\tdry_run: #{self.dry_run}"
       say "\tclean: #{self.clean}\tsums: #{self.sums}\tdb: #{self.db}"
       say "\tFactor arguments: #{self.factor_arguments}"
     }
 
     method read_disk_db () is cached -> Array {
+      self.config_setup
+      self.trc(__METHOD_NAME__, "reading #{self.db}")
+
       MultiFactor::_read_disk_db(self.db)
     }
 
     method write_disk_db (Array new_data) {
+      self.config_setup
+      self.trc(__METHOD_NAME__, "writing #{self.db}")
+
       if (defined(new_data) && Bool(new_data) && new_data.all{_ ~~ BuiltObj}) {
         MultiFactor::_write_disk_db(self.db, new_data)
       } else {
-        die "#{__METHOD__}: garbage argument #{new_data}"
+        self.cleanup_lock_file
+        die "[ERROR]\t#{__METHOD_NAME__}: garbage argument #{new_data}"
+      }
+    }
+
+    -> _test_lock_file (Bool cleanup) {
+      const String first_line = self.lock_name.open_r.readline
+      # err on the side of caution
+      die "[ERROR]\t#{__METHOD_NAME__}: malformed lockfile #{self.lock_name} exists and is empty\n\t(not removing; not continuing)"\
+        if (! defined(first_line) || !first_line)
+      if ( first_line.chomp != self.UUID() ) {
+        # otherwise, if the file is empty or lacks a UUID, it's not ours
+        # we should die
+        self.vbs(__METHOD_NAME__, "UUID mismatch:" first_line.chomp.dump, self.UUID.dump)
+        die (
+          "[ERROR]\t#{__METHOD_NAME__}: lockfile #{self.lock_name} contains foreign UUID" +
+          "\n\t(only one MultiFactor process should be active in one directory at once)"
+          "\n\tnot removing it; not continuing"
+        )
+        # Sys.exit(136)
+      } else {
+        if (cleanup) { self.lock_name.remove }
+        else {
+          warn (
+            "[WARN]\t#{__METHOD_NAME__}: my UUID already exists in the lockfile #{self.lock_name}" +
+            "\n\tUnnecessary read; MultiFactor bug found! in #{Dir.cwd}"
+          )
+        }
       }
     }
 
@@ -294,40 +315,65 @@ module MultiFactor {
     # different from the tmp_file implementation above
     # database "locking" should consist primarily in rename()
     # NOTE: NIH: want to avoid CPAN deps
-    method do_lock_file () {
+    method do_lock_file {
+      self.config_setup
+
+      die "[ERROR]\t#{__METHOD_NAME__}: empty dbname! lock_name was #{self.lock_name}" \
+        if (self.lock_name.to_s == lock_ext)
       # if it doesn't exist, create it with our UUID
+      if (! self.lock_name.exists) {
+        const File fh = lock_name.create
+        die "[ERROR]\t#{__METHOD_NAME__}: failed to create lockfile #{self.lock_name}: $!" \
+          if (! defined(fh))
+        fh.spurt(self.UUID)
+        fh.close
+        self.vbs(__METHOD_NAME__, "created #{self.lock_name}")
+      } else {
+        # otherwise, and if the contained UUID is ours, it must be ours (right?)
+        # do nothing, but warn
+        self._test_lock_file(false)
+      }
+    }
 
-      # otherwise, and if the contained UUID is ours, it must be ours (right?)
-      # do nothing, but warn
-
-      # otherwise, if the file is empty or lacks a UUID, it's not ours
-      # we should die
+    method cleanup_lock_file {
+      self.config_setup
+      if (! self.lock_name.exists) {
+        warn "[WARN]\t#{__METHOD_NAME__}: Cannot stat #{self.lock_name}"
+        return nil
+      } else {
+        self.vbs(__METHOD_NAME__, "removing #{self.lock_name}")
+        self._test_lock_file(true)
+      }
     }
 
     # multifactor's actual entry point
     method go {
       self.config_setup
       self.do_lock_file
-      var db = self.read_disk_config
+      const db = self.read_disk_config
+
+      # no changes to disk yet, also haven't read from git yet
+
+      self.cleanup_lock_file
     }
   }
 }
 
-func usec { Time.micro*10_000 }
-func usec (Number n) { Time.micro*10_000 - n }
+func μsec { Time.micro*10_000 }
+func μsec (Number n) { Time.micro*10_000 - n }
 
 func main () {
-  var us = usec()
+  var μs = μsec()
   # say Factor::RC_FILE
   # say Factor::REPO
   # say Factor::VERSION
   # say Dir.cwd
   # say Dir.cwd
-  Dir.chdir(Factor::REPO)
-  say BuildSh::generate_make_targets()
-  say FactorBash::sum_git_names_matching(/\.s(?:m|f)/)
-  say FactorBash::sum_git_contents_matching(/\.s(?:m|f)/)
-  say MultiFactor::BuiltObj(([""] * 15)..., false ).dump.len
+  # Dir.chdir(Factor::REPO)
+  # say BuildSh::generate_make_targets()
+  # say FactorBash::sum_git_names_matching(/\.s(?:m|f)/)
+  # say FactorBash::sum_git_contents_matching(/\.s(?:m|f)/)
+  # say MultiFactor::BuiltObj(([""] * 15)..., false ).dump.len
 
   var parser = argparse::ArgParse(ARGV) \
     .info(SCRIPT) \
@@ -345,6 +391,7 @@ func main () {
     # .use_stdin_file_arg \
     # .use_arg_list_terminator \
     # .ignore_unknowns \
+    # .help_on_stderr \
     .arg("arg...", doc: "Arguments to the final Factor VM")
 
   var (opts, args, *_) = parser.go...
@@ -353,8 +400,10 @@ func main () {
   const r = MultiFactor::Runtime(opts, args.keys)
 
   r.show_info()
+  r.go()
 
-  say "\n\tΔ#{usec(us)}"
+
+  say "\n\tΔ#{μsec(μs)}μ"
 }
 
 if (__FILE__ == __MAIN__) {

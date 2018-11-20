@@ -80,9 +80,10 @@ module BuildSh {
   # NOTE: os_type is distinct to osname
   -> os_name () is cached -> String {
     given (Sys.osname) {
-      when (/(?:windows|cygwin)/) { :windows }
+      when (/(?:windows|cygwin)/i) { :windows }
       when (:darwin) { continue }
       when (:macos) { :macos }
+      when (:mingw) { continue }
       when (:linux) { :linux }
       when (/bsd/i) { :bsd }
       default { die "Unknown osname: #{Sys.osname}" }
@@ -90,8 +91,8 @@ module BuildSh {
   }
   -> os_type () is cached -> String {
     given (Sys.osname) {
-      when (/(?:linux|darwin|macos|bsd|mingw)/) { :unix }
-      when (/(?:windows|cygwin)/) { :windows }
+      when (/(?:linux|darwin|macos|bsd|mingw)/i) { :unix }
+      when (/(?:windows|cygwin)/i) { :windows }
       default { die "Can't convert osname to os_type: #{Sys.osname}" }
     }
   }
@@ -149,5 +150,29 @@ int main(){printf(\"%ld\",(long)(8*sizeof(void*)));}' | #{BuildSh::cc()} -xc -o#
   -> current_git_branch () is cached {
     const branch = `git rev-parse --abbrev-ref HEAD`
     (Number($?)==0 ? branch : :master)
+  }
+}
+
+module FactorBash {
+  define Regex VM_DIR_REGEX = /vm/
+  define Regex IMAGE_DIR_REGEX = /(?:core|basis)/
+  -> make_uuid (Number len = 32) -> String {
+    `tr -dc 'a-zA-Z0-9\-_=,' < /dev/urandom | fold -w#{len} | head -n1`.chomp
+  }
+  -> git_files_matching (Regex r) -> Array {
+    const Array files = `git ls-files`.lines.grep{ _ ~~ r}
+    if (! files) {
+      warn "[WARN] #{__FUNC_NAME__}: no files matched #{r} in #{Dir.cwd}"
+    }
+    files
+  }
+  -> sum_git_names_matching (Regex r) -> String {
+    # allow utf-8 with SHA
+    FactorBash::git_files_matching(r).join("\n").bytes.map{.chr}.join.sha256
+  }
+  -> sum_git_contents_matching (Regex r) -> String {
+    FactorBash::git_files_matching(r).map{
+      File(_).open_r.slurp.bytes.map{.chr}.join # allow utf-8 with SHA
+    }.join("\n").sha256
   }
 }
