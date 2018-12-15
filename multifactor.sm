@@ -67,9 +67,9 @@ module MultiFactor {
     String _sum_image_contents,     # .
     String _vm_blob_sum,            # .
     String _image_blob_sum,         # .
-    String _created_time,           # epoch timestamp
-    String _mod_access_time,        # 2 timestamps in the form "xxx/yyy"
-    String _tombstoned_at,          # for once-existing now-deleted images; stores deletion time
+    String _time_created,           # epoch timestamp
+    String _time_mod_access,        # 2 timestamps in the form "xxx/yyy"
+    String _time_tombstoned = :never, # for once-existing now-deleted images; stores deletion time
     String _vm_base_name = :factor, # usually "factor"
     String _image_ext = ".image",   # usually ".image"
     Bool   _lk = false              # object locking
@@ -91,9 +91,9 @@ module MultiFactor {
     -> image_blob_sum () -> String { self._image_blob_sum }
     -> vm_base_name () -> String { self._vm_base_name }
     -> image_ext () -> String { self._image_ext }
-    -> created_time () -> String { self._created_time }
-    -> mod_access_time () -> String { self._mod_access_time }
-    -> tombstoned_at () -> String { self._tombstoned_at }
+    -> time_created () -> String { self._time_created }
+    -> time_mod_access () -> String { self._time_mod_access }
+    -> time_tombstoned () -> String { self._time_tombstoned }
 
     -> id (String id) -> BuiltObj { if (!self._lk) { self._id = id }; self }
     -> git_branch (String gb) -> BuiltObj { if (!self._lk) { self._git_branch = gb }; self }
@@ -110,9 +110,9 @@ module MultiFactor {
     -> image_blob_sum (String x) -> BuiltObj { if (!self._lk) { self._image_blob_sum = x }; self }
     -> vm_base_name (String x) -> BuiltObj { if (!self._lk) { self._vm_base_name = x }; self }
     -> image_ext (String x) -> BuiltObj { if (!self._lk) { self._image_ext = x }; self }
-    -> created_time (String x) -> BuiltObj { if (!self._lk) { self._created_time = x }; self }
-    -> mod_access_time (String x) -> BuiltObj { if (!self._lk) { self._mod_access_time = x }; self }
-    -> tombstoned_at (String x) -> BuiltObj { if (!self._lk) { self._tombstoned_at = x }; self }
+    -> time_created (String x) -> BuiltObj { if (!self._lk) { self._time_created = x }; self }
+    -> time_mod_access (String x) -> BuiltObj { if (!self._lk) { self._time_mod_access = x }; self }
+    -> time_tombstoned (String x) -> BuiltObj { if (!self._lk) { self._time_tombstoned = x }; self }
   }
 
   include Factor
