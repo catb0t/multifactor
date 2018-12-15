@@ -54,56 +54,65 @@ module Factor {
 module MultiFactor {
   # accessors are a necessity
   class BuiltObj (
-    String _id,
-    String _git_branch,
-    String _git_hash, # git rev-parse HEAD
-    String _os_type,
-    String _os_name,
-    String _arch_name,
-    String _word_size,
-    String _sum_vm_names,
-    String _sum_vm_contents,
-    String _sum_image_names,
-    String _sum_image_contents,
-    String _vm_blob_sum,
-    String _image_blob_sum,
-    String _vm_base_name = :factor,  # usually "factor"
-    String _image_ext = ".image",    # usually ".image"
-    Bool   _lk = false               # object locking
+    String _id,                     # long uuid
+    String _git_branch,             # branch to which this applies
+    String _git_hash,               # hash it's from; git rev-parse HEAD
+    String _os_type,                # target os kind
+    String _os_name,                # specific os string
+    String _arch_name,              # x86 / ppc / arm ...
+    String _word_size,              # 32 / 64
+    String _sum_vm_names,           # a sha256 checksum
+    String _sum_vm_contents,        # .
+    String _sum_image_names,        # .
+    String _sum_image_contents,     # .
+    String _vm_blob_sum,            # .
+    String _image_blob_sum,         # .
+    String _created_time,           # epoch timestamp
+    String _mod_access_time,        # 2 timestamps in the form "xxx/yyy"
+    String _tombstoned_at,          # for once-existing now-deleted images; stores deletion time
+    String _vm_base_name = :factor, # usually "factor"
+    String _image_ext = ".image",   # usually ".image"
+    Bool   _lk = false              # object locking
   ) {
-      -> lock () -> BuiltObj { self._lk = true; self }
-      # -> unlock () -> BuiltObj { self._lk = false; self }
-      -> id () -> String { self.id }
-      -> git_branch () -> String { self._git_branch }
-      -> git_hash () -> String { self._git_hash }
-      -> os_type () -> String { self._os_type }
-      -> os_name () -> String { self._os_name }
-      -> arch_name () -> String { self._arch_name }
-      -> word_size () -> String { self._arch_name }
-      -> sum_vm_names () -> String {  self._sum_vm_names }
-      -> sum_vm_contents () -> String {  self._sum_vm_contents }
-      -> sum_image_names () -> String {  self._sum_image_names }
-      -> sum_image_contents () -> String {  self._sum_image_contents }
-      -> vm_blob_sum () -> String { self._vm_blob_sum }
-      -> image_blob_sum () -> String {  self._image_blob_sum }
-      -> vm_base_name () -> String {  self._vm_base_name }
-      -> image_ext () -> String { self._image_ext }
+    -> lock () -> BuiltObj { self._lk = true; self }
+    # -> unlock () -> BuiltObj { self._lk = false; self }
+    -> id () -> String { self.id }
+    -> git_branch () -> String { self._git_branch }
+    -> git_hash () -> String { self._git_hash }
+    -> os_type () -> String { self._os_type }
+    -> os_name () -> String { self._os_name }
+    -> arch_name () -> String { self._arch_name }
+    -> word_size () -> String { self._arch_name }
+    -> sum_vm_names () -> String { self._sum_vm_names }
+    -> sum_vm_contents () -> String { self._sum_vm_contents }
+    -> sum_image_names () -> String { self._sum_image_names }
+    -> sum_image_contents () -> String { self._sum_image_contents }
+    -> vm_blob_sum () -> String { self._vm_blob_sum }
+    -> image_blob_sum () -> String { self._image_blob_sum }
+    -> vm_base_name () -> String { self._vm_base_name }
+    -> image_ext () -> String { self._image_ext }
+    -> created_time () -> String { self._created_time }
+    -> mod_access_time () -> String { self._mod_access_time }
+    -> tombstoned_at () -> String { self._tombstoned_at }
 
-      -> id (String id) -> BuiltObj { if (!self._lk) { self._id = id }; self }
-      -> git_branch (String gb) -> BuiltObj { if (!self._lk) { self._git_branch = gb }; self }
-      -> git_hash (String hs) -> BuiltObj { if (!self._lk) { self._git_hash = hs }; self }
-      -> os_type (String os) -> BuiltObj { if (!self._lk) { self._os_type = os }; self }
-      -> os_name (String os) -> BuiltObj { if (!self._lk) { self._os_name = os }; self }
-      -> arch_name (String an) -> BuiltObj { if (!self._lk) { self._arch_name = an }; self }
-      -> word_size (String ws) -> BuiltObj { if (!self._lk) { self._word_size = ws }; self }
-      -> sum_vm_names (String x) -> BuiltObj { if (!self._lk) { self._sum_vm_names = x }; self }
-      -> sum_vm_contents (String x) -> BuiltObj { if (!self._lk) { self._sum_vm_contents = x }; self }
-      -> sum_image_names (String x) -> BuiltObj { if (!self._lk) { self._sum_image_names = x }; self }
-      -> sum_image_contents (String x) -> BuiltObj { if (!self._lk) { self._sum_image_contents = x }; self }
-      -> vm_blob_sum (String x) -> BuiltObj { if (!self._lk) { self._vm_blob_sum = x }; self }
-      -> image_blob_sum (String x) -> BuiltObj { if (!self._lk) { self._image_blob_sum = x }; self }
-      -> vm_base_name (String x) -> BuiltObj { if (!self._lk) { self._vm_base_name = x }; self }
-      -> image_ext (String x) -> BuiltObj { if (!self._lk) { self._image_ext = x }; self }
+    -> id (String id) -> BuiltObj { if (!self._lk) { self._id = id }; self }
+    -> git_branch (String gb) -> BuiltObj { if (!self._lk) { self._git_branch = gb }; self }
+    -> git_hash (String hs) -> BuiltObj { if (!self._lk) { self._git_hash = hs }; self }
+    -> os_type (String os) -> BuiltObj { if (!self._lk) { self._os_type = os }; self }
+    -> os_name (String os) -> BuiltObj { if (!self._lk) { self._os_name = os }; self }
+    -> arch_name (String an) -> BuiltObj { if (!self._lk) { self._arch_name = an }; self }
+    -> word_size (String ws) -> BuiltObj { if (!self._lk) { self._word_size = ws }; self }
+    -> sum_vm_names (String x) -> BuiltObj { if (!self._lk) { self._sum_vm_names = x }; self }
+    -> sum_vm_contents (String x) -> BuiltObj { if (!self._lk) { self._sum_vm_contents = x }; self }
+    -> sum_image_names (String x) -> BuiltObj { if (!self._lk) { self._sum_image_names = x }; self }
+    -> sum_image_contents (String x) -> BuiltObj { if (!self._lk) { self._sum_image_contents = x }; self }
+    -> vm_blob_sum (String x) -> BuiltObj { if (!self._lk) { self._vm_blob_sum = x }; self }
+    -> image_blob_sum (String x) -> BuiltObj { if (!self._lk) { self._image_blob_sum = x }; self }
+    -> vm_base_name (String x) -> BuiltObj { if (!self._lk) { self._vm_base_name = x }; self }
+    -> image_ext (String x) -> BuiltObj { if (!self._lk) { self._image_ext = x }; self }
+    -> created_time (String x) -> BuiltObj { if (!self._lk) { self._created_time = x }; self }
+    -> mod_access_time (String x) -> BuiltObj { if (!self._lk) { self._mod_access_time = x }; self }
+    -> tombstoned_at (String x) -> BuiltObj { if (!self._lk) { self._tombstoned_at = x }; self }
   }
 
   include Factor
@@ -152,14 +161,15 @@ module MultiFactor {
 
   # these are actually the interfaces to the above words
   # this returns a filehandle to in-memory string
-  func atomic_read (File name) -> FileHandle {
+  func atomic_read (File name) -> String {
     const File tmp = MultiFactor::temp_r(name)
-    const tmp_fh = tmp.open_w
-    const String contents = tmp_fh.open_r.slurp
+    const tmp_fh = tmp.open_r
+    const String contents = tmp_fh.slurp.dclone()
+    contents # won't be eagerly evaluated without this line
     # check error here?
     tmp_fh.close
     MultiFactor::finalise_temp_r(tmp)
-    contents.open_r
+    contents
   }
 
   func atomic_write (File name, String contents) -> nil {
@@ -178,11 +188,8 @@ module MultiFactor {
     # look for the database file
     # if it doesn't exist, stop
     # otherwise, open it
-    const contents_fh = MultiFactor::atomic_read(name).open_r
-    const contents = contents_fh.slurp
-
+    const contents = MultiFactor::atomic_read(name)
     # if it's empty, get a new one -> []
-    contents_fh.close
     if (! contents) {
       return []
     }
@@ -288,7 +295,7 @@ module MultiFactor {
     -> _test_lock_file (Bool cleanup) {
       const String first_line = self.lock_name.open_r.readline
       # err on the side of caution
-      die "[ERROR]\t#{__METHOD_NAME__}: malformed lockfile #{self.lock_name} exists and is empty\n\t(not removing; not continuing)"\
+      die "[ERROR]\t#{__METHOD_NAME__}: malformed lockfile #{self.lock_name} exists and is empty\n\t(not removing; not continuing)" \
         if (! defined(first_line) || !first_line)
       if ( first_line.chomp != self.UUID() ) {
         # otherwise, if the file is empty or lacks a UUID, it's not ours
@@ -296,7 +303,7 @@ module MultiFactor {
         self.vbs(__METHOD_NAME__, "UUID mismatch:" first_line.chomp.dump, self.UUID.dump)
         die (
           "[ERROR]\t#{__METHOD_NAME__}: lockfile #{self.lock_name} contains foreign UUID" +
-          "\n\t(only one MultiFactor process should be active in one directory at once)"
+          "\n\t(only one MultiFactor process should be active in a directory)"
           "\n\tnot removing it; not continuing"
         )
         # Sys.exit(136)
@@ -350,8 +357,9 @@ module MultiFactor {
     method go {
       self.config_setup
       self.do_lock_file
-      const db = self.read_disk_config
+      const db = self.read_disk_db
 
+      say db.dump
       # no changes to disk yet, also haven't read from git yet
 
       self.cleanup_lock_file
