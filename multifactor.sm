@@ -142,7 +142,6 @@ module MultiFactor {
     }
     target
   }
-
   # argument is used literally
   func finalise_temp_r (File target) {
     die "Cannot stat #{target}" if (! target.exists)
@@ -150,7 +149,6 @@ module MultiFactor {
       die "Can't remove #{target}: $!"
     }
   }
-
   # requires literal arguments due to UUID
   func finalise_temp_w (File name, File target) {
     die "Cannot stat #{target}" if (! target.exists)
@@ -171,7 +169,6 @@ module MultiFactor {
     MultiFactor::finalise_temp_r(tmp)
     contents
   }
-
   func atomic_write (File name, String contents) -> nil {
     const File tmp = MultiFactor::temp_w(name)
     const tmp_fh = tmp.open_w
