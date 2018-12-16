@@ -46,7 +46,7 @@ module Factor {
   const Regex VERSION_REGEX = /VERSION = ([0-9]+\.[0-9]+)/
   const String VERSION = (
     VERSION_REGEX =~ (
-      REPO+%f(GNUmakefile)->open_r.lines.find { |l| l ~~ VERSION_REGEX }
+      REPO + %f(GNUmakefile)->open_r.lines.find { |l| l ~~ VERSION_REGEX }
     )
   )[0]
 }
@@ -245,7 +245,7 @@ module MultiFactor {
         self.force = Bool(self.options\{:force})
         self.dry_run = Bool(self.options(){'dry-run'})
         self.trace = Bool(self.options\{:trace} || self.dry_run)
-        self.verbose = (Bool(self.options\{:verbose}) || self.trace || self.dry_run)
+        self.verbose = ( Bool(self.options\{:verbose}) || self.trace || self.dry_run )
         self.info = Bool(self.options\{:info})
 
         # TODO: argparse needs to auto-fill the defaults
@@ -270,6 +270,14 @@ module MultiFactor {
       say "\tFactor arguments: #{self.factor_arguments}"
     }
 
+    method capture_write_disk (Block operation) {
+      if (! self.dry_run) {
+        return operation.run
+      }
+      self.vbs(__METHOD_NAME__, "not writing disk (dry run)")
+      nil
+    }
+
     method read_disk_db () is cached -> Array {
       self.config_setup
       self.trc(__METHOD_NAME__, "reading #{self.db}")
@@ -281,8 +289,8 @@ module MultiFactor {
       self.config_setup
       self.trc(__METHOD_NAME__, "writing #{self.db}")
 
-      if (defined(new_data) && Bool(new_data) && new_data.all{_ ~~ BuiltObj}) {
-        MultiFactor::_write_disk_db(self.db, new_data)
+      if ( defined(new_data) && Bool(new_data) && new_data.all{_ ~~ BuiltObj} ) {
+        self.capture_write_disk( { MultiFactor::_write_disk_db(self.db, new_data) } )
       } else {
         self.cleanup_lock_file
         die "[ERROR]\t#{__METHOD_NAME__}: garbage argument #{new_data}"
@@ -353,10 +361,16 @@ module MultiFactor {
     # multifactor's actual entry point
     method go {
       self.config_setup
+      if (self.info) { self.show_info; return nil }
+
       self.do_lock_file
       const db = self.read_disk_db
 
       say db.dump
+      db.map { .word_size("32") }
+      say db.dump
+      self.write_disk_db(db)
+
       # no changes to disk yet, also haven't read from git yet
 
       self.cleanup_lock_file
