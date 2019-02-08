@@ -1,3 +1,1 @@
-[
-MultiFactor::BuiltObj("1", "master", "4b5fe10", "unix", "linux", "x86", "64", "sum vm names", "sum vm contents", "sum image names", "sum image contents", "vm blob sum", "image blob sum", "3", "4/5", "never")
-]
+[BuiltObj(_arch_name: "x86", _git_branch: "master", _git_hash: "4b5fe10", _id: "1", _image_blob_sum: "image blob sum", _image_ext: ".image", _lk: false, _os_name: "linux", _os_type: "unix", _sum_image_contents: "sum image contents", _sum_image_names: "sum image names", _sum_vm_contents: "sum vm contents", _sum_vm_names: "sum vm names", _time_created: "3", _time_mod_access: "4/5", _time_tombstoned: "never", _vm_base_name: "factor", _vm_blob_sum: "vm blob sum", _word_size: "32")]

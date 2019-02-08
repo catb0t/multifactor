@@ -242,50 +242,50 @@ class ArgParse (argv: Array) {
   method help_me {
     gather {
 
+      -> find_max_long_len (args, opts) {
+        [opts.values..., args.values...].map{ .string_parts[1].len }.max
+      }
       # unfortunately, aligning the argument and option docs requires an all-at-once
       #   solution, which isn't this
       # this is like, really bad
-      func quarks_to_formatted_lines (Hash qs) -> String {
+      func quarks_to_formatted_lines (Hash qs, Number longest_len) -> String {
         var (
-          sorted_qs     = qs.sort{|a, b| a.lc <=> b.lc }.map{ _[1].string_parts },
-          padding_size  = sorted_qs.map{ _[0] }.max.len,
-          first_space   = 1,
-          first_padding = 16
+          sorted_qs          = qs.sort{|a, b| a.lc <=> b.lc }.map{ _[1].string_parts },
+          # long_option_maxlen = sorted_qs.map{ _[1].len }.max,
+          short_after_space  = 4, # hmm, make this work with Arg
+          long_after_space   = 1
         )
-
-        # TODO: make '-c,--clone' (no space) possible, currently it isn't even with first_space = 0
+        # say qs
         gather {
           for quark in sorted_qs {
-            var (first, second, doc_first, *rest) = quark...
-            take("#{self.leading_alignment}%s%s%-*s%-*s%s".sprintf(
-                # 4 is the magic length of a short option + a comma + 1
-                # as if the rest of this isn't also magic
-                first + (" " * (first.len - 4)),
-                " " * first_space,
-                first_padding, second, padding_size, doc_first
-              )
-            )
-            # everything after the first doc line
-            for line in rest {
-              # say (first.len + first_space + first_padding + second.len + padding_size)
-              take("#{self.leading_alignment}%s%-*s".sprintf(
-                  " " * (first_space + first_padding + padding_size), padding_size, line
-                )
+            var (short, long, doc_line1, *doc_rest) = quark...
+            var first_line = (
+                "#{self.leading_alignment}%-#{short_after_space}s%-#{longest_len+long_after_space}s%s"
+            ).sprintf(short, long, doc_line1)
+            take(first_line)
+            for line in doc_rest {
+              take(
+                self.leading_alignment +
+                (" " * short_after_space) +
+                (" " * longest_len+long_after_space) +
+                line
               )
             }
           }
         }.join("\n")
       }
+
+      const longest = find_max_long_len(self.prog_args, self.prog_opts)
       take(self.usage_short)
       take(self.version_me)
 
       take("")
       take("Arguments")
-      take(quarks_to_formatted_lines(self.prog_args))
+      take(quarks_to_formatted_lines(self.prog_args, longest))
 
       take("")
       take("Options")
-      take(quarks_to_formatted_lines(self.prog_opts))
+      take(quarks_to_formatted_lines(self.prog_opts, longest))
 
       take("")
       take("Config")

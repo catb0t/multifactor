@@ -137,7 +137,7 @@ module MultiFactor {
   # this makes a temp file for writing, which can be rename()d over `name`
   func temp_w (File name) -> File {
     const File target = MultiFactor::temp_write_target(name)
-    if (! target.exists) {
+    if (target.exists) {
       die "Create file #{target}: file exists"
     }
     target
@@ -169,7 +169,7 @@ module MultiFactor {
     MultiFactor::finalise_temp_r(tmp)
     contents
   }
-  func atomic_write (File name, String contents) -> nil {
+  func atomic_write (File name, String contents) {
     const File tmp = MultiFactor::temp_w(name)
     const tmp_fh = tmp.open_w
     const Bool res = tmp_fh.spurt(contents)
@@ -178,7 +178,7 @@ module MultiFactor {
     }
     tmp_fh.close
     MultiFactor::finalise_temp_w(name, tmp)
-    nil
+    return nil
   }
 
   func _read_disk_db (File name) is cached -> Array {
@@ -270,11 +270,11 @@ module MultiFactor {
       say "\tFactor arguments: #{self.factor_arguments}"
     }
 
-    method capture_write_disk (Block operation) {
+    method capture_write_disk (Block operation, String caller_name) {
       if (! self.dry_run) {
         return operation.run
       }
-      self.vbs(__METHOD_NAME__, "not writing disk (dry run)")
+      self.vbs(__METHOD_NAME__, "#{caller_name}: not writing disk (dry run)")
       nil
     }
 
@@ -290,7 +290,7 @@ module MultiFactor {
       self.trc(__METHOD_NAME__, "writing #{self.db}")
 
       if ( defined(new_data) && Bool(new_data) && new_data.all{_ ~~ BuiltObj} ) {
-        self.capture_write_disk( { MultiFactor::_write_disk_db(self.db, new_data) } )
+        self.capture_write_disk( { MultiFactor::_write_disk_db(self.db, new_data) }, __METHOD_NAME__ )
       } else {
         self.cleanup_lock_file
         die "[ERROR]\t#{__METHOD_NAME__}: garbage argument #{new_data}"
@@ -366,12 +366,12 @@ module MultiFactor {
       self.do_lock_file
       const db = self.read_disk_db
 
-      say db.dump
-      db.map { .word_size("32") }
-      say db.dump
+      # say db.dump
+      # db.map { .word_size("64") }
+      #say db.dump
+      # no changes to disk yet, also haven't read from git yet
       self.write_disk_db(db)
 
-      # no changes to disk yet, also haven't read from git yet
 
       self.cleanup_lock_file
     }
@@ -405,7 +405,9 @@ func main () {
     .option("sums", "s",  negate: "Always":"Never", doc: "use checksums") \
     # probably don't need this, or set it in config file
     # .option("sum-len", "l", param: "len":"12", doc: "Shorten checksums to this length") \
-    .option("db", "d", param: "file":".multifactor.db", doc: "Use this database instead") \
+    .option("db-name", "D", param: "name":".multifactor.db", doc: "Custom database filename") \
+    .option("db-path", "d", param: "path":".", doc: "Path to dir containing database") \
+    .option("factor-path", "w", param: "path":".", doc: "Path to Factor working directory") \
     .use_option_terminator("Further arguments are given to Factor") \
     # .use_stdin_file_arg \
     # .use_arg_list_terminator \
