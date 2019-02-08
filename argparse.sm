@@ -57,7 +57,8 @@ class ArgParse (argv: Array) {
 
   # long option RE allows for --h so that these are caught
   # as illegal long options           ---V
-  has const opt_long_re = /^--([^-][^:= ]*)[:= ]?(.*)$/
+  has const opt_any_re   = /^-.+/
+  has const opt_long_re  = /^--([^-][^:= ]*)[:= ]?(.*)$/
   has const opt_short_re = /^-([^-][^:= ]*)[:= ]?(.*)$/
 
   # mutable
@@ -77,7 +78,7 @@ class ArgParse (argv: Array) {
   # otherwise, goes to STDOUT
   has Bool help_on_stderr = true
   # return code for --help
-  has Number help_exits_with   = 0
+  has Number help_exits_with = 0
   # numeric short option names like -1
   # enabling this removes support for non-separated parameters to short options
   # NOTE: actually mostly unimplemented
@@ -242,17 +243,13 @@ class ArgParse (argv: Array) {
   method help_me {
     gather {
 
-      -> find_max_long_len (args, opts) {
-        [opts.values..., args.values...].map{ .string_parts[1].len }.max
+      -> find_max_long_len (*hashes) -> Array {
+        [0, 1].map{ |pos| hashes.map{ .values... }.map{ .string_parts[pos].len }.max }
       }
-      # unfortunately, aligning the argument and option docs requires an all-at-once
-      #   solution, which isn't this
-      # this is like, really bad
-      func quarks_to_formatted_lines (Hash qs, Number longest_len) -> String {
+      func quarks_to_formatted_lines (Hash qs, Array longest_lens) -> String {
         var (
           sorted_qs          = qs.sort{|a, b| a.lc <=> b.lc }.map{ _[1].string_parts },
-          # long_option_maxlen = sorted_qs.map{ _[1].len }.max,
-          short_after_space  = 4, # hmm, make this work with Arg
+          short_after_space  = longest_lens[0]+1, # hmm, make this work with Arg
           long_after_space   = 1
         )
         # say qs
@@ -260,32 +257,30 @@ class ArgParse (argv: Array) {
           for quark in sorted_qs {
             var (short, long, doc_line1, *doc_rest) = quark...
             var first_line = (
-                "#{self.leading_alignment}%-#{short_after_space}s%-#{longest_len+long_after_space}s%s"
+              "#{self.leading_alignment}%-#{short_after_space}s%-#{longest_lens[1]+long_after_space}s%s"
             ).sprintf(short, long, doc_line1)
             take(first_line)
             for line in doc_rest {
               take(
-                self.leading_alignment +
-                (" " * short_after_space) +
-                (" " * longest_len+long_after_space) +
-                line
+                self.leading_alignment + (" " * short_after_space) +
+                (" " * longest_lens[1]+long_after_space) + line
               )
             }
           }
         }.join("\n")
       }
 
-      const longest = find_max_long_len(self.prog_args, self.prog_opts)
+      const lens = find_max_long_len(self.prog_args, self.prog_opts)
       take(self.usage_short)
       take(self.version_me)
 
       take("")
       take("Arguments")
-      take(quarks_to_formatted_lines(self.prog_args, longest))
+      take(quarks_to_formatted_lines(self.prog_args, lens))
 
       take("")
       take("Options")
-      take(quarks_to_formatted_lines(self.prog_opts, longest))
+      take(quarks_to_formatted_lines(self.prog_opts, lens))
 
       take("")
       take("Config")
@@ -326,6 +321,8 @@ class ArgParse (argv: Array) {
     # for non-provided options with default values
     # (could do that right here)
 
+    const continuing = "  \t[Now continuing due to backward compatibility and excessive paranoia.]"
+
     -> unknown_option (String length, Number nr, String name, Number short_pos = 0, String short_char = "") {
       name = if ( [short_pos, short_char].any{ _ } ) {
         "char \##{short_pos}: '#{short_char}'"
@@ -338,10 +335,10 @@ class ArgParse (argv: Array) {
       )
 
       if (self.unknown_is_error) {
-        die "#{err}"
+        die err
       } else {
-        STDERR.say("#{err}")
-        STDERR.say("#{lead}  \t[Now continuing due to backward compatibility and excessive paranoia.]")
+        STDERR.say(err)
+        STDERR.say(lead + continuing)
       }
     }
 
@@ -349,7 +346,7 @@ class ArgParse (argv: Array) {
       STDERR.say(
         "[INFO] ArgParse: too many non-option arguments (want exactly #{self.prog_args.len}) (\##{nr}): #{name}"
       )
-      STDERR.say("[INFO]  \t[Now continuing due to backward compatibility and excessive paranoia.]")
+      STDERR.say("[INFO]" + continuing)
     }
 
     for current_index, param in self.argv.zip_indices() {
@@ -368,7 +365,7 @@ class ArgParse (argv: Array) {
 
       # ok, read an option
       # note that this regex excludes the - STDIN file argument
-      if (reading_opts && (param ~~ /^-.+/) ) {
+      if (reading_opts && (param ~~ self.opt_any_re) ) {
         # long options
         # -- as a terminator was already handled above
         if (param =~ self.opt_long_re) {

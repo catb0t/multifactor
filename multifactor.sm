@@ -305,7 +305,7 @@ module MultiFactor {
       if ( first_line.chomp != self.UUID() ) {
         # otherwise, if the file is empty or lacks a UUID, it's not ours
         # we should die
-        self.vbs(__METHOD_NAME__, "UUID mismatch:" first_line.chomp.dump, self.UUID.dump)
+        self.vbs(__METHOD_NAME__, "UUID mismatch: #{first_line.chomp.dump} ≠ #{self.UUID.dump}")
         die (
           "[ERROR]\t#{__METHOD_NAME__}: lockfile #{self.lock_name} contains foreign UUID" +
           "\n\t(only one MultiFactor process should be active in a directory)"
