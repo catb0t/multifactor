@@ -228,14 +228,21 @@ module MultiFactor {
     has Bool clean
     has Bool sums
 
+    # set in config file
     has Number sum_len
+
+    has Dir db_path
+    has File db_name
     has File db
+
+    has Dir factor_path
 
     has String _UUID
     -> UUID () -> String { self._UUID }
     -> UUID (String u) -> MultiFactor::Runtime { self._UUID = u; self }
 
     -> trc (fun, *args) { say "[TRACE]\t#{fun}: #{args.join(' ')}" if (self.trace) }
+    # more verbose than trace
     -> vbs (fun, *args) { say "[VBOSE]\t#{fun}: #{args.join(' ')}" if (self.verbose) }
 
     method config_setup {
@@ -253,7 +260,10 @@ module MultiFactor {
         # and correctly fill out non-provided negatable booleans
         self.clean = Bool(self.options\{:clean})
         self.sums = Bool(self.options\{:sums})
-        self.db = File(self.options\{:db} || '.multifactor.db')
+        self.db_name = File(self.options(){'db-name'} || '.multifactor.db')
+        self.db_path = Dir(self.options(){'db-path'} || '.')
+        self.db = self.db_path+self.db_name
+        self.factor_path = Dir(self.options(){'factor-path'} || '.')
 
         self.lock_name = File(self.db+self.lock_ext)
 
@@ -266,12 +276,14 @@ module MultiFactor {
       self.config_setup
       say "MultiFactor #{self.UUID} options"
       say "\tverbose: #{self.verbose}\tinfo: #{self.info}\ttrace: #{self.trace}\tdry_run: #{self.dry_run}"
-      say "\tclean: #{self.clean}\tsums: #{self.sums}\tdb: #{self.db}"
+      say "\tclean: #{self.clean}\tsums: #{self.sums}\tdb_name: #{self.db_name}\tdb_path: #{self.db_path}"
+      say "\tfactor_path: #{self.factor_path}\tdb: #{self.db}"
       say "\tFactor arguments: #{self.factor_arguments}"
     }
 
     method capture_write_disk (Block operation, String caller_name) {
       if (! self.dry_run) {
+        self.vbs(__METHOD_NAME__, "#{caller_name}: writing disk with #{operation}")
         return operation.run
       }
       self.vbs(__METHOD_NAME__, "#{caller_name}: not writing disk (dry run)")

@@ -158,7 +158,7 @@ class ArgParse (argv: Array) {
       given (required) {
         when (Pair) { required[negate_branch] }
         when (Bool) { required }
-        default { die "argument 'required': type mismatch" } }
+        default { die "argument 'required': type mismatch (multifactor bug found): got #{required.class}" } }
     }
 
     if (negate) {
@@ -312,7 +312,7 @@ class ArgParse (argv: Array) {
     var (
       reading_opts = true,
       got_stdin = false,
-      in_opts = Hash(),
+      in_opts = self.prog_opts.dclone.grep{ |_, v| v.param }.map_kv{ |k, v| (k, v.param.second || true) },
       in_args = Hash(),
       glob_args = []
     )
@@ -321,6 +321,7 @@ class ArgParse (argv: Array) {
     # for non-provided options with default values
     # (could do that right here)
 
+    say "in_opts: #{in_opts.dump}"
     const continuing = "  \t[Now continuing due to backward compatibility and excessive paranoia.]"
 
     -> unknown_option (String length, Number nr, String name, Number short_pos = 0, String short_char = "") {
