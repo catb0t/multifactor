@@ -153,26 +153,77 @@ int main(){printf(\"%ld\",(long)(8*sizeof(void*)));}' | #{BuildSh::cc()} -xc -o#
   }
 }
 
-module FactorBash {
-  define Regex VM_DIR_REGEX = /vm/
-  define Regex IMAGE_DIR_REGEX = /(?:core|basis)/
+module FactorBashStateless {
   -> make_uuid (Number len = 32) -> String {
     `tr -dc 'a-zA-Z0-9\-_=,' < /dev/urandom | fold -w#{len} | head -n1`.chomp
   }
-  -> git_files_matching (Regex r) -> Array {
-    const Array files = `git ls-files`.lines.grep{ _ ~~ r}
-    if (! files) {
-      warn "[WARN] #{__FUNC_NAME__}: no files matched #{r} in #{Dir.cwd}"
-    }
+}
+
+class FactorBash (Dir wd) {
+  define String VM_DIR_REGEX = '^vm/'
+  define String IMAGE_DIR_REGEX = '^(?:core|basis)/'
+
+  # define Regex VM_DIR_REGEX = /^vm\//
+  # define Regex IMAGE_DIR_REGEX = /^(?:core|basis)\//
+
+  -> with_directory (Block operation) {
+    # SIDEF BUG: if this is `const oldwd`, the old working directory is never restored
+    var oldwd = Dir.cwd
+    self.wd.chdir
+    var retval = operation.run
+    oldwd.chdir
+    retval
+  }
+
+  -> git_files_matching (String r) -> Array {
+    const Array files = `git ls-files | egrep '#{r}'`.lines.map{ .chomp } # .grep{ _ ~~ r }
+    die "[ERROR] #{__METHOD_NAME__}: no files matched #{r} in #{Dir.cwd}" if (! files)
+    # say "git listing #{files.len} files: #{r}"
     files
   }
-  -> sum_git_names_matching (Regex r) -> String {
+
+  # aka hash_directory_filenames
+  -> sum_git_names_matching (String r) -> String {
     # allow utf-8 with SHA
-    FactorBash::git_files_matching(r).join("\n").bytes.map{.chr}.join.sha256
+    self.git_files_matching(r).join("\n").bytes.map{ .chr }.join.sha256
   }
-  -> sum_git_contents_matching (Regex r) -> String {
-    FactorBash::git_files_matching(r).map{
-      File(_).open_r.slurp.bytes.map{.chr}.join # allow utf-8 with SHA
+
+  # TODO: make this not so slow so we don't have to use shell syntax directly
+  # aka hash_directory_contents
+  -> sum_git_contents_matching_native (String r) -> String {
+    self.git_files_matching(r).map{
+        |fname|
+      # allow utf-8 with SHA
+      const fh = File(fname).open_r
+      const c = fh.slurp
+      c
+      fh.close
+      c.bytes.map{ .chr }.join.sha256
     }.join("\n").sha256
+  }
+
+  -> sum_git_contents_matching_shell (String r) -> String {
+    # say self.git_files_matching(r).join(" ")
+    `git ls-files | egrep '#{r}' | xargs cat | sha256sum | cut -f1 -d' '`.chomp
+  }
+
+  # c++ files
+  ->  sum_vm_source {
+    self.with_directory({
+      Hash(
+        :names => self.sum_git_names_matching(VM_DIR_REGEX),
+        :contents => self.sum_git_contents_matching_shell(VM_DIR_REGEX)
+      )
+    })
+  }
+
+  # .factor files
+  -> sum_image_source {
+    self.with_directory({
+      Hash(
+        :names => self.sum_git_names_matching(IMAGE_DIR_REGEX),
+        :contents => self.sum_git_contents_matching_shell(IMAGE_DIR_REGEX)
+      )
+    })
   }
 }

@@ -20,7 +20,7 @@
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 include argparse
-include("shell_words.sm")
+include shell_words
 
 define Hash SCRIPT = :(
   "version" => "0.3",
@@ -116,13 +116,17 @@ module MultiFactor {
   }
 
   include Factor
-  include FactorBash
+  include FactorBashStateless
 
   define String temp_read_ext = "\.tmp_read"
   define String temp_write_ext = "\.tmp_write"
 
-  -> temp_read_target (File name) is cached -> File { File(name + MultiFactor::temp_read_ext + FactorBash::make_uuid() ) }
-  -> temp_write_target (File name) is cached -> File { File(name + MultiFactor::temp_write_ext + FactorBash::make_uuid() ) }
+  -> temp_read_target (File name) is cached -> File {
+    File(name + MultiFactor::temp_read_ext + FactorBashStateless::make_uuid() )
+  }
+  -> temp_write_target (File name) is cached -> File {
+    File(name + MultiFactor::temp_write_ext + FactorBashStateless::make_uuid() )
+  }
 
   # NOTE: NOT instance-specific, i.e doesn't use *OUR* UUID in name
   # this copies a file to a temporary for reading
@@ -236,6 +240,7 @@ module MultiFactor {
     has File db
 
     has Dir factor_path
+    has FactorBash fbash
 
     has String _UUID
     -> UUID () -> String { self._UUID }
@@ -247,7 +252,13 @@ module MultiFactor {
 
     method config_setup {
       if (! self._config_setup_done) {
-        self.UUID(FactorBash::make_uuid())
+        self.db_name = File(self.options(){'db-name'})
+        self.db_path = Dir(self.options(){'db-path'})
+        self.db = self.db_path+self.db_name
+
+        self.factor_path = Dir(self.options(){'factor-path'})
+        self.fbash = shell_words::FactorBash(self.factor_path)
+        self.UUID(FactorBashStateless::make_uuid())
 
         self.force = Bool(self.options\{:force})
         self.dry_run = Bool(self.options(){'dry-run'})
@@ -255,20 +266,15 @@ module MultiFactor {
         self.verbose = ( Bool(self.options\{:verbose}) || self.trace || self.dry_run )
         self.info = Bool(self.options\{:info})
 
-        # TODO: argparse needs to auto-fill the defaults
-        # for non-provided options with default values
-        # and correctly fill out non-provided negatable booleans
+        # TODO: argparse needs to
+        # correctly fill out non-provided negatable booleans
         self.clean = Bool(self.options\{:clean})
         self.sums = Bool(self.options\{:sums})
-        self.db_name = File(self.options(){'db-name'} || '.multifactor.db')
-        self.db_path = Dir(self.options(){'db-path'} || '.')
-        self.db = self.db_path+self.db_name
-        self.factor_path = Dir(self.options(){'factor-path'} || '.')
 
         self.lock_name = File(self.db+self.lock_ext)
 
         self._config_setup_done = true
-        self.vbs(__METHOD_NAME__, "finished configuration")
+        self.vbs(__METHOD_NAME__, "finished configuration, moved to #{self.db_path}")
       }
     }
 
@@ -363,7 +369,6 @@ module MultiFactor {
       self.config_setup
       if (! self.lock_name.exists) {
         warn "[WARN]\t#{__METHOD_NAME__}: Cannot stat #{self.lock_name}"
-        return nil
       } else {
         self.vbs(__METHOD_NAME__, "removing #{self.lock_name}")
         self._test_lock_file(true)
@@ -376,22 +381,50 @@ module MultiFactor {
       if (self.info) { self.show_info; return nil }
 
       self.do_lock_file
-      const db = self.read_disk_db
 
-      # say db.dump
+      const (
+        vm_sums = self.fbash.sum_vm_source,
+        image_sums = self.fbash.sum_image_source
+      )
+      say "vm: #{vm_sums}"
+      say "image: #{image_sums}"
+
+      const db_data = self.read_disk_db
+      const builtobj_matching_source = db_data.find{
+          |b|
+        b.sum_vm_contents==vm_sums{:contents} && b.sum_vm_names==vm_sums{:names} \
+        && b.sum_image_contents==image_sums{:contents} && b.sum_image_names==image_sums{:names} \
+      }
+      if (! defined(builtobj_matching_source)) {
+        say "no file"
+        self.cleanup_lock_file
+        return nil
+      }
+
+      say db_data
+      say builtobj_matching_source
+      const want_blobs_named = builtobj_matching_source.id
+      const (
+        want_vm = File(want_blobs_named),
+        want_image = File("#{want_blobs_named}.image")
+      )
+
+      const (want_vm_sum, want_image_sum = self.fbash.with_directory{
+        want_vm.exists && want_vm.open_r.slurp.bytes.sha256, want_image.exists && want_image.open_r.slurp.bytes.sha256
+      })
       # db.map { .word_size("64") }
       #say db.dump
       # no changes to disk yet, also haven't read from git yet
-      self.write_disk_db(db)
-
+      # self.write_disk_db(db)
 
       self.cleanup_lock_file
     }
   }
 }
 
-func μsec { Time.micro*10_000 }
-func μsec (Number n) { Time.micro*10_000 - n }
+define MICRO_MAGNITUDE = 1_000
+func μsec { Time.micro*MICRO_MAGNITUDE }
+func μsec (Number n) { Time.micro*MICRO_MAGNITUDE - n }
 
 func main () {
   var μs = μsec()
@@ -436,7 +469,7 @@ func main () {
   r.go()
 
 
-  say "\n\tΔ#{μsec(μs)}μ"
+  say "\n\tΔ#{μsec(μs)} ×1,000μ"
 }
 
 if (__FILE__ == __MAIN__) {

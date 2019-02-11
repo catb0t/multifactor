@@ -109,6 +109,7 @@ class ArgParse (argv: Array) {
   # TODO: add ability to prevent re-specified option
   # TODO: allow exclusive options, which prevent / negate other options
   # TODO: positional options
+  # TODO: missing support for required arguments and conditionally required arguments
   # TODO: missing support for positional, named arguments like in "git commit"
   # currently only supports nonpositional arguments that don't start with - or --
   # we have 2 kinds of object: option, arg
@@ -123,20 +124,23 @@ class ArgParse (argv: Array) {
     Pair param = nil,
     String doc = long_name.tclc
   ) {
+    # option name lengths / content
+    die "empty string as parameter" if ( [long_name, short_name].contains("") )
+
     die "option names can't start with - or --" \
       if ([long_name, short_name].any{ _ =~ /^-+/ })
     die "short name isn't: #{short_name}" if (short_name && short_name.len>1)
     die "long name isn't: #{long_name}" if (long_name.len == 1)
-    # die "short name isn't a name: #{short_name}" if (short_name && ["-"].any{ _ == short_name })
-
-    die "already registered option with long name #{long_name}" \
-      if ( self.prog_opts.contains(long_name) )
-
-    die "already registered option with short name #{short_name}" \
-      if ( self.long_name_from_short(short_name) )
 
     die "parser configuration disallows numeric short names: #{short_name}" \
       if ( (! self.numeric_short_names) && short_name.is_numeric )
+    # die "short name isn't a name: #{short_name}" if (short_name && ["-"].any{ _ == short_name })
+
+    # duplicate options
+    die "already registered option with long name #{long_name}" \
+      if ( self.prog_opts.contains(long_name) )
+    die "already registered option with short name #{short_name}" \
+      if ( self.long_name_from_short(short_name) )
 
     negate && negate.flatten!.any { ! defined(_) } \
       && die "non-nil 'negate' must have non-nil values: #{negate}"
@@ -144,14 +148,11 @@ class ArgParse (argv: Array) {
     param && param.flatten!.any { ! defined(_) } \
       && die "non-nil 'param' must have non-nil values: #{param}"
 
-    die "empty string as parameter" if ( [long_name, short_name].contains("") )
-
-    # parameterise this
+    # TODO: parameterise this
     var (_help, _h, _ver, _v) = (self.HELP_NAME..., self.VER_NAME...)
     die "options '#{_help}' '#{_h}' '#{_ver}' '#{_v}' are reserved options: #{long_name} #{short_name}" \
       if ( [_help, _h, _ver, _v].contains_any(long_name, short_name) )
-
-    die "can't use negatable option #{short_name}, because h is reserved for showing the help: #{short_name}" \
+    die "can't use negatable option #{short_name} (it's reserved for showing the help): #{short_name}" \
       if (negate && short_name==_h.uc)
 
     func required_negated (Bool negate_branch) {
@@ -183,11 +184,16 @@ class ArgParse (argv: Array) {
       if ( self.prog_args.contains(name) )
     die "empty name" if (name == "")
 
-    var changed
+    var changed = nil
     name =  if ( !repeatable && name=~/^([^.]+)\.\.\.$/) { |n| changed = true; n[0] }
             else { name }
     self._arg(name, example_val, repeatable || changed, doc)
   }
+
+  # allow options and arguments to be required, obviated, enabled, disabled, and set by other options/arguments
+  # allows implementation of "synonym"
+  method _trigger (s, t, d) { ...; self }
+  method trigger (source, target, String doc = "") { self._trigger(source, target, doc) }
 
   method use_option_terminator (String doc = "") {
     self._option("", d: "End #{ self.prog_info\{:name} }'s argument list#{\"\n\"+doc if doc}")
@@ -199,7 +205,7 @@ class ArgParse (argv: Array) {
     self
   }
 
-  method use_arg_list_terminator (doc = "") {
+  method use_arg_list_terminator (String doc = "") {
     self._arg(self.GLOB_ARG, d: "Begin a list of arbitrary arguments#{\"\n\"+doc if doc}")
     self
   }
@@ -216,19 +222,15 @@ class ArgParse (argv: Array) {
   -> no_stderr_help { self.help_on_stderr = false; self }
 
   method long_name_from_short (name) {
-    for k, v in self.prog_opts() {
-      if (v.short == name) {
-        return k
-      }
-    }
+    self.prog_opts.each_kv{ |k, v| return k if (v.short == name) }
     nil
   }
 
   # just the usage line
   method usage_short () is cached -> String {
     var (
-      opts = gather { for _, v in self.prog_opts.sort() { take(v.short) if (v.short) } }.join(""),
-      args = gather { for _, v in self.prog_args.sort() { take("[#{v.name}#{v.repeatable_str}]") } }.join(" ")
+      opts = gather { self.prog_opts.sort.each_kv{ |_, v| take(v.short) if (v.short) } }.join,
+      args = gather { self.prog_args.sort.each_kv{ |_, v| take("[#{v.name}#{v.repeatable_str}]") } }.join(" ")
     )
 
     "Usage: #{ self.prog_info(){:name} } [-#{opts}] #{args}"
@@ -249,7 +251,7 @@ class ArgParse (argv: Array) {
       func quarks_to_formatted_lines (Hash qs, Array longest_lens) -> String {
         var (
           sorted_qs          = qs.sort{|a, b| a.lc <=> b.lc }.map{ _[1].string_parts },
-          short_after_space  = longest_lens[0]+1, # hmm, make this work with Arg
+          short_after_space  = longest_lens.first+1,
           long_after_space   = 1
         )
         # say qs
@@ -317,11 +319,10 @@ class ArgParse (argv: Array) {
       glob_args = []
     )
 
-    # TODO: need to auto-fill the defaults
+    # DONE?: need to auto-fill the defaults
     # for non-provided options with default values
-    # (could do that right here)
 
-    say "in_opts: #{in_opts.dump}"
+    # say "in_opts: #{in_opts.dump}"
     const continuing = "  \t[Now continuing due to backward compatibility and excessive paranoia.]"
 
     -> unknown_option (String length, Number nr, String name, Number short_pos = 0, String short_char = "") {
