@@ -151,6 +151,22 @@ int main(){printf(\"%ld\",(long)(8*sizeof(void*)));}' | #{BuildSh::cc()} -xc -o#
     const branch = `git rev-parse --abbrev-ref HEAD`
     (Number($?)==0 ? branch : :master)
   }
+
+  -> make_clean {
+    `make clean`
+    Number($?)==0
+  }
+
+  -> make_factor {
+    say "Building factor with infinite cores"
+    `make #{BuildSh::generate_make_targets\{:make_vm}} -j`
+    Number($?)==0
+  }
+
+  -> make_clean_factor {
+    BuildSh::make_clean()
+    BuildSh::make_factor()
+  }
 }
 
 module FactorBashStateless {
@@ -185,7 +201,7 @@ class FactorBash (Dir wd) {
   # aka hash_directory_filenames
   -> sum_git_names_matching (String r) -> String {
     # allow utf-8 with SHA
-    self.git_files_matching(r).join("\n").bytes.map{ .chr }.join.sha256
+    self.git_files_matching(r).join("\n").encode("utf8").decode("latin1").sha256
   }
 
   # TODO: make this not so slow so we don't have to use shell syntax directly
@@ -198,7 +214,7 @@ class FactorBash (Dir wd) {
       const c = fh.slurp
       c
       fh.close
-      c.bytes.map{ .chr }.join.sha256
+      c.encode("utf8").decode("latin1")
     }.join("\n").sha256
   }
 
@@ -209,21 +225,59 @@ class FactorBash (Dir wd) {
 
   # c++ files
   ->  sum_vm_source {
-    self.with_directory({
+    self.with_directory{
       Hash(
         :names => self.sum_git_names_matching(VM_DIR_REGEX),
-        :contents => self.sum_git_contents_matching_shell(VM_DIR_REGEX)
+        :contents => self.sum_git_contents_matching_native(VM_DIR_REGEX)
       )
-    })
+    }
   }
 
   # .factor files
   -> sum_image_source {
-    self.with_directory({
+    self.with_directory{
       Hash(
         :names => self.sum_git_names_matching(IMAGE_DIR_REGEX),
-        :contents => self.sum_git_contents_matching_shell(IMAGE_DIR_REGEX)
+        :contents => self.sum_git_contents_matching_native(IMAGE_DIR_REGEX)
       )
-    })
+    }
+  }
+
+  -> refresh_image (File vm_name, File image_name) {
+    `./#{vm_name} -no-user-init -i="#{image_name}" -e="USING: vocabs.loader vocabs.refresh system memory ; refresh-all save 0 exit"`
+    Number($?)==0
+  }
+  -> make_boot_image (File vm_name, File image_name) {
+    `./#{vm_name} -no-user-init -i"#{image_name}" -e="USING: system bootstrap.image memory ; \"#{BuildSh::generate_make_targets\{:make_image}}\" make-image image-path save-image 0 exit"`
+    Number($?)==0
+  }
+  -> build_factor {
+    BuildSh::make_clean_factor()
+  }
+  -> build_image (File vm_name, File image_name){
+    self.with_directory{
+      const (
+        boot_image_file = File(BuildSh::generate_make_targets\{:boot_image})
+        # boot_image_file = File(BuildSh::generate_make_targets\{:vm_})
+      )
+      const have_boot_image = { boot_image_file.exists || BuildSh::update_boot_image || self.get_boot_image || false }
+      die "[ERROR] can't find or download boot image\n\tno prior boot image, can't download one or compile (sorry!)" \
+        if (! have_boot_image)
+
+      -> run_rebuild_image { `./#{vm_name} -no-user-init -i=#{boot_image_file}` }
+      say 'image pass #1'
+      run_rebuild_image()
+      var image_fails_refresh = !self.refresh_image(vm_name, image_name)
+      for (var i = 2; image_fails_refresh && (i < 25); i++ ) {
+        say "image fails refresh \##{i}"
+        self.make_boot_image(vm_name. image_name)
+        run_rebuild_image()
+        image_fails_refresh = self.refresh_image(vm_name, image_name)
+      }
+
+      self.make_boot_image(vm_name. image_name)
+      # mv boot_image my_boot_image_name
+    }
+    say 'finished image compilation'
   }
 }

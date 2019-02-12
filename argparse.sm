@@ -116,6 +116,8 @@ class ArgParse (argv: Array) {
   # we need to split these into
   #   (named option, any-name option)
   #   (named positional arg, named arg, positional arg, non-named non-positional)
+  # TODO: want caller of parser.go to be able to tell exactly which options forms
+  #   were on the command line (long/short and the syntax) to inform the user 
   method option (
     String long_name,
     String short_name = false,
@@ -229,8 +231,9 @@ class ArgParse (argv: Array) {
   # just the usage line
   method usage_short () is cached -> String {
     var (
-      opts = gather { self.prog_opts.sort.each_kv{ |_, v| take(v.short) if (v.short) } }.join,
-      args = gather { self.prog_args.sort.each_kv{ |_, v| take("[#{v.name}#{v.repeatable_str}]") } }.join(" ")
+      # NOTE: after sorting these become Array<Pair> aka assocs
+      opts = gather { self.prog_opts.sort.each{ var v = _[1]; take(v.short) if (v.short) } }.join,
+      args = gather { self.prog_args.sort.each{ var v = _[1]; take("[#{v.name}#{v.repeatable_str}]") } }.join(" ")
     )
 
     "Usage: #{ self.prog_info(){:name} } [-#{opts}] #{args}"
