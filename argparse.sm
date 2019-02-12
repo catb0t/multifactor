@@ -117,7 +117,7 @@ class ArgParse (argv: Array) {
   #   (named option, any-name option)
   #   (named positional arg, named arg, positional arg, non-named non-positional)
   # TODO: want caller of parser.go to be able to tell exactly which options forms
-  #   were on the command line (long/short and the syntax) to inform the user 
+  #   were on the command line (long/short and the syntax) to inform the user
   method option (
     String long_name,
     String short_name = false,
