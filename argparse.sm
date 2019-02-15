@@ -326,19 +326,22 @@ class ArgParse (argv: Array) {
     # for non-provided options with default values
 
     # say "in_opts: #{in_opts.dump}"
-    const continuing = "  \t[Now continuing due to backward compatibility and excessive paranoia.]"
+    const continuing = "\t[Now continuing due to backward compatibility and excessive paranoia.]"
 
-    -> unknown_option (String length, Number nr, String name, Number short_pos = 0, String short_char = "") {
+    -> unknown_option (String length, Number nr, String name, Number short_pos = 0, String short_char = "" , String parent_param = "") {
       name = if ( [short_pos, short_char].any{ _ } ) {
-        "char \##{short_pos}: '#{short_char}'"
+        "'#{parent_param}' char #{short_pos}: '#{short_char}'"
       } else {
         "'#{name}'"
       }
       var (
         lead = "[#{ self.unknown_is_error ? \"ERROR\" : \"INFO\" }]",
-        err = "#{lead} ArgParse: don't know #{length} option (\##{nr}): #{name}"
+        err = [
+          "#{lead} ArgParse: don't know #{length} option#{length==:short ? ' group' : nil} (param \##{nr}): #{name}",
+          self.usage_short,
+          "Try -#{self.HELP_NAME.second} / --#{self.HELP_NAME.first} for more information.\n" 
+        ].join("\n")
       )
-
       if (self.unknown_is_error) {
         die err
       } else {
@@ -424,7 +427,7 @@ class ArgParse (argv: Array) {
 
             # we don't know any argument by that name
             if ( ! long_name_of ) {
-              unknown_option(:short, current_index + 1, opts, short_pos: opt_index, short_char: short_opt)
+              unknown_option(:short, current_index + 1, opts, short_pos: opt_index+1, short_char: short_opt, parent_param: opts)
               next
 
             # allow -WkP12 and -WkP12t when short option names are not numeric

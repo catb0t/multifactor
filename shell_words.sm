@@ -18,9 +18,10 @@
 module Command {
   func spawn_se (Bool output = false, *cmdline) -> Bool {
     $? = 0
-    var p = Pipe('unbuffer ' + cmdline.join(' ')).open_r
+    var p = Pipe(cmdline.join(' ')).open_r
     p.autoflush(true)
     p.binmode
+    $| = 1
     output ? p.each_char{ .print } : p.lines;
     Number($?) == 0
   }
@@ -134,9 +135,10 @@ module BuildSh {
       ws = BuildSh::word_size()
     )
     Hash(
-      :make_image => "#{on}-#{an}.#{ws}",           # MAKE_IMAGE_TARGET
-      :make_vm => "#{on}-#{an}-#{ws}",              # MAKE_TARGET
-      :boot_image => "boot.#{ot}-#{an}.#{ws}.image",# BOOT_IMAGE
+      :make_image => "#{on}-#{an}.#{ws}",            # MAKE_IMAGE_TARGET
+      :make_vm => "#{on}-#{an}-#{ws}",               # MAKE_TARGET
+      :boot_image_base => "#{ot}-#{an}.#{ws}",       # boot image base (no analogue)
+      :boot_image => "boot.#{ot}-#{an}.#{ws}.image", # BOOT_IMAGE
     )
   }
   -> current_git_branch () is cached {
@@ -308,8 +310,8 @@ class FactorBash (Dir wd, Bool subcommand_output = false) {
   -> make_boot_image (File vm_name, File image_name) {
     self.with_directory{
       Command::spawn_se(
-        './' + vm_name, '-no-user-init', "-i'#{image_name}'", "-e='USING: system bootstrap.image memory ;" +
-        "\"#{BuildSh::generate_make_targets(){:make_image}}\" make-image image-path save-image 0 exit'",
+        './' + vm_name, '-no-user-init', "-i'#{image_name}'", "-e='USING: system bootstrap.image memory ; " +
+        "\"#{BuildSh::generate_make_targets(){:boot_image_base}}\" make-image image-path save-image 0 exit'",
         output: self.subcommand_output
       )
     }

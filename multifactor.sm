@@ -85,7 +85,7 @@ module MultiFactor {
     String _failwrite = 'attempted writing to locked BuiltObj object!'
   ) {
     -> lock () -> BuiltObj { self._lk = true; self }
-    # -> unlock () -> BuiltObj { self._lk = false; self }
+    -> unlock () -> BuiltObj { self._lk = false; self }
     -> id () -> Str { self._id }
     -> git_branch () -> Str { self._git_branch }
     -> git_hash () -> Str { self._git_hash }
@@ -261,9 +261,10 @@ module MultiFactor {
     -> UUID (String u) -> MultiFactor::Runtime { self._UUID = u; self }
 
     -> _bn { File(__FILE__).basename.split(".")[0] }
-    -> wrn (Num l, Str m, *args) { warn "[WARN]\t#{self._bn}:#{l}: #{m}: #{args.join(' ')}" }
-    -> trc (Num l, Str m, *args) { say "[TRACE]\t#{self._bn}:#{l}: #{m}: #{args.join(' ')}" if (self.trace) }
-    -> vbs (Num l, Str m, *args) { say "[VBOSE]\t#{self._bn}:#{l}: #{m}: #{args.join(' ')}" if (self.verbose) }
+    -> wrn (Num l, Str m, *args) { warn "[WARN]\t#{l}: #{m}: #{args.join(' ')}" }
+    -> inf (Num l, Str m, *args) { say "[INFO]\t#{l}: #{m}: #{args.join(' ')}" }
+    -> trc (Num l, Str m, *args) { say "[TRACE]\t#{l}: #{m}: #{args.join(' ')}" if (self.trace) }
+    -> vbs (Num l, Str m, *args) { say "[VBOSE]\t#{l}: #{m}: #{args.join(' ')}" if (self.verbose) }
     # more verbose than trace ^^^
 
     method config_setup {
@@ -316,12 +317,14 @@ module MultiFactor {
       say "\tFactor arguments: #{self.factor_arguments}"
     }
 
-    method capture_write_disk (Block operation, String caller_name) {
+    method capture_write_disk (Block operation) {
+      say "caller:"+Perl.eval("sub a { caller(1); }; sub b{ a() } my %data = (result => b()); \\%data")
+      ...
       if (! self.dry_run) {
-        self.vbs(__LINE__, __METHOD_NAME__, "#{caller_name}: writing disk with", 'operation')
+        self.vbs(__LINE__, __METHOD_NAME__, "writing disk with", 'operation')
         return operation.run
       }
-      self.vbs(__LINE__, __METHOD_NAME__, "#{caller_name}: not writing disk (dry run)")
+      self.vbs(__LINE__, __METHOD_NAME__, "#not writing disk (dry run)")
       nil
     }
 
@@ -347,7 +350,7 @@ module MultiFactor {
       self.trc(__LINE__, __METHOD_NAME__, 'writing', self.db)
 
       if ( defined(new_data) && Bool(new_data) && new_data.values.all{_ ~~ BuiltObj} ) {
-        self.capture_write_disk( { MultiFactor::_write_disk_db(self.db, new_data) }, __METHOD_NAME__ )
+        self.capture_write_disk( { MultiFactor::_write_disk_db(self.db, new_data) } ) #, __METHOD_NAME__ )
       } else {
         self.cleanup_lock_file
         die "[ERROR]\t#{__METHOD_NAME__}: garbage argument #{new_data}"
@@ -559,8 +562,9 @@ module MultiFactor {
         &&  (! (new_image_blob_sums_match || image_blob_sums_match))
       ) {
         self.trc(__LINE__, MN, 'blob sums still mismatched!')
-        const tombstone_builtobj = builtobj_matching_source.dclone
-        tombstone_builtobj.time_tombstoned = String(Time.sec)
+        const tombstone_builtobj = (builtobj_matching_source |> :dclone |> :unlock)
+        del builtobj_matching_source
+        tombstone_builtobj.time_tombstoned(Time |> :sec |> :to_s)
 
         self.insert_disk_db(tombstone_builtobj)
         self.capture_write_disk{ matching_vm_name.remove, matching_image_name.remove }
@@ -588,11 +592,11 @@ module MultiFactor {
         true
       }
 
-      say "Eventual successful configuration!"
-      say "\tmatching_vm_name:\t'#{matching_vm_name}' #{disk_vm_sum[0..10]}...\tmatching_image_name:\t'#{matching_image_name}' #{disk_image_sum[0..10]}..."
-      say "\tvm_sums_match:\t\t#{vm_blob_sums_match}/#{new_vm_blob_sums_match}"
-      say "\timage_sums_match:\t#{image_blob_sums_match}/#{new_image_blob_sums_match}"
-      say "\tchanged_db:\t\t#{changed_db}\t\t\tnewly_compiled: #{newly_compiled.to_s.chars.grep{|p|![\"\n\",' '].any{p==_} }.join}"
+      # say "Eventual successful configuration!"
+      # say "\tmatching_vm_name:\t'#{matching_vm_name}' # #{disk_vm_sum[0..10]}...\tmatching_image_name:\t'#{matching_image_name}' #{disk_image_sum[0..10]}..."
+      # say "\tvm_sums_match:\t\t#{vm_blob_sums_match}/#{new_vm_blob_sums_match}"
+      # say "\timage_sums_match:\t#{image_blob_sums_match}/#{new_image_blob_sums_match}"
+      # say "\tchanged_db:\t\t#{changed_db}\t\t\tnewly_compiled: #{newly_compiled.to_s.chars.grep{|p|![\"\n\",' '].any{p==_} }.join}"
       self.trc(__LINE__, MN, "ok, running factor!")
       # say want_vm_sum
       # db.map { .word_size("64") }
@@ -601,7 +605,15 @@ module MultiFactor {
       # self.write_disk_db(db)
 
       self.cleanup_lock_file
-      { self.fbash.with_directory{ `./#{matching_vm_name}` } }.thr.join
+      # don't segfault
+      {
+        self.inf(__LINE__, MN, 'Launching Factor: ', "'", matching_vm_name, self.factor_arguments..., "'")
+        if (! self.fbash.with_directory{
+          Command::spawn_se('./' + matching_vm_name, self.factor_arguments..., output: true)
+        } ) {
+          self.inf(__LINE__, MN, "Failed #{$!}")
+        }
+      }.thr.detach
     }
   }
 }
@@ -612,6 +624,7 @@ func μsec (Number n) { Time.micro*MICRO_MAGNITUDE - n }
 
 func main () {
   const μs = μsec()
+  μs
   # say Factor::RC_FILE
   # say Factor::REPO
   # say Factor::VERSION
