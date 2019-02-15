@@ -18,6 +18,14 @@
 ##
 ##    You should have received a copy of the GNU General Public License
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+class Object {
+  method cleave (*blocks) {
+    blocks.map{ .run(self) }...
+  }
+  method ifold (*bv_pairs) {
+    bv_pairs.map{ |p| p.first.run( self, @(p.second)... ) }...
+  }
+}
 
 include argparse
 include shell_words
@@ -252,10 +260,10 @@ module MultiFactor {
     -> UUID () -> String { self._UUID }
     -> UUID (String u) -> MultiFactor::Runtime { self._UUID = u; self }
 
-    -> bn (Str fname) { File(fname).basename.split(".")[0] }
-    -> wrn (Str f, Num l, Str m, *args) { warn "[WARN]\t#{self.bn(f)}:#{l}: #{m}: #{args.join(' ')}" }
-    -> trc (Str f, Num l, Str m, *args) { say "[TRACE]\t#{self.bn(f)}:#{l}: #{m}: #{args.join(' ')}" if (self.trace) }
-    -> vbs (Str f, Num l, Str m, *args) { say "[VBOSE]\t#{self.bn(f)}:#{l}: #{m}: #{args.join(' ')}" if (self.verbose) }
+    -> _bn { File(__FILE__).basename.split(".")[0] }
+    -> wrn (Num l, Str m, *args) { warn "[WARN]\t#{self._bn}:#{l}: #{m}: #{args.join(' ')}" }
+    -> trc (Num l, Str m, *args) { say "[TRACE]\t#{self._bn}:#{l}: #{m}: #{args.join(' ')}" if (self.trace) }
+    -> vbs (Num l, Str m, *args) { say "[VBOSE]\t#{self._bn}:#{l}: #{m}: #{args.join(' ')}" if (self.verbose) }
     # more verbose than trace ^^^
 
     method config_setup {
@@ -267,7 +275,10 @@ module MultiFactor {
         self.db = self.db_path+self.db_name
 
         self.factor_path = Dir(self.options(){'factor-path'})
-        self.fbash = shell_words::FactorBash(self.factor_path)
+        self.fbash = shell_words::FactorBash(
+          self.factor_path,
+          subcommand_output: Bool( ! self.options\{'quiet-subcom'} )
+        )
         self.UUID(FactorBashStateless::make_uuid())
 
         self.force = Bool(self.options\{:force})
@@ -275,7 +286,7 @@ module MultiFactor {
         self.verbose = ( Bool(self.options\{:verbose}) || self.dry_run )
         self.trace = Bool(self.options\{:trace} || self.dry_run || self.verbose)
         self.info = Bool(self.options\{:info})
-        self.fbash.subcommand_output = Bool( self.options\{'subcom-output'} ) # || self.trace || self.verbose)
+        # self.fbash.subcommand_output = Bool( ! self.options\{'quiet-subcom'} ) # || self.trace || self.verbose)
 
         # TODO: argparse needs to
         # correctly fill out non-provided negatable booleans
@@ -287,12 +298,12 @@ module MultiFactor {
 
         self.remove_old_lock = Bool(self.options(){'remove-old-lock'})
         if (self.remove_old_lock) {
-          self.wrn(__FILE__, __LINE__, __METHOD_NAME__, "!!!", "blindly removing old lockfiles (unsafe/debug) [--remove-old-lock | -R]")
+          self.wrn(__LINE__, __METHOD_NAME__, "!!!", "blindly removing old lockfiles (unsafe/debug) [--remove-old-lock | -R]")
           if (self.lock_name.exists) { self.lock_name.remove }
         }
 
         self._config_setup_done = true
-        self.trc(__FILE__, __LINE__, __METHOD_NAME__, "finished configuration, wd now: '#{self.db_path}'")
+        self.trc(__LINE__, __METHOD_NAME__, "finished configuration, wd now: '#{self.db_path}'")
       }
     }
 
@@ -307,25 +318,25 @@ module MultiFactor {
 
     method capture_write_disk (Block operation, String caller_name) {
       if (! self.dry_run) {
-        self.vbs(__FILE__, __LINE__, __METHOD_NAME__, "#{caller_name}: writing disk with #{operation}")
+        self.vbs(__LINE__, __METHOD_NAME__, "#{caller_name}: writing disk with", 'operation')
         return operation.run
       }
-      self.vbs(__FILE__, __LINE__, __METHOD_NAME__, "#{caller_name}: not writing disk (dry run)")
+      self.vbs(__LINE__, __METHOD_NAME__, "#{caller_name}: not writing disk (dry run)")
       nil
     }
 
     method read_disk_db () is cached -> Hash {
       self.config_setup
-      self.trc(__FILE__, __LINE__, __METHOD_NAME__, 'reading', self.db)
+      self.trc(__LINE__, __METHOD_NAME__, 'reading', self.db)
 
       MultiFactor::_read_disk_db(self.db)
     }
 
     method load_db () is cached -> Hash {
-      self.vbs(__FILE__, __LINE__, __METHOD_NAME__, 'loading db...')
+      self.vbs(__LINE__, __METHOD_NAME__, 'loading db...')
       static const db_data
       if (! defined(db_data)) {
-        self.vbs(__FILE__, __LINE__, __METHOD_NAME__, 'wasn\'t cached!')
+        self.vbs(__LINE__, __METHOD_NAME__, 'wasn\'t cached!')
         db_data = self.read_disk_db
       }
       db_data
@@ -333,7 +344,7 @@ module MultiFactor {
 
     method write_disk_db (Hash new_data) {
       self.config_setup
-      self.trc(__FILE__, __LINE__, __METHOD_NAME__, 'writing', self.db)
+      self.trc(__LINE__, __METHOD_NAME__, 'writing', self.db)
 
       if ( defined(new_data) && Bool(new_data) && new_data.values.all{_ ~~ BuiltObj} ) {
         self.capture_write_disk( { MultiFactor::_write_disk_db(self.db, new_data) }, __METHOD_NAME__ )
@@ -345,7 +356,7 @@ module MultiFactor {
 
     # TODO: don't write the disk right away
     method insert_disk_db (BuiltObj new_entry) {
-      self.trc(__FILE__, __LINE__, __METHOD_NAME__, 'inserting', new_entry)
+      self.trc(__LINE__, __METHOD_NAME__, 'inserting', new_entry)
       const entire_db = self.load_db
       entire_db{new_entry.id} = new_entry
       self.write_disk_db( entire_db )
@@ -363,7 +374,7 @@ module MultiFactor {
       if ( first_line.chomp != self.UUID ) {
         # otherwise, if the file is empty or lacks a UUID, it's not ours
         # we should die
-        self.vbs(__FILE__, __LINE__, __METHOD_NAME__, 'UUID mismatch:', first_line.chomp.dump, '≠' self.UUID.dump)
+        self.vbs(__LINE__, __METHOD_NAME__, 'UUID mismatch:', first_line.chomp.dump, '≠' self.UUID.dump)
         die (
           "[ERROR]\t#{__METHOD_NAME__}: lockfile #{self.lock_name} contains foreign UUID" +
           "\n\t(only one MultiFactor process should be active in a directory)"
@@ -398,7 +409,7 @@ module MultiFactor {
           if (! defined(fh))
         fh.spurt(self.UUID)
         fh.close
-        self.vbs(__FILE__, __LINE__, __METHOD_NAME__, "created #{self.lock_name}")
+        self.vbs(__LINE__, __METHOD_NAME__, "created #{self.lock_name}")
       } else {
         # otherwise, and if the contained UUID is ours, it must be ours (right?)
         # do nothing, but warn
@@ -407,20 +418,30 @@ module MultiFactor {
     }
 
     method cleanup_lock_file {
+      const MN = __METHOD_NAME__
       self.config_setup
       if (! self.lock_name.exists) {
-        self.wrn(__FILE__, __LINE__, __METHOD_NAME__, 'Cannot stat', self.lock_name)
+        self.wrn(__LINE__, MN, 'Cannot stat', self.lock_name)
       } else {
-        self.vbs(__FILE__, __LINE__, __METHOD_NAME__, 'removing', self.lock_name)
+        self.vbs(__LINE__, MN, 'removing', self.lock_name)
         self._test_lock_file(true)
       }
     }
 
-    -> _build_factor (File vm_name) {
-      self.fbash.build_factor(vm_name)
+    -> compile_vm (File vm_name) -> Bool {
+      if ( ! self.fbash.build_factor(vm_name) ) {
+        self.cleanup_lock_file
+        die "vm compilation failed!"
+      }
+      true
     }
-    -> _build_image (File vm_name, File image_name) {
-      self.fbash.build_image(vm_name, image_name)
+
+    -> compile_image (File vm_name, File image_name) -> Bool {
+      if (! self.fbash.build_image(vm_name, image_name) ) {
+        self.cleanup_lock_file
+        die "image compilation failed!"
+      }
+      true
     }
 
     # multifactor's actual entry point
@@ -460,6 +481,7 @@ module MultiFactor {
       }
       if (! defined(builtobj_matching_source)) {
         say '!!! no match'
+        ...
         # need to generate new ID and compile
         self.cleanup_lock_file
         return nil
@@ -467,42 +489,36 @@ module MultiFactor {
       builtobj_matching_source.lock
       if (builtobj_matching_source.time_tombstoned != "never") {
         say '!!! matching entry is tombstoned!'
+        ...
         # need to generate new ID and compile
         self.cleanup_lock_file
         return nil
       }
 
-      self.vbs(__FILE__, __LINE__, MN, 'matching object in db')
+      self.vbs(__LINE__, MN, 'matching object in db')
       const String matching_blobs_name = builtobj_matching_source.id
       const (
         # could do %f( File().abs ) but that would break a concern separation
         # note: ignoring BuiltObj.vm_base_name here because it doesn't make any sense
-        matching_vm_name = self.fbash.with_directory{
-          File("#{matching_blobs_name}")
+        matching_vm_name = self.fbash.wd+File("#{matching_blobs_name}"),
+        matching_image_name = self.fbash.wd+File("#{matching_blobs_name}#{builtobj_matching_source.image_ext}")
+      )
+
+      const Hash newly_compiled = :(
+        :vm => if (! (self.fbash.wd + matching_vm_name -> exists) ) {
+          self.trc(__LINE__, MN, "vm named '#{matching_vm_name}' doesn't exist: compiling")
+          self.compile_vm(matching_vm_name)
         },
-        matching_image_name = self.fbash.with_directory{
-          File("#{matching_blobs_name}#{builtobj_matching_source.image_ext}")
+
+        :image => if (! (self.fbash.wd + matching_image_name -> exists) ) {
+          self.trc(__LINE__, MN, "image named '#{matching_image_name}' doesn't exist: compiling")
+          self.compile_image(matching_vm_name, matching_image_name)
         }
       )
 
-      const Hash newly_compiled = :( :vm => false, :image => false )
-
-      newly_compiled{:vm} = if (! self.fbash.with_directory{ matching_vm_name.exists } ) {
-        self.trc(__FILE__, __LINE__, MN, "vm named '#{matching_vm_name}' doesn't exist: compiling")
-        # ...
-        self._build_factor(matching_vm_name)
-        # self.fbash.with_directory{  }
-        true
-      }
-      newly_compiled{:image} = if (! self.fbash.with_directory{ matching_image_name.exists }) {
-        self.trc(__FILE__, __LINE__, MN, "image named '#{matching_image_name}' doesn't exist: compiling")
-        # ...
-        self._build_image(matching_vm_name, matching_image_name)
-        true
-      }
       # we know they exist now, so they are "disk files" not just "names linked to a hash"
       -> blob_file_contents_sum (File f) {
-        self.fbash.with_directory{ f.open_r.slurp.encode("utf8").decode("latin1").sha256 }
+        self.fbash.wd + f->open_r.slurp.encode("utf8").sha256
       }
       const (
         disk_vm_sum = blob_file_contents_sum(matching_vm_name),
@@ -513,21 +529,21 @@ module MultiFactor {
         image_blob_sums_match = (disk_image_sum == builtobj_matching_source.image_blob_sum)
       )
 
-      if (! (vm_blob_sums_match && image_blob_sums_match)) {
-        # due to different compiler versions
-        self.trc(__FILE__, __LINE__, MN, 'blob sums mismatch!')
+      newly_compiled.merge(if (! (vm_blob_sums_match && image_blob_sums_match)) {
+          # due to different compiler versions
+        self.trc(__LINE__, MN, 'blob sums mismatch!')
         # ???
-        newly_compiled{:vm} = newly_compiled{:vm} || if (! vm_blob_sums_match) {
-          self.trc(__FILE__, __LINE__, MN, 'recompiling VM!')
-          ... # recompile the VM
-          true
-        }
-        newly_compiled{:image} = newly_compiled{:image} || if (! image_blob_sums_match) {
-          self.trc(__FILE__, __LINE__, MN, 'recompiling image!')
-          ... # recompile the image
-          true
-        }
-      }
+        Hash(
+          :vm => newly_compiled{:vm} || if (! vm_blob_sums_match) {
+            self.trc(__LINE__, MN, 'recompiling VM!')
+            self.compile_vm(matching_vm_name)
+          },
+          :image => newly_compiled{:image} || if (! image_blob_sums_match) {
+            self.trc(__LINE__, MN, 'recompiling image!')
+            self.compile_image(matching_vm_name, matching_image_name)
+          }
+        )
+      })
       # RE-CHECK BLOB HASHES HERE
       const (
         new_disk_vm_sum = blob_file_contents_sum(matching_vm_name),
@@ -542,7 +558,7 @@ module MultiFactor {
             (! (new_vm_blob_sums_match || vm_blob_sums_match)) \
         &&  (! (new_image_blob_sums_match || image_blob_sums_match))
       ) {
-        self.trc(__FILE__, __LINE__, MN, 'blob sums still mismatched!')
+        self.trc(__LINE__, MN, 'blob sums still mismatched!')
         const tombstone_builtobj = builtobj_matching_source.dclone
         tombstone_builtobj.time_tombstoned = String(Time.sec)
 
@@ -558,25 +574,26 @@ module MultiFactor {
       # otherwise, just update the mod/access times and run count
       const new_builtobj_matching = builtobj_matching_source.dclone
       if (newly_compiled{:vm}) {
-        self.vbs(__FILE__, __LINE__, MN, 'updating db in memory because of the newly compiled VM')
+        self.vbs(__LINE__, MN, 'writing memory BuiltObj because of the newly compiled VM')
         new_builtobj_matching.vm_blob_sum(new_disk_vm_sum)
       }
       if (newly_compiled{:image}) {
-        self.vbs(__FILE__, __LINE__, MN, 'updating db in memory because of the newly compiled image')
+        self.vbs(__LINE__, MN, 'writing memory BuiltObj because of the newly compiled image')
         new_builtobj_matching.image_blob_sum(new_disk_image_sum)
       }
 
       const changed_db = if (builtobj_matching_source.dump != new_builtobj_matching.dump) {
-        self.trc(__FILE__, __LINE__, MN, 'writing the new db because it doesn\'t match the original one')
+        self.trc(__LINE__, MN, 'writing the new BuiltObj to disk db because it changed')
         self.insert_disk_db(new_builtobj_matching)
         true
       }
+
       say "Eventual successful configuration!"
       say "\tmatching_vm_name:\t'#{matching_vm_name}' #{disk_vm_sum[0..10]}...\tmatching_image_name:\t'#{matching_image_name}' #{disk_image_sum[0..10]}..."
       say "\tvm_sums_match:\t\t#{vm_blob_sums_match}/#{new_vm_blob_sums_match}"
       say "\timage_sums_match:\t#{image_blob_sums_match}/#{new_image_blob_sums_match}"
       say "\tchanged_db:\t\t#{changed_db}\t\t\tnewly_compiled: #{newly_compiled.to_s.chars.grep{|p|![\"\n\",' '].any{p==_} }.join}"
-      self.trc(__FILE__, __LINE__, MN, "ok, running factor!")
+      self.trc(__LINE__, MN, "ok, running factor!")
       # say want_vm_sum
       # db.map { .word_size("64") }
       #say db.dump
@@ -621,7 +638,7 @@ func main () {
     .option("db-path", "d", param: "path":".", doc: "Path to dir containing database") \
     .option("factor-path", "w", param: "path":".", doc: "Path to Factor working directory") \
     .option("remove-old-lock", "R", doc: "Blindly remove any old lock files (unsafe!)") \
-    .option("subcom-output", "q", negate: "Always":"Never", doc: "show subcommand outputs") \
+    .option("quiet-subcom", "q", negate: "Never":"Always", doc: "show subcommand outputs") \
     .use_option_terminator("Further arguments are given to Factor") \
     # .use_stdin_file_arg \
     # .use_arg_list_terminator \

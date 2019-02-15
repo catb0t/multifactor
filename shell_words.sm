@@ -16,13 +16,19 @@
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 module Command {
+  func spawn_se (Bool output = false, *cmdline) -> Bool {
+    $? = 0
+    var p = Pipe('unbuffer ' + cmdline.join(' ')).open_r
+    p.autoflush(true)
+    p.binmode
+    output ? p.each_char{ .print } : p.lines;
+    Number($?) == 0
+  }
   func ql (Array args) -> String {
     args.map{ "#{_.quotemeta} " }.join
   }
-  func make (output = false, *args) -> Number {
-    var p = Pipe("make -j #{ql(args)}").open_r
-    output && p.each{ .say }
-    Number($?)
+  func make (Bool output = false, *args) -> Bool {
+    Command::spawn_se('make', '-j', args..., output: output)
   }
 }
 
@@ -43,7 +49,6 @@ module BuildSh {
   }
   -> find_programs (String kind, Array ps) is cached -> String {
     say "Look for '#{kind}': #{ps.join(', ')}..."
-    # could probably optimise this by just returning the first match
     for p in ps {
       const s = `which #{p.quotemeta}`.chomp
       if (Number($?) == 0) {
@@ -92,31 +97,29 @@ module BuildSh {
     }
   }
   -> c_word_size () is cached -> String {
-    define File ws_name = %f(factor_word_size)
+    define File ws_binary = %f(factor_word_size)
     `echo '#include <stdio.h>
-int main(){printf(\"%ld\",(long)(8*sizeof(void*)));}' | #{BuildSh::cc()} -xc -o#{ws_name} -`
+    int main(){printf(\"%ld\",(long)(8*sizeof(void*)));}' | #{BuildSh::cc()} -xc -o#{ws_binary} -`
 
-    die "couldn't call the C compiler: $!" \
+    die "couldn't call the C compiler: #{$!}" \
       if (Number($?) != 0)
 
     # NOTE: can't be const, or else the value will be discarded
-    var String ws = `./#{ws_name}`
+    var String ws = `./#{ws_binary}`
     if (Number($?) != 0) {
       var e = $!
-      ws_name.remove
-      # Command::rm([ws_name])
+      ws_binary.remove
       die "couldn\'t run the word size program: $!"
     }
-    ws_name.remove
-    # Command::rm([ws_name])
+    ws_binary.remove
     ws
   }
   -> intel_macosx_word_size () is cached -> String {
-    `#{BuildSh::find_programs(:sysctl, ["sysctl"])} machdep.cpu.extfeatures | grep EM64T >/dev/null`
+    `#{BuildSh::find_programs(:sysctl, [:sysctl])} machdep.cpu.extfeatures | grep EM64T >/dev/null`
     (Number($?)==0 ? "64" : "32")
   }
   -> word_size () is cached -> String {
-    if (Sys.osname~~"macos" && BuildSh::arch_name()~~:x86) {
+    if (Sys.osname~~:macos && BuildSh::arch_name()~~:x86) {
       BuildSh::intel_macosx_word_size()
     } else {
       BuildSh::c_word_size()
@@ -137,8 +140,8 @@ int main(){printf(\"%ld\",(long)(8*sizeof(void*)));}' | #{BuildSh::cc()} -xc -o#
     )
   }
   -> current_git_branch () is cached {
-    const branch = `git rev-parse --abbrev-ref HEAD`.chomp
-    (Number($?)==0 ? branch : :master)
+    const branch = `git rev-parse --abbrev-ref HEAD`
+    (Number($?)==0 ? branch.chomp : :master)
   }
 
   -> platform_vm_name {
@@ -152,21 +155,20 @@ int main(){printf(\"%ld\",(long)(8*sizeof(void*)));}' | #{BuildSh::cc()} -xc -o#
   }
 
   -> make_clean (Bool output = false) {
-    Command::make('clean', output: output)==0
+    Command::make(:clean, output: output)
   }
 
   -> make_factor (File final_name, Bool output = false ) {
     const target = BuildSh::generate_make_targets(){:make_vm}
     say "Building '#{target}' with infinite cores"
-    const Bool retval = Command::make(target, output: output)==0
+    const Bool retval = Command::make(target, output: output)
 
     var (f_case, ext) = BuildSh::platform_vm_name()...
     retval && File("#{f_case}actor#{ext}").move(final_name)
   }
 
   -> make_clean_factor (File final_name, Bool output = false) {
-    BuildSh::make_clean(output: output)
-    BuildSh::make_factor(final_name, output: output)
+    BuildSh::make_clean(output: output) && BuildSh::make_factor(final_name, output: output)
   }
 
   define BASE_REMOTE_IMAGE_URL= 'http://downloads.factorcode.org/images/%s/%s' # branchname and file name
@@ -194,7 +196,7 @@ int main(){printf(\"%ld\",(long)(8*sizeof(void*)));}' | #{BuildSh::cc()} -xc -o#
     say "Removing old data..."
     File(CHECKSUM_FILENAME).remove
     # remove all boot images with a name like BOOT_IMAGE.{?,??}
-    File("#{boot_image_name}*").glob.grep{ _ ~~ Regex("#{boot_image_name}\.(?:.|..)") }.map{ File(_).remove }
+    File(boot_image_name + '*').glob.grep{ _ ~~ Regex("#{boot_image_name}\.(?:.|..)") }.map{ File(_).remove }
     File("temp/staging.*.image").glob.map{ File(_).remove }
 
     const File boot_image_file = File(boot_image_name)
@@ -244,7 +246,7 @@ class FactorBash (Dir wd, Bool subcommand_output = false) {
       r
     }
   }
-
+  # TODO: compare egrep with PCRE to figure out which files are being matched differently
   -> git_files_matching (String r) -> Array {
     const Array files = Pipe("git ls-files | egrep '#{r}'").open_r.map{ File(_) } # .grep{ _ ~~ r }
     die "[ERROR] #{__METHOD_NAME__}: no files matched #{r} in #{Dir.cwd}" if (! files)
@@ -255,7 +257,7 @@ class FactorBash (Dir wd, Bool subcommand_output = false) {
   # aka hash_directory_filenames
   -> sum_git_names_matching (String r) -> String {
     # allow utf-8 with SHA
-    self.git_files_matching(r).join("\n").encode("utf8").decode("latin1").sha256
+    self.git_files_matching(r).join("\n").encode("utf8").sha256
   }
 
   # TODO: make this not so slow so we don't have to use shell syntax directly
@@ -265,7 +267,7 @@ class FactorBash (Dir wd, Bool subcommand_output = false) {
       # if we sha256ed the file itself we wouldn't have to read it ourselves
       # but that would mean sha256ing each file individually which might be slower
       # and is probably not the right answer anyways
-      .open_r.slurp.encode("utf8").decode("latin1")
+      .open_r.slurp.encode("utf8")
     }.join("\n").sha256
   }
 
@@ -296,26 +298,29 @@ class FactorBash (Dir wd, Bool subcommand_output = false) {
 
   -> refresh_image (File vm_name, File image_name) {
     self.with_directory{
-      var p = Pipe("./#{vm_name} -no-user-init -i='#{image_name}' -e='USING: vocabs.loader vocabs.refresh system memory ; refresh-all save 0 exit'").open_r
-      self.subcommand_output && p.each{ .say }
-      Number($?)==0
+      Command::spawn_se(
+        './' + vm_name, '-no-user-init', "-i='#{image_name}'",
+        "-e='USING: vocabs.loader vocabs.refresh system memory ; refresh-all save 0 exit'",
+        output: self.subcommand_output
+      )
     }
   }
   -> make_boot_image (File vm_name, File image_name) {
     self.with_directory{
-      var p = Pipe("./#{vm_name} -no-user-init -i'#{image_name}' -e='USING: system bootstrap.image memory ; \"#{BuildSh::generate_make_targets\{:make_image}}\" make-image image-path save-image 0 exit'").open_r
-      self.subcommand_output && p.each{ .say }
-      Number($?)==0
+      Command::spawn_se(
+        './' + vm_name, '-no-user-init', "-i'#{image_name}'", "-e='USING: system bootstrap.image memory ;" +
+        "\"#{BuildSh::generate_make_targets(){:make_image}}\" make-image image-path save-image 0 exit'",
+        output: self.subcommand_output
+      )
     }
   }
   -> build_factor (File final_name) {
     self.with_directory{
       const ret = BuildSh::make_clean_factor(final_name, output: self.subcommand_output)
-      die "!!! Compiler error" if (! (ret && final_name.exists ))
-      ret
+      ret && final_name.exists
     }
   }
-  -> build_image (File vm_name, File image_name){
+  -> build_image (File vm_name, File image_name) {
     self.with_directory{
       const boot_image_file = File(BuildSh::generate_make_targets(){:boot_image})
 
@@ -323,16 +328,13 @@ class FactorBash (Dir wd, Bool subcommand_output = false) {
       die "[ERROR] can't find or download boot image\n\tno boot image, can't compile (sorry!)" \
         if (! have_boot_image)
 
-      say "#{boot_image_file}"
-      STDOUT.autoflush(true)
-      STDIN.autoflush(true)
+      # say "#{boot_image_file}"
       -> run_boot_image {
-        var p = Pipe("./#{vm_name} -no-user-init -i='#{boot_image_file}'").open_r
-        self.subcommand_output && p.each{ .say }
+        Command::spawn_se('./' + vm_name, '-no-user-init' "-i='#{boot_image_file}'", output: self.subcommand_output)
       }
       var count_refresh = 1
       # NOTE: STEP 1: run from boot image
-      say "image pass #{count_refresh}"
+      say "Compiling from boot image, pass \##{count_refresh}"
       run_boot_image()
 
       # NOTE: STEP 2: `refresh-all` from newly compiled image
@@ -340,7 +342,7 @@ class FactorBash (Dir wd, Bool subcommand_output = false) {
 
       # NOTE: STEP 3: re-bootstrap and refresh until it doesn't break
       for (true; image_fails_refresh && (count_refresh < 25); count_refresh++ ) {
-        say "refresh \##{count_refresh} failed! bootstrapping again..."
+        say "Boot image refresh \##{count_refresh} failed! bootstrapping again..."
 
         # NOTE: STEP 3a: new boot image
         self.make_boot_image(vm_name, image_name)
@@ -354,7 +356,7 @@ class FactorBash (Dir wd, Bool subcommand_output = false) {
       const retval = self.make_boot_image(vm_name, image_name)
       # don't delete the boot image?
       # mv boot_image my_boot_image_name
-      say "finished image compilation after #{count_refresh} refresh#{count_refresh > 1 ? '' : '' }"
+      say "finished image compilation after #{count_refresh} refresh#{count_refresh > 1 ? 'es' : '' }"
       retval
     }
   }
