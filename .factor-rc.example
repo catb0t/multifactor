@@ -1,0 +1,4 @@
+! multifactor:repo /home/cat/projects/git/factor
+! multifactor:quiet-pipe true
+! multifactor:factor-setup never-user-init save-with-user-init start-in=~ -- unimplemented
+USING: ui ui.tools.listener kernel ui.theme.switching threads ; dark-mode

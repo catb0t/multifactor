@@ -73,9 +73,6 @@ module Factor {
   }
 }
 
-# say Factor::rc_config_lines()
-# say Factor::find_config("quiet-pipe")
-
 module MultiFactor {
   # accessors are a necessity
   class BuiltObj (
