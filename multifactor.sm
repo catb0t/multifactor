@@ -40,24 +40,41 @@ define Hash SCRIPT = :(
 
 # basic variable definitions for working with Factor from a high-level perspective
 module Factor {
-  const String RC_FILE = Dir.home+%f(.factor-rc)
+  const File RC_FILE = Dir.home+%f(.factor-rc)
 
-  func find_config (name) {
-    const regex = Regex("^! multifactor:#{name} (.*)")
-    File(RC_FILE).open_r.lines.each {
-      with ( .match(regex)[0] ) { return _ }
-    }
-    die "Config 'multifactor:#{name}' not found in #{Factor::RC_FILE}"
+  func rc_config_lines () is cached -> Array {
+    Factor::RC_FILE.open_r.lines.grep{ _ ~~ /^! multifactor:/ }
   }
 
-  const Dir REPO = Dir(find_config("repo"))
+  func find_config (name) is cached -> String {
+    const regex = Regex("^! multifactor:#{name} (.*)")
+    Factor::rc_config_lines().find{ (_ =~ regex)[0] } \
+      || die "Config 'multifactor:#{name}' not found in #{Factor::RC_FILE}"
+    # File(RC_FILE).open_r.lines.each {
+    #   with ( .match(regex)[0] ) { return _ }
+    # }
+  }
+
+  const Dir REPO = Dir(Factor::find_config("repo"))
+  const Bool QUIET_PIPE = Bool(Factor::find_config("quiet-pipe"))
   const Regex VERSION_REGEX = /VERSION = ([0-9]+\.[0-9]+)/
   const String VERSION = (
-    VERSION_REGEX =~ (
-      REPO + %f(GNUmakefile)->open_r.lines.find { |l| l ~~ VERSION_REGEX }
+    Factor::VERSION_REGEX =~ (
+      REPO + %f(GNUmakefile)->open_r.lines.find { |l| l ~~ Factor::VERSION_REGEX }
     )
   )[0]
+
+  # ???
+  func say_stderr (*args) {
+    if (STDOUT.is_on_tty || (!STDOUT.is_on_tty && !Factor::QUIET_PIPE)) {
+      STDERR.say(args...)
+    }
+    # else, not a TTY and quiet-pipe is true
+  }
 }
+
+# say Factor::rc_config_lines()
+# say Factor::find_config("quiet-pipe")
 
 module MultiFactor {
   # accessors are a necessity
@@ -81,8 +98,8 @@ module MultiFactor {
     String _vm_base_name = :factor, # usually "factor"
     String _image_ext = '.image',   # usually ".image"
     String _sum_algorithm = :sha256, # usually sha256
-    Bool   _lk = false,              # object locking
-    String _failwrite = 'attempted writing to locked BuiltObj object!'
+    Bool   _lk = false,             # object locking
+    String _fail = 'attempted writing to locked BuiltObj object!'
   ) {
     -> lock () -> BuiltObj { self._lk = true; self }
     -> unlock () -> BuiltObj { self._lk = false; self }
@@ -105,24 +122,24 @@ module MultiFactor {
     -> time_mod_access () -> Str { self._time_mod_access }
     -> time_tombstoned () -> Str { self._time_tombstoned }
 
-    -> id (Str id)                { die _failwrite if (self._lk); self._id = id               ; self }
-    -> git_branch (Str gb)        { die _failwrite if (self._lk); self._git_branch = gb       ; self }
-    -> git_hash (Str hs)          { die _failwrite if (self._lk); self._git_hash = hs         ; self }
-    -> os_type (Str os)           { die _failwrite if (self._lk); self._os_type = os          ; self }
-    -> os_name (Str os)           { die _failwrite if (self._lk); self._os_name = os          ; self }
-    -> arch_name (Str an)         { die _failwrite if (self._lk); self._arch_name = an        ; self }
-    -> word_size (Str ws)         { die _failwrite if (self._lk); self._word_size = ws        ; self }
-    -> sum_vm_names (Str x)       { die _failwrite if (self._lk); self._sum_vm_names = x      ; self }
-    -> sum_vm_contents (Str x)    { die _failwrite if (self._lk); self._sum_vm_contents = x   ; self }
-    -> sum_image_names (Str x)    { die _failwrite if (self._lk); self._sum_image_names = x   ; self }
-    -> sum_image_contents (Str x) { die _failwrite if (self._lk); self._sum_image_contents = x; self }
-    -> vm_blob_sum (Str x)        { die _failwrite if (self._lk); self._vm_blob_sum = x       ; self }
-    -> image_blob_sum (Str x)     { die _failwrite if (self._lk); self._image_blob_sum = x    ; self }
-    -> vm_base_name (Str x)       { die _failwrite if (self._lk); self._vm_base_name = x      ; self }
-    -> image_ext (Str x)          { die _failwrite if (self._lk); self._image_ext = x         ; self }
-    -> time_created (Str x)       { die _failwrite if (self._lk); self._time_created = x      ; self }
-    -> time_mod_access (Str x)    { die _failwrite if (self._lk); self._time_mod_access = x   ; self }
-    -> time_tombstoned (Str x)    { die _failwrite if (self._lk); self._time_tombstoned = x   ; self }
+    -> id (Str id)                { die self._fail if (self._lk); self._id = id               ; self }
+    -> git_branch (Str gb)        { die self._fail if (self._lk); self._git_branch = gb       ; self }
+    -> git_hash (Str hs)          { die self._fail if (self._lk); self._git_hash = hs         ; self }
+    -> os_type (Str os)           { die self._fail if (self._lk); self._os_type = os          ; self }
+    -> os_name (Str os)           { die self._fail if (self._lk); self._os_name = os          ; self }
+    -> arch_name (Str an)         { die self._fail if (self._lk); self._arch_name = an        ; self }
+    -> word_size (Str ws)         { die self._fail if (self._lk); self._word_size = ws        ; self }
+    -> sum_vm_names (Str x)       { die self._fail if (self._lk); self._sum_vm_names = x      ; self }
+    -> sum_vm_contents (Str x)    { die self._fail if (self._lk); self._sum_vm_contents = x   ; self }
+    -> sum_image_names (Str x)    { die self._fail if (self._lk); self._sum_image_names = x   ; self }
+    -> sum_image_contents (Str x) { die self._fail if (self._lk); self._sum_image_contents = x; self }
+    -> vm_blob_sum (Str x)        { die self._fail if (self._lk); self._vm_blob_sum = x       ; self }
+    -> image_blob_sum (Str x)     { die self._fail if (self._lk); self._image_blob_sum = x    ; self }
+    -> vm_base_name (Str x)       { die self._fail if (self._lk); self._vm_base_name = x      ; self }
+    -> image_ext (Str x)          { die self._fail if (self._lk); self._image_ext = x         ; self }
+    -> time_created (Str x)       { die self._fail if (self._lk); self._time_created = x      ; self }
+    -> time_mod_access (Str x)    { die self._fail if (self._lk); self._time_mod_access = x   ; self }
+    -> time_tombstoned (Str x)    { die self._fail if (self._lk); self._time_tombstoned = x   ; self }
   }
 
   include Factor
@@ -233,6 +250,7 @@ module MultiFactor {
     has Bool _config_setup_done = false # whether the following variables have been written
     has Str lock_ext = ".multifactor_lock"
     has Str lock_name
+    has Str action
 
     has Bool force
     has Bool trace
@@ -254,17 +272,18 @@ module MultiFactor {
     has File db
 
     has Dir factor_path
-    has FactorBash fbash
+    has shell_words::FactorBash fbash
 
     has String _UUID
     -> UUID () -> String { self._UUID }
     -> UUID (String u) -> MultiFactor::Runtime { self._UUID = u; self }
 
     -> _bn { File(__FILE__).basename.split(".")[0] }
-    -> wrn (Num l, Str m, *args) { warn "[WARN]\t#{l}: #{m}: #{args.join(' ')}" }
-    -> inf (Num l, Str m, *args) { say "[INFO]\t#{l}: #{m}: #{args.join(' ')}" }
-    -> trc (Num l, Str m, *args) { say "[TRACE]\t#{l}: #{m}: #{args.join(' ')}" if (self.trace) }
-    -> vbs (Num l, Str m, *args) { say "[VBOSE]\t#{l}: #{m}: #{args.join(' ')}" if (self.verbose) }
+    -> _log (*a) { Factor::say_stderr(a...) }
+    -> wrn (Num l, Str m, *args) { say "[WARN]\t#{l}: #{m}: #{args.join(' ')}" }
+    -> inf (Num l, Str m, *args) { self._log("[INFO]\t", l, ': ', m, ': ', args.join(' ')) }
+    -> trc (Num l, Str m, *args) { self._log("[TRACE]\t", l, ': ', m, ': ', args.join(' ')) if (self.trace) }
+    -> vbs (Num l, Str m, *args) { self._log("[VBOSE]\t", l, ': ', m, ': ', args.join(' ')) if (self.verbose) }
     # more verbose than trace ^^^
 
     method config_setup {
@@ -280,7 +299,7 @@ module MultiFactor {
           self.factor_path,
           subcommand_output: Bool( ! self.options\{'quiet-subcom'} )
         )
-        self.UUID(FactorBashStateless::make_uuid())
+        self.UUID( FactorBashStateless::make_uuid() )
 
         self.force = Bool(self.options\{:force})
         self.dry_run = Bool(self.options(){'dry-run'})
@@ -303,6 +322,8 @@ module MultiFactor {
           if (self.lock_name.exists) { self.lock_name.remove }
         }
 
+        self.action = self.options\{:action}
+
         self._config_setup_done = true
         self.trc(__LINE__, __METHOD_NAME__, "finished configuration, wd now: '#{self.db_path}'")
       }
@@ -317,14 +338,12 @@ module MultiFactor {
       say "\tFactor arguments: #{self.factor_arguments}"
     }
 
-    method capture_write_disk (Block operation) {
-      say "caller:"+Perl.eval("sub a { caller(1); }; sub b{ a() } my %data = (result => b()); \\%data")
-      ...
+    method capture_write_disk (String caller_name, Block operation) {
       if (! self.dry_run) {
-        self.vbs(__LINE__, __METHOD_NAME__, "writing disk with", 'operation')
+        self.vbs(__LINE__, __METHOD_NAME__, "#{caller_name}: writing disk with", operation)
         return operation.run
       }
-      self.vbs(__LINE__, __METHOD_NAME__, "#not writing disk (dry run)")
+      self.vbs(__LINE__, __METHOD_NAME__, "#{caller_name}: not writing disk (dry run)")
       nil
     }
 
@@ -346,11 +365,12 @@ module MultiFactor {
     }
 
     method write_disk_db (Hash new_data) {
+      const MN = __METHOD_NAME__
       self.config_setup
-      self.trc(__LINE__, __METHOD_NAME__, 'writing', self.db)
+      self.trc(__LINE__, MN, 'writing', self.db)
 
       if ( defined(new_data) && Bool(new_data) && new_data.values.all{_ ~~ BuiltObj} ) {
-        self.capture_write_disk( { MultiFactor::_write_disk_db(self.db, new_data) } ) #, __METHOD_NAME__ )
+        self.capture_write_disk(MN, { MultiFactor::_write_disk_db(self.db, new_data) } ) #, __METHOD_NAME__ )
       } else {
         self.cleanup_lock_file
         die "[ERROR]\t#{__METHOD_NAME__}: garbage argument #{new_data}"
@@ -404,10 +424,10 @@ module MultiFactor {
       self.config_setup
 
       die "[ERROR]\t#{__METHOD_NAME__}: empty dbname! lock_name was #{self.lock_name}" \
-        if (self.lock_name.to_s == lock_ext)
+        if (self.lock_name.to_s == self.lock_ext)
       # if it doesn't exist, create it with our UUID
       if (! self.lock_name.exists) {
-        const File fh = lock_name.create
+        const File fh = self.lock_name.create
         die "[ERROR]\t#{__METHOD_NAME__}: failed to create lockfile #{self.lock_name}: $!" \
           if (! defined(fh))
         fh.spurt(self.UUID)
@@ -469,8 +489,17 @@ module MultiFactor {
         vm_sums = self.fbash.sum_vm_source,
         image_sums = self.fbash.sum_image_source
       )
-      # say "vm: #{vm_sums}"
-      # say "image: #{image_sums}"
+
+      given (self.action) {
+        when ("src-sums") {
+          self.fbash.say_src_sums
+          return self.cleanup_lock_file
+        }
+        when ("env-info") {
+          self.fbash.say_env_info
+          return self.cleanup_lock_file
+        }
+      }
 
       const db_data = self.load_db
       const builtobj_matching_source = db_data.values.find{
@@ -486,16 +515,14 @@ module MultiFactor {
         say '!!! no match'
         ...
         # need to generate new ID and compile
-        self.cleanup_lock_file
-        return nil
+        return self.cleanup_lock_file
       }
       builtobj_matching_source.lock
       if (builtobj_matching_source.time_tombstoned != "never") {
         say '!!! matching entry is tombstoned!'
         ...
         # need to generate new ID and compile
-        self.cleanup_lock_file
-        return nil
+        return self.cleanup_lock_file
       }
 
       self.vbs(__LINE__, MN, 'matching object in db')
@@ -567,9 +594,8 @@ module MultiFactor {
         tombstone_builtobj.time_tombstoned(Time |> :sec |> :to_s)
 
         self.insert_disk_db(tombstone_builtobj)
-        self.capture_write_disk{ matching_vm_name.remove, matching_image_name.remove }
-        self.cleanup_lock_file
-        return nil
+        self.capture_write_disk(MN, { matching_vm_name.remove, matching_image_name.remove })
+        return self.cleanup_lock_file
       }
 
       # OK, going to update the DB and run Factor
@@ -652,6 +678,10 @@ func main () {
     .option("factor-path", "w", param: "path":".", doc: "Path to Factor working directory") \
     .option("remove-old-lock", "R", doc: "Blindly remove any old lock files (unsafe!)") \
     .option("quiet-subcom", "q", negate: "Never":"Always", doc: "show subcommand outputs") \
+    .option(
+      "action", "a", param: "name":"run-factor",
+      doc: "Perform this action\nactions: run-factor, src-sums, env-info"
+    ) \
     .use_option_terminator("Further arguments are given to Factor") \
     # .use_stdin_file_arg \
     # .use_arg_list_terminator \
@@ -667,7 +697,7 @@ func main () {
   # r.show_info()
   r.go()
 
-  say "\n\tΔ#{μsec(μs)} ×1,000μ"
+  Factor::say_stderr("\n\tΔ#{μsec(μs)} ×1,000μ")
 }
 
 if (__FILE__ == __MAIN__) {

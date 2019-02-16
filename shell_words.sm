@@ -49,11 +49,11 @@ module BuildSh {
     false
   }
   -> find_programs (String kind, Array ps) is cached -> String {
-    say "Look for '#{kind}': #{ps.join(', ')}..."
+    STDERR.say("Look for '#{kind}': #{ps.join(', ')}...")
     for p in ps {
       const s = `which #{p.quotemeta}`.chomp
       if (Number($?) == 0) {
-        say "\tfound #{s}"
+        STDERR.say("    found #{s}")
         return s
       }
     }
@@ -146,7 +146,7 @@ module BuildSh {
     (Number($?)==0 ? branch.chomp : :master)
   }
 
-  -> platform_vm_name {
+  -> platform_vm_name () is cached {
     [
       (Sys.osname~~/darwin/ ? 'F' : 'f'),
       given ( Sys.osname ) {
@@ -257,14 +257,14 @@ class FactorBash (Dir wd, Bool subcommand_output = false) {
   }
 
   # aka hash_directory_filenames
-  -> sum_git_names_matching (String r) -> String {
+  -> sum_git_names_matching (String r) is cached -> String {
     # allow utf-8 with SHA
     self.git_files_matching(r).join("\n").encode("utf8").sha256
   }
 
   # TODO: make this not so slow so we don't have to use shell syntax directly
   # aka hash_directory_contents
-  -> sum_git_contents_matching_native (String r) -> String {
+  -> sum_git_contents_matching (String r) is cached -> String {
     self.git_files_matching(r).map{
       # if we sha256ed the file itself we wouldn't have to read it ourselves
       # but that would mean sha256ing each file individually which might be slower
@@ -279,23 +279,44 @@ class FactorBash (Dir wd, Bool subcommand_output = false) {
   # }
 
   # c++ files
-  ->  sum_vm_source {
+  ->  sum_vm_source () is cached {
     self.with_directory{
       Hash(
         :names => self.sum_git_names_matching(VM_DIR_REGEX),
-        :contents => self.sum_git_contents_matching_native(VM_DIR_REGEX)
+        :contents => self.sum_git_contents_matching(VM_DIR_REGEX)
       )
     }
   }
 
   # .factor files
-  -> sum_image_source {
+  -> sum_image_source () is cached {
     self.with_directory{
       Hash(
         :names => self.sum_git_names_matching(IMAGE_DIR_REGEX),
-        :contents => self.sum_git_contents_matching_native(IMAGE_DIR_REGEX)
+        :contents => self.sum_git_contents_matching(IMAGE_DIR_REGEX)
       )
     }
+  }
+
+  -> say_src_sums {
+    say "#{self.sum_vm_source\{:names}}  vm_names"
+    say "#{self.sum_vm_source\{:contents}}  vm_contents"
+    say "#{self.sum_image_source\{:names}}  image_names"
+    say "#{self.sum_image_source\{:contents}}  image_contents"
+  }
+
+  -> say_env_info {
+    const p = BuildSh::platform_vm_name()
+    var cc = BuildSh::cc()
+    var cxx = BuildSh::cxx()
+    say "cc=#{cc}"
+    say "cxx=#{cxx}"
+    say "os_type=#{BuildSh::os_type()}"
+    say "os_name=#{BuildSh::os_name()}"
+    say "arch_name=#{BuildSh::arch_name()}"
+    say "word_size=#{BuildSh::word_size()}"
+    say "git_branch=#{BuildSh::current_git_branch()}"
+    say "platform_vm_name=#{p.first}actor#{p.second}"
   }
 
   -> refresh_image (File vm_name, File image_name) {

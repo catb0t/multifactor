@@ -118,6 +118,16 @@ class ArgParse (argv: Array) {
   #   (named positional arg, named arg, positional arg, non-named non-positional)
   # TODO: want caller of parser.go to be able to tell exactly which options forms
   #   were on the command line (long/short and the syntax) to inform the user
+  # $ sidef -kP8 multifactor.sm -RVw=../factor -a=src-sums
+  # Hash(
+  #     "action" => "src-sums",
+  #     "db-name" => ".multifactor.db",
+  #     "db-path" => ".",
+  #     "factor-path" => true,
+  #     "remove-old-lock" => "../factor",
+  #     "verbose" => true
+  # )
+
   method option (
     String long_name,
     String short_name = false,
@@ -339,7 +349,7 @@ class ArgParse (argv: Array) {
         err = [
           "#{lead} ArgParse: don't know #{length} option#{length==:short ? ' group' : nil} (param \##{nr}): #{name}",
           self.usage_short,
-          "Try -#{self.HELP_NAME.second} / --#{self.HELP_NAME.first} for more information.\n" 
+          "Try -#{self.HELP_NAME.second} / --#{self.HELP_NAME.first} for more information.\n"
         ].join("\n")
       )
       if (self.unknown_is_error) {
