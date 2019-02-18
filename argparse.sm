@@ -118,7 +118,7 @@ class ArgParse (argv: Array) {
   #   (named positional arg, named arg, positional arg, non-named non-positional)
   # TODO: want caller of parser.go to be able to tell exactly which options forms
   #   were on the command line (long/short and the syntax) to inform the user
-  # $ sidef -kP8 multifactor.sm -RVw=../factor -a=src-sums
+  # TODO: bug: $ sidef -kP8 multifactor.sm -RVw=../factor -a=src-sums
   # Hash(
   #     "action" => "src-sums",
   #     "db-name" => ".multifactor.db",

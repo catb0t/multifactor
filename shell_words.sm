@@ -16,14 +16,33 @@
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 module Command {
+  define Regex RETVAL_REGEX = /__RETURNED=(\d+)/
+
   func spawn_se (Bool output = false, *cmdline) -> Bool {
-    $? = 0
-    var p = Pipe(cmdline.join(' ')).open_r
-    p.autoflush(true)
-    p.binmode
     $| = 1
-    output ? p.each_char{ .print } : p.lines;
-    Number($?) == 0
+
+    STDERR.say("\t\b\b\b-> #{cmdline.join(' ')}")
+    0 == Number(
+      (Pipe( [cmdline..., ";", "echo", '"__RETURNED=$?\n"'].join(' ') ) \
+        .open_r.cleave(
+          { .autoflush(true) },
+          { "\n\t\t".print if (output) }
+          {
+            var c = ''
+            .each_char{
+                |b|
+              if (output) {
+                if (c.last == "\n") { "\t\t".print }
+                b.print
+              }
+              c += b
+            }
+            c
+          },
+        ).last \
+        .lines.find{ _ ~~ RETVAL_REGEX } =~ RETVAL_REGEX
+      )[0].to_n
+    )
   }
   func ql (Array args) -> String {
     args.map{ "#{_.quotemeta} " }.join
@@ -36,17 +55,18 @@ module Command {
 # `build.sh` bash functions
 # THEIR utilities, re-implemented in Sidef
 module BuildSh {
+
+  define Regex VERSION_REGEX = /VERSION = ([0-9]+\.[0-9]+)/
+  define File GNU_MAKEFILE = %f(GNUmakefile)
+  define String NOT_A_GIT_REPO = '^~not a git repository~^'
+
   include Command
   -> downloader {
     'LWP::UserAgent'.require.new(show_progress => 1)
   }
   -> make_http_request (url) {
     var resp = BuildSh::downloader().get(url)
-
-    if (resp.is_success) {
-      resp.decoded_content
-    }
-    false
+    resp.is_success ? resp.decoded_content : false
   }
   -> find_programs (String kind, Array ps) is cached -> String {
     STDERR.say("Look for '#{kind}': #{ps.join(', ')}...")
@@ -74,24 +94,24 @@ module BuildSh {
   -> os_name () is cached -> String {
     given (Sys.osname) {
       when (/(?:windows|cygwin)/i) { :windows }
-      when (:darwin) { continue }
-      when (:macos) { :macos }
-      when (:mingw) { continue }
-      when (:linux) { :linux }
-      when (/bsd/i) { :bsd }
+      when (/(?:macos|darwin)/)  { :macos }
+      when (/(?:linux|mingw)/)  { :linux }
+      when (:bsd)               { :bsd }
+      when (:haiku)             { :haiku }
       default { die "Unknown osname: #{Sys.osname}" }
     }
   }
   -> os_type () is cached -> String {
-    given (Sys.osname) {
+    given ( BuildSh::os_name() ) {
       when (/(?:linux|darwin|macos|bsd|mingw)/i) { :unix }
       when (/(?:windows|cygwin)/i) { :windows }
+      case ( %w(haiku).contains(_) ) { BuildSh::os_name() }
       default { die "Can't convert osname to os_type: #{Sys.osname}" }
     }
   }
   -> arch_name () is cached -> String {
     const uname = `uname -m`.chomp
-    if ([:ppc64, "Power Macintosh"].any{ uname.contains(_) }) {
+    if ( [:ppc64, "Power Macintosh"].any{ uname.contains(_) } ) {
       :ppc
     } else {
       :x86
@@ -110,17 +130,17 @@ module BuildSh {
     if (Number($?) != 0) {
       var e = $!
       ws_binary.remove
-      die "couldn\'t run the word size program: $!"
+      die "couldn't run the word size program: #{e}"
     }
     ws_binary.remove
     ws
   }
   -> intel_macosx_word_size () is cached -> String {
     `#{BuildSh::find_programs(:sysctl, [:sysctl])} machdep.cpu.extfeatures | grep EM64T >/dev/null`
-    (Number($?)==0 ? "64" : "32")
+    (Number($?)==0 ? :64 : :32)
   }
   -> word_size () is cached -> String {
-    if (Sys.osname~~:macos && BuildSh::arch_name()~~:x86) {
+    if (BuildSh::os_name()~~:macos && BuildSh::arch_name()~~:x86) {
       BuildSh::intel_macosx_word_size()
     } else {
       BuildSh::c_word_size()
@@ -141,19 +161,59 @@ module BuildSh {
       :boot_image => "boot.#{ot}-#{an}.#{ws}.image", # BOOT_IMAGE
     )
   }
-  -> current_git_branch () is cached {
-    const branch = `git rev-parse --abbrev-ref HEAD`
-    (Number($?)==0 ? branch.chomp : :master)
+
+  # lots of things aren't allowed in a git branchname
+  # see `man git check-ref-format` and https://stackoverflow.com/a/3651867/4532996
+  # we're going to use just ~ and ^ internally to identify non-git strings
+  -> is_git_ref_name (Str b) is cached {
+    b!=BuildSh::NOT_A_GIT_REPO && !( ['~', '^'].any{ b.contains(_) } )
   }
 
-  -> platform_vm_name () is cached {
+  # check the outputs of these with is_git_ref_name:
+
+  # returning `nil` from these is not an option, because `nil` is an empty string
+  -> git_branch () is cached {
+    const branch = `git rev-parse --abbrev-ref HEAD`
+    (Number($?)==0 ? branch.chomp : BuildSh::NOT_A_GIT_REPO)
+  }
+
+  -> git_hash () is cached {
+    const hash = `git rev-parse HEAD`
+    (Number($?)==0 ? hash.chomp : BuildSh::NOT_A_GIT_REPO)
+  }
+
+  -> try_git (Str operation, Str caller_name, Bool fatal = true) is cached {
+    const git_output = eval("BuildSh::git_#{operation}")()
+    if (! BuildSh::is_git_ref_name(git_output) ) {
+      die "[FATAL] #{__FUNC_NAME__}: git_#{operation}: #{caller_name} requires #{Dir.cwd} to be a git repository" if (fatal)
+      return false
+    }
+    git_output
+  }
+
+  -> is_git () is cached -> Bool {
+    [:branch, :hash].all{ BuildSh::try_git(_, __FUNC_NAME__, fatal: false) }
+  }
+
+  -> platform_vm_name () is cached -> Array {
     [
-      (Sys.osname~~/darwin/ ? 'F' : 'f'),
+      (Sys.osname~~/darwin/ ? "F" : "f"),
       given ( Sys.osname ) {
         when (/(?:windows|cygwin)/i) { ".exe" }
         when (/darwin/i) { ".app" }
+        default { "" }
       }
     ]
+  }
+
+  -> vm_ext () is cached -> String {
+    BuildSh::platform_vm_name().second
+  }
+
+  -> factor_version () is cached {
+    const result = BuildSh::GNU_MAKEFILE.open_r.lines.find{ _ ~~ BuildSh::VERSION_REGEX } \
+      || die "[FATAL] #{__FUNC_NAME__}: can't find a VERSION in GNUmakefile #{BuildSh::GNU_MAKEFILE.abs}"
+    (BuildSh::VERSION_REGEX =~ result)[0]
   }
 
   -> make_clean (Bool output = false) {
@@ -161,24 +221,25 @@ module BuildSh {
   }
 
   -> make_factor (File final_name, Bool output = false ) {
-    const target = BuildSh::generate_make_targets(){:make_vm}
-    say "Building '#{target}' with infinite cores"
-    const Bool retval = Command::make(target, output: output)
-
     var (f_case, ext) = BuildSh::platform_vm_name()...
-    retval && File("#{f_case}actor#{ext}").move(final_name)
+
+    BuildSh::generate_make_targets(){:make_vm} -> cleave(
+      { say "Building '#{_}' with infinite cores" },
+      { Command::make(_, output: output) }
+    ).last && File("#{f_case}actor#{ext}").move(final_name)
   }
 
   -> make_clean_factor (File final_name, Bool output = false) {
     BuildSh::make_clean(output: output) && BuildSh::make_factor(final_name, output: output)
   }
 
-  define BASE_REMOTE_IMAGE_URL= 'http://downloads.factorcode.org/images/%s/%s' # branchname and file name
+  # branchname and file name
+  define BASE_REMOTE_IMAGE_URL = 'http://downloads.factorcode.org/images/%s/%s'
   define CHECKSUM_FILENAME = 'checksums.txt'
   # aka set_boot_image_vars
   -> boot_image_urls () is cached {
-    const curbranch_file_url = -> (String filename, Bool use_non_master = true) is cached {
-      BASE_REMOTE_IMAGE_URL.sprintf( (use_non_master ? BuildSh::current_git_branch() : :master), filename )
+    -> curbranch_file_url (String filename, Bool use_non_master = true) is cached {
+      BASE_REMOTE_IMAGE_URL.sprintf( (use_non_master ? BuildSh::try_git(:branch, __FUNC_NAME__) : :master), filename )
     }
 
     const non_master_branch_ok = Bool( BuildSh::make_http_request( curbranch_file_url(CHECKSUM_FILENAME) ) )
@@ -188,9 +249,33 @@ module BuildSh {
     )
   }
 
+  -> process_checksums_file (String data, String want_name) {
+    data.lines.find{ .contains(want_name) }.split(" ").second
+  }
+
   -> get_boot_image {
-    say "Downloading #{BuildSh::generate_make_targets(){:boot_image}}"
-    BuildSh::make_http_request( BuildSh::boot_image_urls(){:boot_image_url} )
+    const File boot_image_file = File( BuildSh::generate_make_targets(){:boot_image} )
+    say "Downloading boot image file #{boot_image_file}"
+
+    const boot_image_urls = BuildSh::boot_image_urls()
+
+    const boot_image_data = BuildSh::make_http_request( boot_image_urls{:boot_image_url} )
+    const download_md5 = boot_image_data.md5
+
+    const remote_checksum_data = BuildSh::make_http_request( boot_image_urls{:checksum} )
+    if (! remote_checksum_data) {
+      say "Can't download, can't checksum"
+      return false
+    }
+    const remote_md5 = BuildSh::process_checksums_file(remote_checksum_data, boot_image_file)
+
+    say "boot image sums: #{remote_md5} / #{download_md5}"
+    if (remote_md5 != download_md5) { die "!!! downloaded checksum mismatch !!!" }
+
+    boot_image_file.touch.cleave(
+      { .binmode },
+      { .spurt( boot_image_data ) }
+    )
   }
 
   -> update_boot_image {
@@ -198,20 +283,25 @@ module BuildSh {
     say "Removing old data..."
     File(CHECKSUM_FILENAME).remove
     # remove all boot images with a name like BOOT_IMAGE.{?,??}
-    File(boot_image_name + '*').glob.grep{ _ ~~ Regex("#{boot_image_name}\.(?:.|..)") }.map{ File(_).remove }
+    # File(boot_image_name + '*').glob.grep{ _ ~~ Regex("#{boot_image_name}\.(?:.|..)") }.map{ File(_).remove }
     File("temp/staging.*.image").glob.map{ File(_).remove }
 
     const File boot_image_file = File(boot_image_name)
+    say "Processing #{boot_image_file}"
 
     if ( boot_image_file.exists ) {
       const boot_image_urls = BuildSh::boot_image_urls()
       const remote_checksum_data = BuildSh::make_http_request( boot_image_urls{:checksum} )
-      const remote_md5 = remote_checksum_data.lines.find{ .contains(boot_image_name) }.split(" ").first
+      if (! remote_checksum_data) {
+        say "Can't download, can't checksum"
+        return false
+      }
+      const remote_md5 = BuildSh::process_checksums_file(remote_checksum_data, boot_image_file)
 
       const local_md5 = boot_image_file.md5
       say "boot image sums: #{remote_md5} / #{local_md5}"
 
-      if (! (remote_md5 == local_md5)) {
+      if (remote_md5 != local_md5) {
         say "\t!!! mismatch !!! "
         File(boot_image_name).remove
         return BuildSh::get_boot_image()
@@ -229,12 +319,24 @@ module FactorBashStateless {
   }
 }
 
-class FactorBash (Dir wd, Bool subcommand_output = false) {
-  define String VM_DIR_REGEX = '^vm/'
-  define String IMAGE_DIR_REGEX = '^(?:core|basis)/'
+class SrcSums (Str algo = '', Str names = '', Str contents = '') {
+  method == (other) {
+    if (other.class == self.class) {
+      # props.map{ other.method(_) == self.method(_) }.all{ _ }
+      [self.algo, self.names, self.contents] ~Z== [other.algo, other.names, other.contents] -> all{ _ }
+    } else {
+      const props = [:algo, :names, :contents]
+      props.map{ other{_} == self{_} }.all{ _ } # ??
+    }
+  }
+}
 
-  # define Regex VM_DIR_REGEX = /^vm\//
-  # define Regex IMAGE_DIR_REGEX = /^(?:core|basis)\//
+class FactorBash (Dir wd, Bool subcommand_output = false) {
+  # in POSIX, longest wins
+  # in PCRE, "leftmost" wins
+  # these are strings until the differences are sorted
+  define String VM_DIR_REGEX = "^vm/"
+  define String IMAGE_DIR_REGEX = "^(?:core|basis)/"
 
   -> with_directory (Block operation) {
     # SIDEF BUG: if this is `const oldwd`, the old working directory is never restored
@@ -250,27 +352,27 @@ class FactorBash (Dir wd, Bool subcommand_output = false) {
   }
   # TODO: compare egrep with PCRE to figure out which files are being matched differently
   -> git_files_matching (String r) -> Array {
-    const Array files = Pipe("git ls-files | egrep '#{r}'").open_r.map{ File(_) } # .grep{ _ ~~ r }
-    die "[ERROR] #{__METHOD_NAME__}: no files matched #{r} in #{Dir.cwd}" if (! files)
+    const Array files = Pipe("git ls-files | egrep '#{r}'").open_r.map{ File(_ ) } # .grep{ _ ~~ r }
+    die "[FATAL] #{__METHOD_NAME__}: no files matched #{r} in #{Dir.cwd}" if (! files)
     # say "git listing #{files.len} files: #{r}"
     files
   }
 
   # aka hash_directory_filenames
-  -> sum_git_names_matching (String r) is cached -> String {
+  -> sum_git_names_matching (String r, algo) is cached -> String {
     # allow utf-8 with SHA
-    self.git_files_matching(r).join("\n").encode("utf8").sha256
+    self.git_files_matching(r).join("\n").encode("utf8") |> algo
   }
 
   # TODO: make this not so slow so we don't have to use shell syntax directly
   # aka hash_directory_contents
-  -> sum_git_contents_matching (String r) is cached -> String {
+  -> sum_git_contents_matching (String r, algo) is cached -> String {
     self.git_files_matching(r).map{
       # if we sha256ed the file itself we wouldn't have to read it ourselves
       # but that would mean sha256ing each file individually which might be slower
       # and is probably not the right answer anyways
       .open_r.slurp.encode("utf8")
-    }.join("\n").sha256
+    }.join("\n") |> algo
   }
 
   # -> sum_git_contents_matching_shell (String r) -> String {
@@ -278,31 +380,47 @@ class FactorBash (Dir wd, Bool subcommand_output = false) {
   #   `git ls-files | egrep '#{r}' | xargs cat | sha256sum | cut -f1 -d' '`.chomp
   # }
 
+  # TODO: don't hardcode sha256
+
   # c++ files
-  ->  sum_vm_source () is cached {
+  -> vm_sums (algo = :sha256) is cached -> SrcSums {
     self.with_directory{
-      Hash(
-        :names => self.sum_git_names_matching(VM_DIR_REGEX),
-        :contents => self.sum_git_contents_matching(VM_DIR_REGEX)
+      SrcSums(
+        algo: algo,
+        names: self.sum_git_names_matching(VM_DIR_REGEX, algo: algo),
+        contents: self.sum_git_contents_matching(VM_DIR_REGEX, algo: algo)
       )
     }
   }
 
   # .factor files
-  -> sum_image_source () is cached {
+  -> image_sums (algo = :sha256) is cached -> SrcSums {
     self.with_directory{
-      Hash(
-        :names => self.sum_git_names_matching(IMAGE_DIR_REGEX),
-        :contents => self.sum_git_contents_matching(IMAGE_DIR_REGEX)
+      SrcSums(
+        algo: algo,
+        names: self.sum_git_names_matching(IMAGE_DIR_REGEX, algo: algo),
+        contents: self.sum_git_contents_matching(IMAGE_DIR_REGEX, algo: algo)
       )
     }
   }
 
+  -> delegate (String name, Block default = {}, args = ()) {
+    var fn
+    try { fn = eval("BuildSh::#{name}") } catch {}
+    if ( self |> :methods |> :keys |> (:contains, name) ) {
+      self.method(name)(@|args)
+    } elsif (fn) {
+      self.with_directory{ fn() }
+    } else {
+      default.run(@|args)
+    }
+  }
+
   -> say_src_sums {
-    say "#{self.sum_vm_source\{:names}}  vm_names"
-    say "#{self.sum_vm_source\{:contents}}  vm_contents"
-    say "#{self.sum_image_source\{:names}}  image_names"
-    say "#{self.sum_image_source\{:contents}}  image_contents"
+    say "#{self.vm_sums.names}  vm_names"
+    say "#{self.vm_sums.contents}  vm_contents"
+    say "#{self.image_sums.names}  image_names"
+    say "#{self.image_sums.contents}  image_contents"
   }
 
   -> say_env_info {
@@ -314,9 +432,11 @@ class FactorBash (Dir wd, Bool subcommand_output = false) {
     say "os_type=#{BuildSh::os_type()}"
     say "os_name=#{BuildSh::os_name()}"
     say "arch_name=#{BuildSh::arch_name()}"
-    say "word_size=#{BuildSh::word_size()}"
-    say "git_branch=#{BuildSh::current_git_branch()}"
+    say "word_size=#{self.delegate(:word_size)}"
+    say "git_branch=#{self.delegate(:git_branch)}"
+    say "git_hash=#{self.delegate(:git_hash)}"
     say "platform_vm_name=#{p.first}actor#{p.second}"
+    say "factor_version=#{self.delegate(:factor_version)}"
   }
 
   -> refresh_image (File vm_name, File image_name) {
@@ -331,7 +451,7 @@ class FactorBash (Dir wd, Bool subcommand_output = false) {
   -> make_boot_image (File vm_name, File image_name) {
     self.with_directory{
       Command::spawn_se(
-        './' + vm_name, '-no-user-init', "-i'#{image_name}'", "-e='USING: system bootstrap.image memory ; " +
+        './' + vm_name, '-no-user-init', "-i='#{image_name}'", "-e='USING: system bootstrap.image memory ; " +
         "\"#{BuildSh::generate_make_targets(){:boot_image_base}}\" make-image image-path save-image 0 exit'",
         output: self.subcommand_output
       )
@@ -344,28 +464,44 @@ class FactorBash (Dir wd, Bool subcommand_output = false) {
     }
   }
   -> build_image (File vm_name, File image_name) {
+    say "vm_name: #{vm_name} image_name: #{image_name}"
+    define String lead = "===="
     self.with_directory{
       const boot_image_file = File(BuildSh::generate_make_targets(){:boot_image})
 
-      const have_boot_image = ( boot_image_file.exists || BuildSh::update_boot_image || self.get_boot_image || false )
-      die "[ERROR] can't find or download boot image\n\tno boot image, can't compile (sorry!)" \
+      const have_boot_image = ( boot_image_file.exists || BuildSh::update_boot_image() || self.get_boot_image || false )
+      die "[FATAL] #{__METHOD_NAME__}: can't find or download boot image\n\tno boot image, can't compile (sorry!)" \
         if (! have_boot_image)
 
       # say "#{boot_image_file}"
       -> run_boot_image {
-        Command::spawn_se('./' + vm_name, '-no-user-init' "-i='#{boot_image_file}'", output: self.subcommand_output)
+        Command::spawn_se("echo \"USE: system 255 (exit)\"", '|', './' + vm_name, '-no-user-init' "-i='#{boot_image_file}'", output: self.subcommand_output)
       }
       var count_refresh = 1
       # NOTE: STEP 1: run from boot image
-      say "Compiling from boot image, pass \##{count_refresh}"
-      run_boot_image()
+      say "#{lead}Compiling from boot image, pass \##{count_refresh}"
+      if (! run_boot_image() ) {
+        say "[WARN]\t#{__METHOD_NAME__}: First pass not OK, trying again"
 
-      # NOTE: STEP 2: `refresh-all` from newly compiled image
+        const updated = BuildSh::update_boot_image()
+
+        die "[FATAL] #{__METHOD_NAME__}: Failed to update, can't recover" \
+          if (!updated)
+
+        die "[FATAL] #{__METHOD_NAME__}: Still can't run from the new boot image, something is deeply wrong" \
+          if ( updated && !run_boot_image() )
+
+        say "#{lead}Second pass OK"
+      } else {
+        say "#{lead}First pass OK"
+      }
+
+      # NOTE: STEP 2: refresh-all from newly compiled image
       var image_fails_refresh = !self.refresh_image(vm_name, image_name)
 
       # NOTE: STEP 3: re-bootstrap and refresh until it doesn't break
       for (true; image_fails_refresh && (count_refresh < 25); count_refresh++ ) {
-        say "Boot image refresh \##{count_refresh} failed! bootstrapping again..."
+        say "#{lead}Boot image refresh \##{count_refresh} failed! bootstrapping again..."
 
         # NOTE: STEP 3a: new boot image
         self.make_boot_image(vm_name, image_name)
@@ -379,7 +515,7 @@ class FactorBash (Dir wd, Bool subcommand_output = false) {
       const retval = self.make_boot_image(vm_name, image_name)
       # don't delete the boot image?
       # mv boot_image my_boot_image_name
-      say "finished image compilation after #{count_refresh} refresh#{count_refresh > 1 ? 'es' : '' }"
+      say "#{lead}Finished image compilation after #{count_refresh} refresh#{count_refresh > 1 ? 'es' : '' }"
       retval
     }
   }

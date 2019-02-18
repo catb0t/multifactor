@@ -20,7 +20,7 @@
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 class Object {
   method cleave (*blocks) {
-    blocks.map{ .run(self) }...
+    blocks.map{ .run(self) } # ...
   }
   method ifold (*bv_pairs) {
     bv_pairs.map{ |p| p.first.run( self, @(p.second)... ) }...
@@ -48,25 +48,18 @@ module Factor {
 
   func find_config (name) is cached -> String {
     const regex = Regex("^! multifactor:#{name} (.*)")
-    Factor::rc_config_lines().find{ (_ =~ regex)[0] } \
+    const result = Factor::rc_config_lines().find{ _ ~~ regex } \
       || die "Config 'multifactor:#{name}' not found in #{Factor::RC_FILE}"
-    # File(RC_FILE).open_r.lines.each {
-    #   with ( .match(regex)[0] ) { return _ }
-    # }
+    (regex =~ result)[0]
   }
 
-  const Dir REPO = Dir(Factor::find_config("repo"))
+  const Dir FOLDER = Dir(Factor::find_config("factor-dir"))
   const Bool QUIET_PIPE = Bool(Factor::find_config("quiet-pipe"))
-  const Regex VERSION_REGEX = /VERSION = ([0-9]+\.[0-9]+)/
-  const String VERSION = (
-    Factor::VERSION_REGEX =~ (
-      REPO + %f(GNUmakefile)->open_r.lines.find { |l| l ~~ Factor::VERSION_REGEX }
-    )
-  )[0]
 
   # ???
   func say_stderr (*args) {
     if (STDOUT.is_on_tty || (!STDOUT.is_on_tty && !Factor::QUIET_PIPE)) {
+      STDERR.autoflush(true)
       STDERR.say(args...)
     }
     # else, not a TTY and quiet-pipe is true
@@ -74,69 +67,85 @@ module Factor {
 }
 
 module MultiFactor {
+  import shell_words::SrcSums
+
   # accessors are a necessity
   class BuiltObj (
-    String _id,                     # long uuid
-    String _git_branch,             # branch to which this applies
-    String _git_hash,               # hash it's from; git rev-parse HEAD
-    String _os_type,                # target os kind
-    String _os_name,                # specific os string
-    String _arch_name,              # x86 / ppc / arm ...
-    String _word_size,              # 32 / 64
-    String _sum_vm_names,           # a sha256 checksum
-    String _sum_vm_contents,        # .
-    String _sum_image_names,        # .
-    String _sum_image_contents,     # .
-    String _vm_blob_sum,            # .
-    String _image_blob_sum,         # .
-    String _time_created,           # epoch timestamp
-    String _time_mod_access,        # 2 timestamps in the form "xxx/yyy"
-    String _time_tombstoned = :never, # for once-existing now-deleted images; stores deletion time
-    String _vm_base_name = :factor, # usually "factor"
-    String _image_ext = '.image',   # usually ".image"
-    String _sum_algorithm = :sha256, # usually sha256
-    Bool   _lk = false,             # object locking
-    String _fail = 'attempted writing to locked BuiltObj object!'
+    Str  _id = '',                  # long uuid
+    Str  _factor_version = '',      # 0.98, 0.99
+    Str  _git_branch = '',          # branch to which this applies
+    Str  _git_hash = '',            # hash it's from; git rev-parse HEAD
+    Str  _os_type = '',             # target os kind
+    Str  _os_name = '',             # specific os string
+    Str  _arch_name = '',           # x86 / ppc / arm ...
+    Str  _word_size = '',           # 32 / 64
+    SrcSums _vm_sums = SrcSums(),   #
+    SrcSums _image_sums = SrcSums(),# .
+    Str  _vm_blob_sum = '',         # .
+    Str  _image_blob_sum = '',      # .
+    Num  _time_created = 0,         # epoch timestamp
+    Num  _time_modified = 0,       # .
+    Num  _time_accessed = 0,         # .
+    Bool _is_git = true,            # whether it's in a git repository
+    Str _time_tombstoned = :never, # for once-existing now-deleted images; stores deletion time
+    Str  _vm_ext = '',              # usually "factor"
+    Str  _vm_prefix = :fvm_,        # usually "factor"
+    Str  _image_ext = '.image',     # usually ".image"
+    Str  _image_prefix = :fvm_,     # usually ".image"
+    Str  _sum_algorithm = :sha256,  # usually sha256
+    Bool _lk = false,               # object locking
+    Str  _fail = 'attempted writing to locked BuiltObj object!'
   ) {
     -> lock () -> BuiltObj { self._lk = true; self }
     -> unlock () -> BuiltObj { self._lk = false; self }
     -> id () -> Str { self._id }
+    -> factor_version () -> Str { self._factor_version }
     -> git_branch () -> Str { self._git_branch }
     -> git_hash () -> Str { self._git_hash }
+    -> is_git () -> Bool { self._is_git }
     -> os_type () -> Str { self._os_type }
     -> os_name () -> Str { self._os_name }
     -> arch_name () -> Str { self._arch_name }
-    -> word_size () -> Str { self._arch_name }
-    -> sum_vm_names () -> Str { self._sum_vm_names }
-    -> sum_vm_contents () -> Str { self._sum_vm_contents }
-    -> sum_image_names () -> Str { self._sum_image_names }
-    -> sum_image_contents () -> Str { self._sum_image_contents }
+    -> word_size () -> Str { self._word_size }
+    -> vm_sums () -> SrcSums { self._vm_sums }
+    -> image_sums () -> SrcSums { self._image_sums }
     -> vm_blob_sum () -> Str { self._vm_blob_sum }
     -> image_blob_sum () -> Str { self._image_blob_sum }
-    -> vm_base_name () -> Str { self._vm_base_name }
+    -> vm_ext () -> Str { self._vm_ext }
+    -> vm_prefix () -> Str { self._vm_prefix }
     -> image_ext () -> Str { self._image_ext }
-    -> time_created () -> Str { self._time_created }
-    -> time_mod_access () -> Str { self._time_mod_access }
+    -> image_prefix () -> Str { self._image_prefix }
+    -> time_created () -> Num { self._time_created }
+    -> time_modified () -> Str { self._time_modified }
+    -> time_accessed () -> Str { self._time_access }
     -> time_tombstoned () -> Str { self._time_tombstoned }
+    -> sum_algorithm () -> Str { self._sum_algorithm }
 
-    -> id (Str id)                { die self._fail if (self._lk); self._id = id               ; self }
-    -> git_branch (Str gb)        { die self._fail if (self._lk); self._git_branch = gb       ; self }
-    -> git_hash (Str hs)          { die self._fail if (self._lk); self._git_hash = hs         ; self }
-    -> os_type (Str os)           { die self._fail if (self._lk); self._os_type = os          ; self }
-    -> os_name (Str os)           { die self._fail if (self._lk); self._os_name = os          ; self }
-    -> arch_name (Str an)         { die self._fail if (self._lk); self._arch_name = an        ; self }
-    -> word_size (Str ws)         { die self._fail if (self._lk); self._word_size = ws        ; self }
-    -> sum_vm_names (Str x)       { die self._fail if (self._lk); self._sum_vm_names = x      ; self }
-    -> sum_vm_contents (Str x)    { die self._fail if (self._lk); self._sum_vm_contents = x   ; self }
-    -> sum_image_names (Str x)    { die self._fail if (self._lk); self._sum_image_names = x   ; self }
-    -> sum_image_contents (Str x) { die self._fail if (self._lk); self._sum_image_contents = x; self }
-    -> vm_blob_sum (Str x)        { die self._fail if (self._lk); self._vm_blob_sum = x       ; self }
-    -> image_blob_sum (Str x)     { die self._fail if (self._lk); self._image_blob_sum = x    ; self }
-    -> vm_base_name (Str x)       { die self._fail if (self._lk); self._vm_base_name = x      ; self }
-    -> image_ext (Str x)          { die self._fail if (self._lk); self._image_ext = x         ; self }
-    -> time_created (Str x)       { die self._fail if (self._lk); self._time_created = x      ; self }
-    -> time_mod_access (Str x)    { die self._fail if (self._lk); self._time_mod_access = x   ; self }
-    -> time_tombstoned (Str x)    { die self._fail if (self._lk); self._time_tombstoned = x   ; self }
+    -> id (Str id)             { die self._fail if (self._lk); self._id = id            ; self }
+    -> factor_version (Str ve) { die self._fail if (self._lk); self._factor_version = ve; self }
+    -> git_branch (Str gb)     { die self._fail if (self._lk); self._git_branch = gb    ; self }
+    -> git_hash (Str hs)       { die self._fail if (self._lk); self._git_hash = hs      ; self }
+    -> is_git (Bool g)         { die self._fail if (self._lk); self._is_git = g         ; self }
+    -> os_type (Str os)        { die self._fail if (self._lk); self._os_type = os       ; self }
+    -> os_name (Str os)        { die self._fail if (self._lk); self._os_name = os       ; self }
+    -> arch_name (Str an)      { die self._fail if (self._lk); self._arch_name = an     ; self }
+    -> word_size (Str ws)      { die self._fail if (self._lk); self._word_size = ws     ; self }
+    -> vm_sums (SrcSums x)     { die self._fail if (self._lk); self._vm_sums = x        ; self }
+    -> image_sums (SrcSums x)  { die self._fail if (self._lk); self._image_sums = x     ; self }
+    -> vm_blob_sum (Str x)     { die self._fail if (self._lk); self._vm_blob_sum = x    ; self }
+    -> image_blob_sum (Str x)  { die self._fail if (self._lk); self._image_blob_sum = x ; self }
+    -> vm_ext (Str x)          { die self._fail if (self._lk); self._vm_ext = x         ; self }
+    -> vm_prefix (Str x)       { die self._fail if (self._lk); self._vm_prefix = x      ; self }
+    -> image_ext (Str x)       { die self._fail if (self._lk); self._image_ext = x      ; self }
+    -> image_prefix (Str x)    { die self._fail if (self._lk); self._image_prefix = x   ; self }
+    -> time_created (Num x)    { die self._fail if (self._lk); self._time_created = x   ; self }
+    -> time_modified (Str x)   { die self._fail if (self._lk); self._time_modified = x  ; self }
+    -> time_accessed (Str x)   { die self._fail if (self._lk); self._time_access = x    ; self }
+    -> time_tombstoned (Str x) { die self._fail if (self._lk); self._time_tombstoned = x; self }
+    -> sum_algorithm (Str x)   { die self._fail if (self._lk); self._sum_algorithm = x  ; self }
+
+    -> vm_fullname () -> File { File( self.cleave( { .vm_prefix }, { .id }, { .vm_ext } ).join ) }
+    -> image_fullname () -> File { File( self.cleave( { .image_prefix }, { .id }, { .image_ext } ).join ) }
   }
 
   include Factor
@@ -158,7 +167,7 @@ module MultiFactor {
     die "Cannot stat #{name}" if (! name.exists)
     const File target = MultiFactor::temp_read_target(name)
     if (! name.copy(target) ) {
-      die "Copy file #{name} to #{target}: failed, $!"
+      die "Can't copy file #{name} to #{target}: #{$!}"
     }
     target
   }
@@ -174,14 +183,14 @@ module MultiFactor {
   func finalise_temp_r (File target) {
     die "Cannot stat #{target}" if (! target.exists)
     if (! target.remove) {
-      die "Can't remove #{target}: $!"
+      die "Can't remove #{target}: #{$!}"
     }
   }
   # requires literal arguments due to UUID
   func finalise_temp_w (File name, File target) {
     die "Cannot stat #{target}" if (! target.exists)
-    if (! target.mv(name)) {
-      die "Can't move #{target} over #{name}: $!"
+    if (! target.move(name)) {
+      die "Can't move #{target} over #{name}: #{$!}"
     }
   }
 
@@ -190,7 +199,9 @@ module MultiFactor {
   func atomic_read (File name) -> String {
     const File tmp = MultiFactor::temp_r(name)
     const tmp_fh = tmp.open_r
+    die "Couldn't open file for reading: #{tmp}: #{$!}" if (! tmp_fh)
     const String contents = tmp_fh.slurp
+    die "Read file '#{tmp}' failed: #{$!}" if (! defined(contents))
     contents # won't be eagerly evaluated (will be nil) without this line
     # check error here?
     tmp_fh.close
@@ -200,10 +211,9 @@ module MultiFactor {
   func atomic_write (File name, String contents) {
     const File tmp = MultiFactor::temp_w(name)
     const tmp_fh = tmp.open_w
+    die "Couldn't open file for writing: #{tmp}: #{$!}" if (! tmp_fh)
     const Bool res = tmp_fh.spurt(contents)
-    if (! res) {
-      die "Couldn't write #{contents.len} to #{tmp}: $!"
-    }
+    die "Couldn't write #{contents.len} bytes to #{tmp}: #{$!}" if (! res)
     tmp_fh.close
     MultiFactor::finalise_temp_w(name, tmp)
     return nil
@@ -240,40 +250,92 @@ module MultiFactor {
     MultiFactor::atomic_write(name, new_contents)
   }
 
-  class Runtime (
-    Hash options,
-    Array factor_arguments
-  ) {
+  func compare_properties (Array properties, BuiltObj b, Object o, Bool debug = false) {
+    if (debug) {
+      properties.map{
+          |property|
+        const db_property = b.method(property)()
+        const status_property = o{property}
+        say "Property '#{property}': #{db_property == status_property}: #{db_property.dump} == #{status_property.dump}"
+        db_property == status_property
+      }.all{ _ }
+    } else {
+      properties.map{ |prop| b.method(prop)() } ~Z== o{properties...} -> all{ _ }
+    }
+  }
+
+  # subset Fs1Object < File, Dir
+
+  class Runtime (Hash options, Array factor_arguments) {
     has Bool _config_setup_done = false # whether the following variables have been written
-    has Str lock_ext = ".multifactor_lock"
-    has Str lock_name
-    has Str action
+    has Str _lock_ext = ".multifactor_lock"
+    has Str _action
 
-    has Bool force
-    has Bool trace
-    has Bool verbose
-    has Bool info
-    has Bool dry_run
-    has Bool clean
-    has Bool sums
-    has Bool remove_old_lock
+    has Array db_changes # tracking order of reads/writes
+    has Set locked_fods
 
+    has Bool _force
+    has Bool _trace
+    has Bool _verbose
+    has Bool _debug = false
+    has Bool _info
+    has Bool _dry_run
+    has Bool _clean
+    has Bool _sums
+    has Bool _remove_old_lock
+
+    has String _sum_blob_algo = :sha256
+    has String _sum_src_algo = :sha256
     # set in config file etc, not a cmdline option
-    has Number sum_len
+    # has Number uuid_len
 
     # where the process started before any chdir
     has Dir initial_wd
 
-    has Dir db_path
-    has File db_name
-    has File db
-
-    has Dir factor_path
     has shell_words::FactorBash fbash
 
+    has Dir  _factor_dir
+    has Dir  _db_path
+    has File _db_name
+
     has String _UUID
-    -> UUID () -> String { self._UUID }
-    -> UUID (String u) -> MultiFactor::Runtime { self._UUID = u; self }
+
+    -> UUID ()         { self._UUID }
+    -> lock_ext        { self._lock_ext }
+    -> action          { self._action }
+    -> force           { self._force }
+    -> trace           { self._trace }
+    -> verbose         { self._verbose }
+    -> debug           { self._debug }
+    -> info            { self._info }
+    -> dry_run         { self._dry_run }
+    -> clean           { self._clean }
+    -> sums            { self._sums }
+    -> remove_old_lock { self._remove_old_lock }
+    -> sum_src_algo    { self._sum_src_algo }
+    -> sum_blob_algo   { self._sum_blob_algo }
+    -> factor_dir      { self._factor_dir }
+    -> db_path         { self._db_path }
+    -> db_name         { self._db_name }
+    -> db { self._db_path+self._db_name }
+
+    -> UUID (Str u)             { self._UUID = u; self }
+    -> lock_ext (Str e)         { self._lock_ext = e; self }
+    -> action (Str a)           { self._action = a; self }
+    -> force (Bool b)           { self._force = b; self }
+    -> trace (Bool b)           { self._trace = b; self }
+    -> verbose (Bool b)         { self._verbose = b; self }
+    -> debug (Bool b)           { self._debug = b; self }
+    -> info (Bool b)            { self._info = b; self }
+    -> dry_run (Bool b)         { self._dry_run = b; self }
+    -> clean (Bool b)           { self._clean = b; self }
+    -> sums (Bool b)            { self._sums = b; self }
+    -> remove_old_lock (Bool b) { self._remove_old_lock = b; self }
+    -> sum_src_algo (Str a)     { self._sum_src_algo = a; self }
+    -> sum_blob_algo (Str a)    { self._sum_blob_algo = a; self }
+    -> factor_dir (Dir d)       { self._factor_dir = d; self }
+    -> db_path (Dir d)          { self._db_path = d; self }
+    -> db_name (File d)         { self._db_name = d; self }
 
     -> _bn { File(__FILE__).basename.split(".")[0] }
     -> _log (*a) { Factor::say_stderr(a...) }
@@ -285,55 +347,52 @@ module MultiFactor {
 
     method config_setup {
       if (! self._config_setup_done) {
+        self.UUID( FactorBashStateless::make_uuid() )
         self.initial_wd = Dir.cwd
 
-        self.db_name = File(self.options(){'db-name'})
-        self.db_path = Dir(self.options(){'db-path'})
-        self.db = self.db_path+self.db_name
+        var props = Hash(
+          :db_name => { File(_) },
+          :db_path => { Dir(_) },
+          :factor_dir => { Dir(_) },
+          :action => { _ },
+        ).merge(
+          [:force, :dry_run, :verbose, :trace, :info, :clean, :sums, :remove_old_lock] \
+            .map{
+              ( (_) => { Bool(_) } )
+            }.to_h
+        )
 
-        self.factor_path = Dir(self.options(){'factor-path'})
+        props.each_kv{
+            |name, convert|
+          self.method( name )( convert( self.options(){ name.replace_all("_", "-") } ) )
+        }
+        self.verbose(self.verbose || self.dry_run)
+        self.trace(self.trace || self.dry_run || self.verbose)
+
         self.fbash = shell_words::FactorBash(
-          self.factor_path,
+          self.factor_dir,
           subcommand_output: Bool( ! self.options\{'quiet-subcom'} )
         )
-        self.UUID( FactorBashStateless::make_uuid() )
 
-        self.force = Bool(self.options\{:force})
-        self.dry_run = Bool(self.options(){'dry-run'})
-        self.verbose = ( Bool(self.options\{:verbose}) || self.dry_run )
-        self.trace = Bool(self.options\{:trace} || self.dry_run || self.verbose)
-        self.info = Bool(self.options\{:info})
-        # self.fbash.subcommand_output = Bool( ! self.options\{'quiet-subcom'} ) # || self.trace || self.verbose)
-
-        # TODO: argparse needs to
-        # correctly fill out non-provided negatable booleans
-        self.clean = Bool(self.options\{:clean})
-        self.sums = Bool(self.options\{:sums})
-
-        self.lock_name = File(self.db+self.lock_ext)
-
-
-        self.remove_old_lock = Bool(self.options(){'remove-old-lock'})
         if (self.remove_old_lock) {
           self.wrn(__LINE__, __METHOD_NAME__, "!!!", "blindly removing old lockfiles (unsafe/debug) [--remove-old-lock | -R]")
-          if (self.lock_name.exists) { self.lock_name.remove }
         }
 
-        self.action = self.options\{:action}
+        self.locked_fods = Set(self.db, self.factor_dir)
 
         self._config_setup_done = true
         self.trc(__LINE__, __METHOD_NAME__, "finished configuration, wd now: '#{self.db_path}'")
       }
     }
 
-    method show_info {
-      self.config_setup
-      say "MultiFactor #{self.UUID} options"
-      say "\tverbose: #{self.verbose}\tinfo: #{self.info}\ttrace: #{self.trace}\tdry_run: #{self.dry_run}"
-      say "\tclean: #{self.clean}\tsums: #{self.sums}\tdb_name: #{self.db_name}\tdb_path: #{self.db_path}"
-      say "\tfactor_path: #{self.factor_path}\tdb: #{self.db}\tremove_old_lock: #{self.remove_old_lock}"
-      say "\tFactor arguments: #{self.factor_arguments}"
-    }
+     method show_info {}
+     #  self.config_setup
+     #  say "MultiFactor #{self.UUID} options"
+     #  say "\tverbose: #{self.verbose}\tinfo: #{self.info}\ttrace: #{self.trace}\tdry_run: #{self.dry_run}"
+     #  say "\tclean: #{self.clean}\tsums: #{self.sums}\tdb_name: #{self.db_name}\tdb_path: #{self.db_path}"
+     #  say "\tfactor_path: #{self.factor_path}\tdb: #{self.db}\tremove_old_lock: #{self.remove_old_lock}"
+     #  say "\tFactor arguments: #{self.factor_arguments}"
+     #}
 
     method capture_write_disk (String caller_name, Block operation) {
       if (! self.dry_run) {
@@ -369,88 +428,113 @@ module MultiFactor {
       if ( defined(new_data) && Bool(new_data) && new_data.values.all{_ ~~ BuiltObj} ) {
         self.capture_write_disk(MN, { MultiFactor::_write_disk_db(self.db, new_data) } ) #, __METHOD_NAME__ )
       } else {
-        self.cleanup_lock_file
+        self.cleanup_lock_files
         die "[ERROR]\t#{__METHOD_NAME__}: garbage argument #{new_data}"
       }
     }
 
     # TODO: don't write the disk right away
-    method insert_disk_db (BuiltObj new_entry) {
+    method db_insert (BuiltObj new_entry) {
       self.trc(__LINE__, __METHOD_NAME__, 'inserting', new_entry)
       const entire_db = self.load_db
       entire_db{new_entry.id} = new_entry
       self.write_disk_db( entire_db )
     }
 
-    -> _test_lock_file (Bool cleanup) {
-      const FileHandle first_line_fh = self.lock_name.open_r
-      const String first_line = first_line_fh.readline
-      first_line
-      first_line_fh.close
-      del first_line_fh
-      # err on the side of caution
-      die "[ERROR]\t#{__METHOD_NAME__}: malformed lockfile #{self.lock_name} exists and is empty\n\t(not removing; not continuing)" \
-        if (! defined(first_line) || !first_line)
-      if ( first_line.chomp != self.UUID ) {
-        # otherwise, if the file is empty or lacks a UUID, it's not ours
-        # we should die
-        self.vbs(__LINE__, __METHOD_NAME__, 'UUID mismatch:', first_line.chomp.dump, '≠' self.UUID.dump)
+    method db_delete (String id) {
+      self.trc(__LINE__, __METHOD_NAME__, 'removing id \'', id, "'")
+      const entire_db = self.load_db
+      entire_db.delete(id)
+      self.write_disk_db( entire_db )
+    }
+
+
+    -> _glue_absolute (t) is cached -> File {
+      const File lock_file = File(t.abs+self.lock_ext)
+
+      die "[BUG]\t#{__METHOD_NAME__}: didn't create an absolute path by gluing '#{t}' and '#{self.lock_ext}': #{lock_file}" \
+        if (! lock_file.is_abs)
+      lock_file
+    }
+
+    -> _lock_exists (target, Bool cleanup) {
+      const MN = __METHOD_NAME__
+      const lock_file = self._glue_absolute(target)
+
+      const Str contents = MultiFactor::atomic_read(lock_file).chomp
+      die "[ERROR]\t#{MN}: empty lockfile for target '#{target}'; not safe to continue" \
+        if (! contents)
+
+      if (contents == self.UUID) {
+        if (! cleanup) {
+          die ("[BUG]\t #{MN}: lock file '#{lock_file}' for " +
+            "target '#{target}' contains the current process' UUID" +
+            "\n\tUnnecessary read; MultiFactor bug found! in #{target.basename}")
+        }
+        lock_file.remove
+        self.vbs(__LINE__, MN, "cleaned up #{lock_file}")
+      } else {
+        self.vbs(__LINE__, MN, "!! UUID mismatch: #{contents} ≠ #{self.UUID}")
         die (
-          "[ERROR]\t#{__METHOD_NAME__}: lockfile #{self.lock_name} contains foreign UUID" +
-          "\n\t(only one MultiFactor process should be active in a directory)"
+          "[ERROR]\t#{MN}: lock file '#{lock_file}' for target '#{target}' contains foreign UUID!" +
+          "\n\t(only one MultiFactor process should be active in a directory)" +
           "\n\tnot removing it; not continuing"
         )
-        # Sys.exit(136)
-      } else {
-        if (cleanup) { self.lock_name.remove }
-        else {
-          self.wrn(
-            'my UUID already exists in the lockfile', self.lock_name,
-            "\n\tUnnecessary read; MultiFactor bug found! in", Dir.cwd
+      }
+    }
+
+    -> _do_remove_old_lock {
+      if (self.remove_old_lock) {
+        self.locked_fods.each{
+          const lf = self._glue_absolute(_)
+          self.vbs(__LINE__, __METHOD_NAME__, "try to clear old lock file #{lf}")
+          lf.exists && (
+            lf.remove || self.wrn(__LINE__, __METHOD_NAME__, "can't remove #{lf} for an unknown reason: #{$!}")
           )
         }
       }
     }
 
     # NOTE: this ensures "we are a running process and we must be the only such running process"
-    # different from the tmp_file implementation above
-    # database "locking" should consist primarily in rename()
-    # NOTE: NIH: want to avoid CPAN deps
-    # not that anything on CPAN does what i want anyways
-    method do_lock_file {
-      self.config_setup
+    -> _do_lock_file (target, Bool cleanup) {
 
-      die "[ERROR]\t#{__METHOD_NAME__}: empty dbname! lock_name was #{self.lock_name}" \
-        if (self.lock_name.to_s == self.lock_ext)
-      # if it doesn't exist, create it with our UUID
-      if (! self.lock_name.exists) {
-        const File fh = self.lock_name.create
-        die "[ERROR]\t#{__METHOD_NAME__}: failed to create lockfile #{self.lock_name}: $!" \
-          if (! defined(fh))
-        fh.spurt(self.UUID)
-        fh.close
-        self.vbs(__LINE__, __METHOD_NAME__, "created #{self.lock_name}")
+      die "[ERROR]\t#{__METHOD_NAME__}: lock target '#{target}' does not exists" \
+        if (! target.exists)
+
+      const lock_file = self._glue_absolute(target)
+
+      if (lock_file.exists) {
+        self._lock_exists(target, cleanup)
       } else {
-        # otherwise, and if the contained UUID is ours, it must be ours (right?)
-        # do nothing, but warn
-        self._test_lock_file(false)
+        MultiFactor::atomic_write(lock_file, self.UUID)
+        self.vbs(__LINE__, __METHOD_NAME__, "created #{lock_file}")
       }
     }
 
-    method cleanup_lock_file {
-      const MN = __METHOD_NAME__
+    method do_lock_files {
       self.config_setup
-      if (! self.lock_name.exists) {
-        self.wrn(__LINE__, MN, 'Cannot stat', self.lock_name)
-      } else {
-        self.vbs(__LINE__, MN, 'removing', self.lock_name)
-        self._test_lock_file(true)
+      self._do_remove_old_lock
+      self.trc(__LINE__, __METHOD_NAME__, "locking FODs: #{self.locked_fods.join(', ')}")
+      self.locked_fods.each{
+          |target|
+        self._do_lock_file( target, false )
       }
+      self.vbs(__LINE__, __METHOD_NAME__, "done locking FODs!")
+    }
+
+    method cleanup_lock_files {
+      self.config_setup
+      self.trc(__LINE__, __METHOD_NAME__, "cleanup lock files for FODs: #{self.locked_fods.join(', ')}")
+      self.locked_fods.each{
+          |target|
+        self._do_lock_file( target, cleanup: true )
+      }
+      self.vbs(__LINE__, __METHOD_NAME__, "cleaned up lock files!")
     }
 
     -> compile_vm (File vm_name) -> Bool {
       if ( ! self.fbash.build_factor(vm_name) ) {
-        self.cleanup_lock_file
+        self.cleanup_lock_files
         die "vm compilation failed!"
       }
       true
@@ -458,158 +542,251 @@ module MultiFactor {
 
     -> compile_image (File vm_name, File image_name) -> Bool {
       if (! self.fbash.build_image(vm_name, image_name) ) {
-        self.cleanup_lock_file
+        self.cleanup_lock_files
         die "image compilation failed!"
       }
       true
+    }
+
+    -> _blob_file_contents_sum (File f, Str algo = null) {
+      if (algo == null) { algo = self.sum_blob_algo }
+      # const fname = (f.is_abs ? f : self.fbash.wd+f)
+      self.vbs(__LINE__, __METHOD_NAME__, "checksumming #{f}")
+      f |> :open_r |> :slurp |> (:encode, :utf8) |> algo
+    }
+
+    -> current_status_to_builtobj (Hash status) -> BuiltObj {
+      self.vbs(__LINE__, __METHOD_NAME__, 'creating BuiltObj from scratch')
+      var bo = BuiltObj().id(self.UUID)
+      status.keys.each{
+          |prop|
+        # self.vbs(__LINE__, __METHOD_NAME__, "invoke method / property '#{prop}'")
+        bo.method(prop)( status{prop} )
+      }
+      self.vbs(__LINE__, __METHOD_NAME__, 'setting creation time')
+      bo.time_created(Time.now)
+    }
+
+    -> build_new_factor (Hash current_status) {
+      const MN = __METHOD_NAME__
+      self.trc(__LINE__, MN, 'no match in db!')
+      # interpret the current_status keys as property (setter) names in BuiltObj
+      # this call does not set all properties, only those listed in status_properties
+      const BuiltObj building_obj = self.current_status_to_builtobj(current_status)
+
+      # take the vm file name and compile it, then checksum it
+      building_obj.vm_fullname -> cleave(
+        { |n| self.compile_vm(n) },
+        { |n| building_obj.vm_blob_sum( self._blob_file_contents_sum(n) ) }
+      )
+
+      # in sane configuration, the image won't have a prefix because Factor
+      #   really doesn't like when the VM and image don't have the same
+      # filename before the ".image"
+      building_obj.image_fullname -> cleave(
+        { |n| self.compile_image(building_obj.vm_fullname, n) },
+        { |n| building_obj.image_blob_sum( self._blob_file_contents_sum(n) ) }
+      )
+
+      # no more changes
+      building_obj.lock
+
+      self.trc(__LINE__, MN, 'writing the new BuiltObj to disk db because it changed')
+      self.insert_disk_db(building_obj)
+      self.trc(__LINE__, MN, "ok, running factor!")
+      self.cleanup_lock_files
+      return self._detach_factor_thread(building_obj.vm_fullname)
     }
 
     # multifactor's actual entry point
     # TODO: make this asynchronous, so that with_directory stuff is
     # done in a separate actor and awaited
 
+    # DONE: dynamic hash algo selection
     # TODO: read mtimes
     # TODO: write mtime/atimes
     # TODO: testability
-    # TODO: if branches
-    # TODO: make use of git information
-    # TODO: compare OS, ARCH, WORD SIZE information
+    # DONE: if branches
+    # DONE: make use of git information
+    # DONE: compare OS, ARCH, WORD SIZE information
     # TODO: image compression?
-    method go {
+    method go (Bool is_restart = false) {
       const MN = __METHOD_NAME__
       self.config_setup
       if (self.info) { self.show_info; return nil }
 
-      self.do_lock_file
-
-      const (
-        vm_sums = self.fbash.sum_vm_source,
-        image_sums = self.fbash.sum_image_source
-      )
+      self.do_lock_files
 
       given (self.action) {
-        when ("src-sums") {
+        when ('src-sums') {
           self.fbash.say_src_sums
-          return self.cleanup_lock_file
+          return self.cleanup_lock_files
         }
-        when ("env-info") {
+        when ('env-info') {
           self.fbash.say_env_info
-          return self.cleanup_lock_file
+          return self.cleanup_lock_files
         }
       }
 
+      # property names in BuiltObj, used to create current_status
+      # BuildSh and FactorBash implement these through FactorBash.delegate
+      const status_properties = [
+        :factor_version, :git_branch, :git_hash, :is_git,
+        :os_type, :os_name, :arch_name, :word_size, :vm_ext,
+        # the block is called for its default value but without arguments,
+        #   because a "normal" version of the :sum_algorithm method in FactorBash
+        #   requires knowledge of its containing class
+        # this allows setting the blob checksum algorithm from the command line arguments
+        [ :sum_algorithm, default: { self.sum_blob_algo } ],
+        # this allows setting the SrcSums checksum algorithm for the VM on the command line
+        [ :vm_sums, args: (algo: self.sum_src_algo) ],
+        [ :image_sums, args: (algo: self.sum_src_algo) ],
+      ]
+      subset ArrStr < String, Array
+      # makes Array<String, default?, args?> into String
+      -> undefault_single (prop < ArrStr) -> String { [@|prop] -> first }
+      # makes Array<Array<String, default?, args?>> into Array<String>
+      -> undefault (Array props) -> Array { props.map{ undefault_single(_) } }
+
+      # current_status is a Hash representing current disk / system config
+      # it maps string property names in status_properties to the result of
+      #   determining their values through FactorBash.delegate
+      # '@|' is like '...' but only calls '...' when the object can recieve it
+      const current_status = status_properties.map{ |n| (undefault_single(n), self.fbash.delegate(@|n)) }.to_h
       const db_data = self.load_db
-      const builtobj_matching_source = db_data.values.find{
+      if (self.debug) {
+        say current_status
+        say db_data
+      }
+
+      const builtobj_matching = db_data.values.find{
           |b|
-        (
-             (b.sum_vm_contents     == vm_sums{:contents}) \
-          && (b.sum_vm_names        == vm_sums{:names}) \
-          && (b.sum_image_contents  == image_sums{:contents}) \
-          && (b.sum_image_names     == image_sums{:names}) \
-        )
+        # compare_properties just wants the Array<String> as its basis for
+        #   comparing properties
+        # we're done with the status_properties Array<String, default?, args?>
+        #  now but it may come in handy
+
+        # remember, we're not testing *all* properties like .lock or tombstoned
+        MultiFactor::compare_properties(undefault(status_properties), b, current_status, debug: self.debug)
       }
-      if (! defined(builtobj_matching_source)) {
-        say '!!! no match'
-        ...
-        # need to generate new ID and compile
-        return self.cleanup_lock_file
+
+      # need to generate new ID and compile
+      if (! builtobj_matching) {
+        return self.build_new_factor(current_status)
       }
-      builtobj_matching_source.lock
-      if (builtobj_matching_source.time_tombstoned != "never") {
+
+      # now this is definitely defined
+      builtobj_matching.lock
+
+      if (builtobj_matching.time_tombstoned != 'never') {
         say '!!! matching entry is tombstoned!'
+        # need to trash the old entry
         ...
-        # need to generate new ID and compile
-        return self.cleanup_lock_file
+        self.build_new_factor(current_status)
       }
 
       self.vbs(__LINE__, MN, 'matching object in db')
-      const String matching_blobs_name = builtobj_matching_source.id
       const (
-        # could do %f( File().abs ) but that would break a concern separation
+        # tehcnically breaks concern separation by using full paths instead of with_directory
+        # but this is an optimisation; we want to minimise chdirs
         # note: ignoring BuiltObj.vm_base_name here because it doesn't make any sense
-        matching_vm_name = self.fbash.wd+File("#{matching_blobs_name}"),
-        matching_image_name = self.fbash.wd+File("#{matching_blobs_name}#{builtobj_matching_source.image_ext}")
+        matching_vm_name = self.fbash.wd+File(builtobj_matching.vm_fullname),
+        matching_image_name = self.fbash.wd+File(builtobj_matching.image_fullname)
       )
 
-      const Hash newly_compiled = :(
-        :vm => if (! (self.fbash.wd + matching_vm_name -> exists) ) {
-          self.trc(__LINE__, MN, "vm named '#{matching_vm_name}' doesn't exist: compiling")
-          self.compile_vm(matching_vm_name)
-        },
-
-        :image => if (! (self.fbash.wd + matching_image_name -> exists) ) {
-          self.trc(__LINE__, MN, "image named '#{matching_image_name}' doesn't exist: compiling")
-          self.compile_image(matching_vm_name, matching_image_name)
-        }
-      )
-
-      # we know they exist now, so they are "disk files" not just "names linked to a hash"
-      -> blob_file_contents_sum (File f) {
-        self.fbash.wd + f->open_r.slurp.encode("utf8").sha256
-      }
-      const (
-        disk_vm_sum = blob_file_contents_sum(matching_vm_name),
-        disk_image_sum = blob_file_contents_sum(matching_image_name)
-      )
-      const (
-        vm_blob_sums_match = (disk_vm_sum == builtobj_matching_source.vm_blob_sum),
-        image_blob_sums_match = (disk_image_sum == builtobj_matching_source.image_blob_sum)
-      )
-
-      newly_compiled.merge(if (! (vm_blob_sums_match && image_blob_sums_match)) {
-          # due to different compiler versions
-        self.trc(__LINE__, MN, 'blob sums mismatch!')
-        # ???
-        Hash(
-          :vm => newly_compiled{:vm} || if (! vm_blob_sums_match) {
-            self.trc(__LINE__, MN, 'recompiling VM!')
+      var (
+        current_blob_sums = Hash(),
+        new_recompiled = Hash(
+          :vm => if (! (self.fbash.wd + matching_vm_name -> exists) ) {
+            self.trc(__LINE__, MN, "vm named '#{matching_vm_name}' doesn't exist: compiling")
             self.compile_vm(matching_vm_name)
           },
-          :image => newly_compiled{:image} || if (! image_blob_sums_match) {
-            self.trc(__LINE__, MN, 'recompiling image!')
+
+          :image => if (! (self.fbash.wd + matching_image_name -> exists) ) {
+            self.trc(__LINE__, MN, "image named '#{matching_image_name}' doesn't exist: compiling")
             self.compile_image(matching_vm_name, matching_image_name)
           }
         )
-      })
-      # RE-CHECK BLOB HASHES HERE
-      const (
-        new_disk_vm_sum = blob_file_contents_sum(matching_vm_name),
-        new_disk_image_sum = blob_file_contents_sum(matching_image_name)
       )
-      const (
-        new_vm_blob_sums_match = (new_disk_vm_sum == builtobj_matching_source.vm_blob_sum),
-        new_image_blob_sums_match = (new_disk_image_sum == builtobj_matching_source.image_blob_sum),
+
+      # this exists so we can check the blob sums without having to use scoped assignment
+      -> do_blob_sums (String type, File blob) {
+        const sum = self._blob_file_contents_sum(blob, algo: builtobj_matching.sum_algorithm || self.sum_blob_algo)
+        const property = type+:_blob_sum
+        Hash(
+          (property) => sum,
+          (type+:_matches) => ( sum == builtobj_matching.method(property)() )
+        ).cleave(
+          { say "#{property}: #{builtobj_matching.method(property)()} #{_}" if (self.debug) },
+          { current_blob_sums.merge!(_) }
+        ).last
+      }
+
+      do_blob_sums(:vm, matching_vm_name)
+      do_blob_sums(:image, matching_image_name)
+
+      new_recompiled.merge!(
+        if (! [current_blob_sums{:vm_matches, :image_matches}].all{ _ } ) {
+          # due to different compiler versions
+          self.trc(__LINE__, MN, 'blob sums mismatch!')
+          # ???
+          Hash(
+            :vm => new_recompiled{:vm} || if (! current_blob_sums{:vm_matches}) {
+              self.trc(__LINE__, MN, 'recompiling VM!')
+              self.compile_vm(matching_vm_name) -> cleave(
+                { do_blob_sums(:vm, matching_vm_name) },
+                { _ }
+              ).last
+            },
+            :image => new_recompiled{:image} || if (! current_blob_sums{:image_matches}) {
+              self.trc(__LINE__, MN, 'recompiling image!')
+              self.compile_image(matching_vm_name, matching_image_name) -> cleave(
+                { do_blob_sums(:image, matching_image_name) },
+                { _ }
+              ).last
+            }
+          )
+        } else { Hash() }
       )
+      # blob sums have been implicitly re-checked
+
       # if they STILL don't match, delete the files + tombstone the entry and quit
-      if (
-            (! (new_vm_blob_sums_match || vm_blob_sums_match)) \
-        &&  (! (new_image_blob_sums_match || image_blob_sums_match))
-      ) {
+      if ( ! [current_blob_sums{:vm_matches, :image_matches}].all{ _ } ) {
         self.trc(__LINE__, MN, 'blob sums still mismatched!')
-        const tombstone_builtobj = (builtobj_matching_source |> :dclone |> :unlock)
-        del builtobj_matching_source
-        tombstone_builtobj.time_tombstoned(Time |> :sec |> :to_s)
+        if (is_restart) {
+          self.trc(__LINE__, MN, "i give up");
+          return self.cleanup_lock_files
+        }
+        self.trc(__LINE__, MN, "starting over...")
+        const tombstone_builtobj = (builtobj_matching |> :dclone |> :unlock)
+        del builtobj_matching
+        tombstone_builtobj.time_tombstoned(Time.now)
 
         self.insert_disk_db(tombstone_builtobj)
         self.capture_write_disk(MN, { matching_vm_name.remove, matching_image_name.remove })
-        return self.cleanup_lock_file
+        self.go(is_restart: true)
       }
 
       # OK, going to update the DB and run Factor
 
       # only updating the blob sums IFF the blob was newly compiled
       # otherwise, just update the mod/access times and run count
-      const new_builtobj_matching = builtobj_matching_source.dclone
-      if (newly_compiled{:vm}) {
+      const new_builtobj_matching = builtobj_matching.cleave( { .lock }, { .dclone } ).last
+      if (new_recompiled{:vm}) {
         self.vbs(__LINE__, MN, 'writing memory BuiltObj because of the newly compiled VM')
-        new_builtobj_matching.vm_blob_sum(new_disk_vm_sum)
+        new_builtobj_matching.vm_blob_sum(current_blob_sums{:vm})
       }
-      if (newly_compiled{:image}) {
+      if (new_recompiled{:image}) {
         self.vbs(__LINE__, MN, 'writing memory BuiltObj because of the newly compiled image')
-        new_builtobj_matching.image_blob_sum(new_disk_image_sum)
+        new_builtobj_matching.image_blob_sum(current_blob_sums{:image})
+      }
+      if ( [new_recompiled{:vm, :image}].any{ _ } ) {
+        new_builtobj_matching.time_modified(Time.now)
       }
 
-      const changed_db = if (builtobj_matching_source.dump != new_builtobj_matching.dump) {
+      new_builtobj_matching.lock
+
+      const changed_db = if (builtobj_matching != new_builtobj_matching) {
         self.trc(__LINE__, MN, 'writing the new BuiltObj to disk db because it changed')
         self.insert_disk_db(new_builtobj_matching)
         true
@@ -621,23 +798,51 @@ module MultiFactor {
       # say "\timage_sums_match:\t#{image_blob_sums_match}/#{new_image_blob_sums_match}"
       # say "\tchanged_db:\t\t#{changed_db}\t\t\tnewly_compiled: #{newly_compiled.to_s.chars.grep{|p|![\"\n\",' '].any{p==_} }.join}"
       self.trc(__LINE__, MN, "ok, running factor!")
-      # say want_vm_sum
-      # db.map { .word_size("64") }
-      #say db.dump
-      # no changes to disk yet, also haven't read from git yet
-      # self.write_disk_db(db)
+      self.cleanup_lock_files
+      self._detach_factor_thread(matching_vm_name)
+    }
 
-      self.cleanup_lock_file
-      # don't segfault
+    -> _detach_factor_thread (String vm_name) {
+      const MN = __METHOD_NAME__
       {
-        self.inf(__LINE__, MN, 'Launching Factor: ', "'", matching_vm_name, self.factor_arguments..., "'")
+        self.inf(__LINE__, MN, 'Launching Factor: ', "'", vm_name, self.factor_arguments..., "'")
         if (! self.fbash.with_directory{
-          Command::spawn_se('./' + matching_vm_name, self.factor_arguments..., output: true)
+          Command::spawn_se('./' + vm_name, self.factor_arguments..., output: true)
         } ) {
-          self.inf(__LINE__, MN, "Failed #{$!}")
+          self.inf(__LINE__, MN, "Failed: #{$!}")
         }
       }.thr.detach
+      # don't segfault
     }
+
+    BuiltObj(_arch_name: "x86",
+   _factor_version: "0.99",
+   _fail: "attempted writing to locked BuiltObj object!",
+   _git_branch: "master",
+   _git_hash: "29da71e2bf7d7fc40333752ae692b2b6bd71214e",
+   _id: "MsgIQ-LH,UyQ8DrisbehfDTzoXlCaBMu",
+   _image_blob_sum: "28c843c09a71e948143e3f3c029abbb8254002f8abcdbf9ef1e1f2a223ed7849",
+   _image_ext: ".image",
+   _image_prefix: "fvm_",
+   _image_sums: SrcSums(algo: "sha256",
+   contents: "75cc4b2449fdb5f1326b0f82829ef8a1b257d1567fdfbdde29dd1474802de2f6",
+   names: "dc1af79c46263717d94f506b2dc210b0b3c1235f3893f041eefd13544c3c457d"),
+   _is_git: true,
+   _lk: true,
+   _os_name: "linux",
+   _os_type: "unix",
+   _sum_algorithm: "sha256",
+   _time_accessed: 0,
+   _time_created: 1550446425,
+   _time_modified: 0,
+   _time_tombstoned: "never",
+   _vm_blob_sum: "7af658bd07353264cd2fbfc905f05eb0615b8727381aa6b12b0eaaec9649a5e9",
+   _vm_ext: "",
+   _vm_prefix: "fvm_",
+   _vm_sums: SrcSums(algo: "sha256",
+   contents: "84523dd7e230e9d13958b20a529e169098ba45f7320f3b97d64f104e4934799b",
+   names: "ee881ad2f6a4cdaf3fe6b9e6a2101cdf6bc0e0c39fd47c0dd506b1689574af20"),
+   _word_size: "64")
   }
 }
 
@@ -645,7 +850,7 @@ define MICRO_MAGNITUDE = 1_000
 func μsec { Time.micro*MICRO_MAGNITUDE }
 func μsec (Number n) { Time.micro*MICRO_MAGNITUDE - n }
 
-func main () {
+func main {
   const μs = μsec()
   μs
   # say Factor::RC_FILE
@@ -672,8 +877,8 @@ func main () {
     # .option("sum-len", "l", param: "len":"12", doc: "Shorten checksums to this length") \
     .option("db-name", "D", param: "name":".multifactor.db", doc: "Custom database filename") \
     .option("db-path", "d", param: "path":".", doc: "Path to dir containing database") \
-    .option("factor-path", "w", param: "path":".", doc: "Path to Factor working directory") \
-    .option("remove-old-lock", "R", doc: "Blindly remove any old lock files (unsafe!)") \
+    .option("factor-dir", "w", param: "path":".", doc: "Path to Factor working directory") \
+    .option("remove-old-lock", "R", doc: "Blindly remove any lock files (unsafe!)") \
     .option("quiet-subcom", "q", negate: "Never":"Always", doc: "show subcommand outputs") \
     .option(
       "action", "a", param: "name":"run-factor",
