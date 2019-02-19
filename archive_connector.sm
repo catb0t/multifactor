@@ -1,9 +1,19 @@
+
 # sidef -WkP8
 # /usr/bin/env
 #`(exit the shell) {
   eval 'exec sidef -WkP8 $0 ${1+"$@"}'
 }
 
+inlcude shell_words
+
+module Compress {
+  
+}
+
+# https://metacpan.org/pod/Archive::SevenZip
+
+# future: https://metacpan.org/pod/File::Unpack
 # https://www.perlmonks.org/?node_id=65027
 # Description:	This is a routine I've used in the past to add files to an Archive::Tar object (in the process of creating a # tar archive). My objective was to get relative paths in the archive, rather than paths from the root.
 # Usage:
@@ -21,29 +31,30 @@
 #     add_to_tar($tar, '/foo/bar/baz', '/foo/bar');
 # [download]
 # Hope this is useful.
-sub add_to_tar {
-  my($tar, $thing, $base) = @_;
-
-  if (defined $base) {
-    chdir $base or die "Can't chdir to $base: $!";
-    $thing =~ s!^$base/?!!;
-  }
-
-  if (-f $thing) {
-    $tar->add_files($thing);
-  }
-  elsif (-d $thing) {
-    my $code = sub {
-      return if !-f $_;
-
-      local *FH;
-      open FH, $_ or die "Can't open $_: $!";
-      binmode FH;
-      my $c = do { local $/; <FH> };
-      close FH or die "Can't close $_: $!";
-
-      $tar->add_data($File::Find::name, $c);
-    };
-    find $code, $thing;
-  }
-}
+# sub add_to_tar {
+#   my($tar, $thing, $base) = @_;
+#
+#   if (defined $base) {
+#     chdir $base or die "Can't chdir to $base: $!";
+#     $thing =~ s!^$base/?!!;
+#   }
+#
+#   if (-f $thing) {
+#     $tar->add_files($thing);
+#   }
+#   elsif (-d $thing) {
+#     my $code = sub {
+#       return if !-f $_;
+#
+#       local *FH;
+#       open FH, $_ or die "Can't open $_: $!";
+#       binmode FH;
+#       my $c = do { local $/; <FH> };
+#       close FH or die "Can't close $_: $!";
+#
+#       $tar->add_data($File::Find::name, $c);
+#     };
+#     find $code, $thing;
+#   }
+# }
+#

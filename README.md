@@ -1,6 +1,82 @@
 # multifactor v0.3
 
-no more sneaky bugs from having a single [Factor](https://github.com/factor/factor) binary and `factor.image` for every branch you work on
+To end the hassle of having to manage [Factor](https://github.com/factor/factor) images and executables for different branches / revisions.
+
+## Overview
+
+`multifactor.sm [options] [--] [parameters to Factor]`
+
+Use `multifactor.sm --help` or `-h` for more information on MultiFactor invocation:
+
+```
+Usage: multifactor [-abcDdnwfhiCQSqRstVv] [arg...]
+multifactor v0.3: a meta build system for Factor core development
+
+Arguments
+	    arg...              Arguments to the final Factor VM
+
+Options
+	    --                  End multifactor's argument list
+	                        Further arguments are given to Factor
+	-a, --action=<name>     Perform this action
+	                        actions: run-factor, src-sums, env-info
+	                        default value: 'run-factor'
+	-b, --basis-dev         Ignore changes in basis/
+	                        (basis development mode)
+	-c, --clean             [auto] Always 'make clean'
+	-D, --db-name=<name>    Custom database filename
+	                        default value: '.multifactor.db'
+	-d, --db-path=<path>    Path to dir containing database
+	                        default value: '.'
+	-n, --dry-run           Change no disk files
+	-w, --factor-dir=<path> Path to Factor working directory
+	                        default value: '.'
+	-f, --force             Force a rebuild in any case
+	-h, --help              Show this help
+	-i, --info              Just show configuration information
+	-C, --no-clean          Never 'make clean'
+	-Q, --no-quiet-subcom   Always show subcommand outputs
+	-S, --no-sums           Never use checksums
+	-q, --quiet-subcom      [auto] Never show subcommand outputs
+	-R, --remove-old-lock   Blindly remove any lock files (unsafe!)
+	-s, --sums              [auto] Always use checksums
+	-t, --trace             Some debug tracing
+	-V, --verbose           Verbose debug tracing
+	-v, --version           Print version and exit
+
+Config
+	Unknown options are an error
+	Help output is printed on STDERR
+	Numeric short names like '-2' are disabled
+	Positional arguments and options are not currently supported
+
+	Mandatory arguments to long options are mandatory for short options too.
+```
+
+## Rationale
+
+There are three basic operational goals.
+
+1. Run Factor if an entry matches the current source code configuration, and the binary/image checksums match.
+2. Compile a new binary or new image if either doesn't exist.
+3. Manage these actions with a simple data structure.
+
+This way, MultiFactor will manage built objects for each git branch, git tag, and source code configuration you desire, without mixing them up.
+
+* Factor's built-in build system compiles a `factor` VM executable ("binary") from the C++ source in [`vm/`](https://github.com/factor/factor/tree/master/vm) when you use `make`, and builds a `factor.image` VM image ("image") from the Factor source in [`core/`](https://github.com/factor/factor/tree/master/core) and [`basis/`](https://github.com/factor/factor/tree/master/basis) with `./factor -i=boot.*.image`. (Together with `libfactor.a` etc, these make up "built objects".)
+
+* A binary built with one revision of the `vm` code will not be compatibile with an image built by a binary with different / too old `vm` code, and will crash.
+
+* The image has key vocabularies in `core` and `basis` compiled into it. If the source of these on disk is different than what is compiled into `factor.image`, the VM will either crash or need to refresh at startup. <small> You *can* also `refresh-all save`, but that takes a long time. </small>
+
+To prevent cross-contamination of binaries and images every time you change branches or `git pull`, MultiFactor uses a simple database-like structure to track built objects.
+
+It gives them a unique name, and allows you to easily compile a new Factor, or run one that matches your disk configuration.
+
+MultiFactor is not designed to replace Factor's built-in `build.sh`, although `shell_words.sm` does re-implement most of `build.sh`'s back-end functionality.
+
+## Implementation
+
 
 ---
 
