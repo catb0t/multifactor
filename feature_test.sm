@@ -7,8 +7,13 @@
 
 inlcude shell_words
 
+module Optionals {
+  # look for rar and 7z
+  # look for /usr/share/dict/words
+}
+
 module Compress {
-  
+
 }
 
 # https://metacpan.org/pod/Archive::SevenZip

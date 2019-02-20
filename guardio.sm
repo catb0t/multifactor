@@ -1,0 +1,258 @@
+#! sidef -vWkP8
+#`(exit the shell) {
+  eval 'exec sidef -WkP8 $0 ${1+"$@"}'
+}
+
+##  MultiFactor, meta build system for Factor core development
+##    Copyright Cat Stevens 2018
+##  This program is free software: you can redistribute it and/or modify
+##    it under the terms of the GNU General Public License as published by
+##    the Free Software Foundation, either version 3 of the License, or
+##    (at your option) any later version.
+##
+##    This program is distributed in the hope that it will be useful,
+##    but WITHOUT ANY WARRANTY; without even the implied warranty of
+##    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+##    GNU General Public License for more details.
+##
+##    You should have received a copy of the GNU General Public License
+##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+include shell_words
+
+module GuardIO {
+  include FactorBashStateless
+  module Atomic {
+
+    define String temp_read_ext = "\.tmp_read_"
+    define String temp_write_ext = "\.tmp_write_"
+
+    -> _temp_read_target (File name) is cached -> File {
+      File(name + Atomic::temp_read_ext + FactorBashStateless::make_uuid(words: false) )
+    }
+    -> _temp_write_target (File name) is cached -> File {
+      File(name + Atomic::temp_write_ext + FactorBashStateless::make_uuid(words: false) )
+    }
+
+    # NOTE: NOT instance-specific, i.e doesn't use *OUR* UUID in name
+    # this copies a file to a temporary for reading
+    func _temp_r (File name) -> File {
+      die "Cannot stat #{name}" if (! name.exists)
+      const File target = Atomic::_temp_read_target(name)
+      if (! name.copy(target) ) {
+        die "Can't copy file #{name} to #{target}: #{$!}"
+      }
+      target
+    }
+    # this makes a temp file for writing, which can be rename()d over `name`
+    func _temp_w (File name) -> File {
+      const File target = Atomic::_temp_write_target(name)
+      if (target.exists) {
+        die "Create file #{target}: file exists"
+      }
+      target
+    }
+    # argument is used literally
+    func _finalise_temp_r (File target) {
+      die "Cannot stat #{target}" if (! target.exists)
+      if (! target.remove) {
+        die "Can't remove #{target}: #{$!}"
+      }
+    }
+    # requires literal arguments due to UUID
+    func _finalise_temp_w (File name, File target) {
+      die "Cannot stat #{target}" if (! target.exists)
+      if (! target.move(name)) {
+        die "Can't move #{target} over #{name}: #{$!}"
+      }
+    }
+
+    # these are actually the interfaces to the above words
+    # this returns a filehandle to in-memory string
+    func aread (File name) -> String {
+      const File tmp = Atomic::_temp_r(name)
+      const tmp_fh = tmp.open_r
+      die "Couldn't open file for reading: #{tmp}: #{$!}" if (! tmp_fh)
+      const String contents = tmp_fh.slurp
+      die "Read file '#{tmp}' failed: #{$!}" if (! defined(contents))
+      contents # won't be eagerly evaluated (will be nil) without this line
+      # check error here?
+      tmp_fh.close
+      Atomic::_finalise_temp_r(tmp)
+      contents
+    }
+
+    func awrite (File name, String contents) {
+      const File tmp = Atomic::_temp_w(name)
+      const tmp_fh = tmp.open_w
+      die "Couldn't open file for writing: #{tmp}: #{$!}" if (! tmp_fh)
+      const Bool res = tmp_fh.spurt(contents)
+      die "Couldn't write #{contents.len} bytes to #{tmp}: #{$!}" if (! res)
+      tmp_fh.close
+      Atomic::_finalise_temp_w(name, tmp)
+      return nil
+    }
+  }
+
+  class GlobLocker {
+    has Array locked_fods
+
+    -> setup {}
+
+    -> _glue_absolute (t) is cached -> File {
+      const File lock_file = File(t + self.lock_ext) # expecting t to be absolute
+
+      die "[BUG]\t#{__METHOD_NAME__}: didn't create an absolute path by gluing '#{t}' and '#{self.lock_ext}': #{lock_file}" \
+        if (! lock_file.is_abs)
+      lock_file
+    }
+
+    -> _lock_exists (target, Bool cleanup) {
+      const MN = __METHOD_NAME__
+      const lock_file = self._glue_absolute(target)
+
+      const Str contents = Atomic::aread(lock_file).chomp
+      die "[ERROR]\t#{MN}: empty lockfile for target '#{target}'; not safe to continue" \
+        if (! contents)
+
+      if (contents == self.UUID) {
+        if (! cleanup) {
+          die ("[BUG]\t #{MN}: lock file '#{lock_file}' for " +
+            "target '#{target}' contains the current process' UUID" +
+            "\n\tUnnecessary read; MultiFactor bug found! in #{target.basename}")
+        }
+        lock_file.remove
+        self.vbs(__LINE__, MN, "cleaned up #{_bn(lock_file)}")
+      } else {
+        self.vbs(__LINE__, MN, "!! UUID mismatch: #{contents} ≠ #{self.UUID}")
+        die (
+          "[ERROR]\t#{MN}: lock file '#{lock_file}' for target '#{target}' contains foreign UUID!" +
+          "\n\t(only one MultiFactor process should be active in a directory)" +
+          "\n\tnot removing it; not continuing"
+        )
+      }
+    }
+
+    -> _do_remove_old_lock {
+      if (self.remove_old_lock) {
+        self.locked_fods.each{
+          const lf = self._glue_absolute(_)
+          self.vbs(__LINE__, __METHOD_NAME__, "try to clear old lock file #{_bn(lf)}")
+          lf.exists && (
+            lf.remove || self.wrn(__LINE__, __METHOD_NAME__, "can't remove #{lf} for an unknown reason: #{$!}")
+          )
+        }
+      }
+    }
+
+    # NOTE: this ensures "we are a running process and we must be the only such running process"
+    -> _do_lock_file (target, Bool cleanup) {
+
+      die "[ERROR]\t#{__METHOD_NAME__}: lock target '#{target}' does not exists" \
+        if (! target.exists)
+
+      const lock_file = self._glue_absolute(target)
+
+      if (lock_file.exists) {
+        self._lock_exists(target, cleanup)
+      } else {
+        Atomic::awrite(lock_file, self.UUID)
+        self.vbs(__LINE__, __METHOD_NAME__, "created #{_bn(lock_file)}")
+      }
+    }
+  }
+
+
+  module CacheDBStateless {
+    include Atomic
+    func _read_disk_db (File name, Object wanted_typename = nil) is cached -> Hash {
+      # look for the database file
+      # if it doesn't exist, stop
+      # otherwise, open it
+      const contents = Atomic::aread(name)
+      # if it's empty, get a new one -> []
+      if (! contents) {
+        return Hash()
+      }
+      const eval_contents = eval(contents)
+      # if it's not empty, but contains invalid / throwing code, THAT's an error!
+      if (! defined(eval_contents)) {
+        die "Malformed db: #{name} (it failed to eval): #{contents}"
+      }
+      # if it contains only [], it's also empty -> []
+      if (! eval_contents) {
+        return Hash()
+      }
+      if ( defined(wanted_typename) ) {
+        # if it contains [Type()...], it's nonempty -> [Type()...]
+        eval_contents.values.all{ .is_a(wanted_typename) } || die "Found garbage in #{name}: #{contents}"
+      }
+      return eval_contents
+    }
+
+    func _write_disk_db (File name, Hash new_data) {
+      const String new_contents = new_data.dump # safe ???
+      # look for the database file
+      # if it doesn't exist, stop
+      # otherwise, open it
+      Atomic::awrite(name, new_contents)
+    }
+  }
+  class CacheDB {
+
+    has Array change_sequence
+
+    method capture_write_disk (String caller_name, Block operation) {
+      if (! self.dry_run) {
+        self.vbs(__LINE__, __METHOD_NAME__, "#{caller_name}: writing disk with", operation)
+        return operation.run
+      }
+      self.vbs(__LINE__, __METHOD_NAME__, "#{caller_name}: not writing disk (dry run)")
+      nil
+    }
+
+    method read_disk_db () is cached -> Hash {
+      self.config_setup
+      self.trc(__LINE__, __METHOD_NAME__, 'reading', self.db)
+
+      CacheDBStateless::_read_disk_db(self.db)
+    }
+
+    method load_db () is cached -> Hash {
+      self.vbs(__LINE__, __METHOD_NAME__, 'loading db...')
+      static const db_data
+      if (! defined(db_data)) {
+        self.vbs(__LINE__, __METHOD_NAME__, 'wasn\'t cached!')
+        db_data = self.read_disk_db
+      }
+      db_data
+    }
+
+    method write_disk_db (Hash new_data, Object wanted_typename) {
+      const MN = __METHOD_NAME__
+      self.config_setup
+      self.trc(__LINE__, MN, 'writing', self.db)
+
+      if ( defined(new_data) && Bool(new_data) && new_data.values.all{ .is_a(wanted_typename) } ) {
+        self.capture_write_disk(MN, { CacheDBStateless::_write_disk_db(self.db, new_data) } ) #, __METHOD_NAME__ )
+      } else {
+        self.cleanup_lock_files
+        die "[ERROR]\t#{__METHOD_NAME__}: garbage argument #{new_data}"
+      }
+    }
+
+    # TODO: don't write the disk right away
+    method db_insert (Object new_entry) {
+      self.trc(__LINE__, __METHOD_NAME__, 'inserting', new_entry)
+      const entire_db = self.load_db
+      entire_db{new_entry.id} = new_entry
+      self.write_disk_db( entire_db )
+    }
+
+    method db_delete (Object key) {
+      self.trc(__LINE__, __METHOD_NAME__, 'removing id \'', key, "'")
+      const entire_db = self.load_db
+      entire_db.delete(key)
+      self.write_disk_db( entire_db )
+    }
+  }
+}
