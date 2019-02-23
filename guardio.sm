@@ -19,6 +19,13 @@
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 include shell_words
 
+class SLog (Block logger, /* REF */ is_trace, /* REF */ is_verbose) {
+  -> wrn (File f, Num l, Str m, *args) { say "[WARN]\t#{f}:#{l}: #{m}: #{args.join(' ')}" }
+  -> inf (File f, Num l, Str m, *args) { self.logger("[INFO]\t", f, ':', l, ': ', m, ': ', args.join(' ')) }
+  -> trc (File f, Num l, Str m, *args) { self.logger("[TRACE]\t", f, ':', l, ': ', m, ': ', args.join(' ')) if ( *(self.is_trace)) }
+  -> vbs (File f, Num l, Str m, *args) { self.logger("[VBOSE]\t", f, ':', l, ': ', m, ': ', args.join(' ')) if ( *(self.is_verbose)) }
+}
+
 module GuardIO {
   include FactorBashStateless
   module Atomic {
@@ -159,6 +166,27 @@ module GuardIO {
         self.vbs(__LINE__, __METHOD_NAME__, "created #{_bn(lock_file)}")
       }
     }
+
+    method do_lock_files {
+      self.config_setup
+      self._do_remove_old_lock
+      self.trc(__LINE__, __METHOD_NAME__, "locking FODs: #{self.locked_fods.map{ _bn(_) }.join(', ')}")
+      self.locked_fods.each{
+          |target|
+        self._do_lock_file( target, false )
+      }
+      self.vbs(__LINE__, __METHOD_NAME__, "done locking FODs!")
+    }
+
+    method cleanup_lock_files {
+      self.config_setup
+      self.trc(__LINE__, __METHOD_NAME__, "cleanup lock files for FODs: #{self.locked_fods.map{ _bn(_) }.join(', ')}")
+      self.locked_fods.each{
+          |target|
+        self._do_lock_file( target, true )
+      }
+      self.vbs(__LINE__, __METHOD_NAME__, "cleaned up lock files!")
+    }
   }
 
 
@@ -197,9 +225,14 @@ module GuardIO {
       Atomic::awrite(name, new_contents)
     }
   }
-  class CacheDB {
+
+  # todo: make it actually caching
+  class CacheDB (File db_base, Dir db_dir, Bool dry_run) {
 
     has Array change_sequence
+    has Hash data
+
+    -> db_name { self.db_dir + self.db_base }
 
     method capture_write_disk (String caller_name, Block operation) {
       if (! self.dry_run) {

@@ -28,7 +28,7 @@ module Command {
       (Pipe( [cmdline..., ";", "echo", '"__RETURNED=$?\n"'].join(' ') ) \
         .open_r.cleave(
           { .autoflush(true) },
-          { "\n\t\t".print if (output) }
+          { "\n\t\t".print if (output) },
           {
             var c = ''
             .each_char{
@@ -40,7 +40,7 @@ module Command {
               c += b
             }
             c
-          },
+          }
         ).last \
         .lines.find{ _ ~~ RETVAL_REGEX } =~ RETVAL_REGEX
       )[0].to_n

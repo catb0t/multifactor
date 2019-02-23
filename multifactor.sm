@@ -299,7 +299,7 @@ module MultiFactor {
     has Str _action
     has Array known_actions = ['env-info', 'src-sums', 'run-factor']
 
-    has Array db_changes # tracking order of reads/writes
+    has CacheDB db_man
     has Set locked_fods
 
     has Bool _force
@@ -345,9 +345,6 @@ module MultiFactor {
     -> sum_src_algo    { self._sum_src_algo }
     -> sum_blob_algo   { self._sum_blob_algo }
     -> factor_dir      { self._factor_dir }
-    -> db_path         { self._db_path }
-    -> db_name         { self._db_name }
-    -> db { self._db_path+self._db_name }
 
     -> UUID (Str u)             { self._UUID = u; self }
     -> lock_ext (Str e)         { self._lock_ext = e; self }
@@ -365,15 +362,6 @@ module MultiFactor {
     -> sum_src_algo (Str a)     { self._sum_src_algo = a; self }
     -> sum_blob_algo (Str a)    { self._sum_blob_algo = a; self }
     -> factor_dir (Dir d)       { self._factor_dir = d; self }
-    -> db_path (Dir d)          { self._db_path = d; self }
-    -> db_name (File d)         { self._db_name = d; self }
-
-    -> _log (*a) { Factor::say_stderr(a...) }
-    -> wrn (Num l, Str m, *args) { say "[WARN]\t#{l}: #{m}: #{args.join(' ')}" }
-    -> inf (Num l, Str m, *args) { self._log("[INFO]\t", l, ': ', m, ': ', args.join(' ')) }
-    -> trc (Num l, Str m, *args) { self._log("[TRACE]\t", l, ': ', m, ': ', args.join(' ')) if (self.trace) }
-    -> vbs (Num l, Str m, *args) { self._log("[VBOSE]\t", l, ': ', m, ': ', args.join(' ')) if (self.verbose) }
-    # more verbose than trace ^^^
 
     method config_setup {
       if (! self._config_setup_done) {
@@ -381,8 +369,6 @@ module MultiFactor {
         self.initial_wd = Dir.cwd
 
         var props = Hash(
-          :db_name => { File(_) },
-          :db_path => { Dir(_) },
           :factor_dir => { Dir(_) },
           :action => { _ },
         ).merge(
@@ -397,6 +383,8 @@ module MultiFactor {
         self.verbose(self.verbose || self.dry_run)
         self.trace(self.trace || self.dry_run || self.verbose)
 
+        self.log = guardio::SLog( { Factor::say_stderr(a...) }, \(self.trace), \(self.verbose) )
+
         # need a way for the consumer ofthe ArgParse API to know the exact syntax of the command line
         self.known_actions.contains(self.action) \
           || die "[FATAL] #{__LINE__}: #{__METHOD_NAME__}: don't know action '#{self.action}' [--action | -a]"
@@ -405,6 +393,8 @@ module MultiFactor {
           self.factor_dir,
           subcommand_output: Bool( ! self.options\{'quiet-subcom'} )
         )
+
+        self.db_man = guardio::CacheDB( self.options(){'db-name'}, self.options(){'db-dir'}, self.dry_run )
 
         if (self.remove_old_lock) {
           self.wrn(__LINE__, __METHOD_NAME__, '!!!', 'blindly removing old lockfiles (unsafe/debug) [--remove-old-lock | -R]')
@@ -426,143 +416,6 @@ module MultiFactor {
      #  say "\tFactor arguments: #{self.factor_arguments}"
      #}
 
-    method capture_write_disk (String caller_name, Block operation) {
-      if (! self.dry_run) {
-        self.vbs(__LINE__, __METHOD_NAME__, "#{caller_name}: writing disk with", operation)
-        return operation.run
-      }
-      self.vbs(__LINE__, __METHOD_NAME__, "#{caller_name}: not writing disk (dry run)")
-      nil
-    }
-
-    method read_disk_db () is cached -> Hash {
-      self.config_setup
-      self.trc(__LINE__, __METHOD_NAME__, 'reading', self.db)
-
-      MultiFactor::_read_disk_db(self.db)
-    }
-
-    method load_db () is cached -> Hash {
-      self.vbs(__LINE__, __METHOD_NAME__, 'loading db...')
-      static const db_data
-      if (! defined(db_data)) {
-        self.vbs(__LINE__, __METHOD_NAME__, 'wasn\'t cached!')
-        db_data = self.read_disk_db
-      }
-      db_data
-    }
-
-    method write_disk_db (Hash new_data) {
-      const MN = __METHOD_NAME__
-      self.config_setup
-      self.trc(__LINE__, MN, 'writing', self.db)
-
-      if ( defined(new_data) && Bool(new_data) && new_data.values.all{_ ~~ BuiltObj} ) {
-        self.capture_write_disk(MN, { MultiFactor::_write_disk_db(self.db, new_data) } ) #, __METHOD_NAME__ )
-      } else {
-        self.cleanup_lock_files
-        die "[ERROR]\t#{__METHOD_NAME__}: garbage argument #{new_data}"
-      }
-    }
-
-    # TODO: don't write the disk right away
-    method db_insert (BuiltObj new_entry) {
-      self.trc(__LINE__, __METHOD_NAME__, 'inserting', new_entry)
-      const entire_db = self.load_db
-      entire_db{new_entry.id} = new_entry
-      self.write_disk_db( entire_db )
-    }
-
-    method db_delete (String id) {
-      self.trc(__LINE__, __METHOD_NAME__, 'removing id \'', id, "'")
-      const entire_db = self.load_db
-      entire_db.delete(id)
-      self.write_disk_db( entire_db )
-    }
-
-
-    -> _glue_absolute (t) is cached -> File {
-      const File lock_file = File(t + self.lock_ext) # expecting t to be absolute
-
-      die "[BUG]\t#{__METHOD_NAME__}: didn't create an absolute path by gluing '#{t}' and '#{self.lock_ext}': #{lock_file}" \
-        if (! lock_file.is_abs)
-      lock_file
-    }
-
-    -> _lock_exists (target, Bool cleanup) {
-      const MN = __METHOD_NAME__
-      const lock_file = self._glue_absolute(target)
-
-      const Str contents = MultiFactor::atomic_read(lock_file).chomp
-      die "[ERROR]\t#{MN}: empty lockfile for target '#{target}'; not safe to continue" \
-        if (! contents)
-
-      if (contents == self.UUID) {
-        if (! cleanup) {
-          die ("[BUG]\t #{MN}: lock file '#{lock_file}' for " +
-            "target '#{target}' contains the current process' UUID" +
-            "\n\tUnnecessary read; MultiFactor bug found! in #{target.basename}")
-        }
-        lock_file.remove
-        self.vbs(__LINE__, MN, "cleaned up #{_bn(lock_file)}")
-      } else {
-        self.vbs(__LINE__, MN, "!! UUID mismatch: #{contents} ≠ #{self.UUID}")
-        die (
-          "[ERROR]\t#{MN}: lock file '#{lock_file}' for target '#{target}' contains foreign UUID!" +
-          "\n\t(only one MultiFactor process should be active in a directory)" +
-          "\n\tnot removing it; not continuing"
-        )
-      }
-    }
-
-    -> _do_remove_old_lock {
-      if (self.remove_old_lock) {
-        self.locked_fods.each{
-          const lf = self._glue_absolute(_)
-          self.vbs(__LINE__, __METHOD_NAME__, "try to clear old lock file #{_bn(lf)}")
-          lf.exists && (
-            lf.remove || self.wrn(__LINE__, __METHOD_NAME__, "can't remove #{lf} for an unknown reason: #{$!}")
-          )
-        }
-      }
-    }
-
-    # NOTE: this ensures "we are a running process and we must be the only such running process"
-    -> _do_lock_file (target, Bool cleanup) {
-
-      die "[ERROR]\t#{__METHOD_NAME__}: lock target '#{target}' does not exists" \
-        if (! target.exists)
-
-      const lock_file = self._glue_absolute(target)
-
-      if (lock_file.exists) {
-        self._lock_exists(target, cleanup)
-      } else {
-        MultiFactor::atomic_write(lock_file, self.UUID)
-        self.vbs(__LINE__, __METHOD_NAME__, "created #{_bn(lock_file)}")
-      }
-    }
-
-    method do_lock_files {
-      self.config_setup
-      self._do_remove_old_lock
-      self.trc(__LINE__, __METHOD_NAME__, "locking FODs: #{self.locked_fods.map{ _bn(_) }.join(', ')}")
-      self.locked_fods.each{
-          |target|
-        self._do_lock_file( target, false )
-      }
-      self.vbs(__LINE__, __METHOD_NAME__, "done locking FODs!")
-    }
-
-    method cleanup_lock_files {
-      self.config_setup
-      self.trc(__LINE__, __METHOD_NAME__, "cleanup lock files for FODs: #{self.locked_fods.map{ _bn(_) }.join(', ')}")
-      self.locked_fods.each{
-          |target|
-        self._do_lock_file( target, true )
-      }
-      self.vbs(__LINE__, __METHOD_NAME__, "cleaned up lock files!")
-    }
 
     -> _blob_file_contents_sum (File f, Str algo) {
       self.vbs(__LINE__, __METHOD_NAME__, "checksumming #{f} with algorithm '#{algo}'")
@@ -667,6 +520,8 @@ module MultiFactor {
     # DONE: make use of git information
     # DONE: compare OS, ARCH, WORD SIZE information
     # TODO: image compression?
+
+    #TDOO: DON"T HASH FACTOR IMAGE
     method go (Bool is_restart = false) {
       const MN = __METHOD_NAME__
       self.config_setup
@@ -777,7 +632,7 @@ module MultiFactor {
         }.to_h
       }
       self.inf(__LINE__, MN, "NOTE: no checksums in main path yet")
-      say do_recompile_needed() 
+      say do_recompile_needed()
       ...
       var (
         new_recompiled = do_recompile_needed(),
