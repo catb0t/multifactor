@@ -1,3 +1,4 @@
+#! ruby
 #! sidef -vWkP8
 #`(exit the shell) {
   eval 'exec sidef -WkP8 $0 ${1+"$@"}'
@@ -17,17 +18,23 @@
 ##
 ##    You should have received a copy of the GNU General Public License
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+include util_classes
 include shell_words
 
-class SLog (Block logger, /* REF */ is_trace, /* REF */ is_verbose) {
-  -> wrn (File f, Num l, Str m, *args) { say "[WARN]\t#{f}:#{l}: #{m}: #{args.join(' ')}" }
-  -> inf (File f, Num l, Str m, *args) { self.logger("[INFO]\t", f, ':', l, ': ', m, ': ', args.join(' ')) }
-  -> trc (File f, Num l, Str m, *args) { self.logger("[TRACE]\t", f, ':', l, ': ', m, ': ', args.join(' ')) if ( *(self.is_trace)) }
-  -> vbs (File f, Num l, Str m, *args) { self.logger("[VBOSE]\t", f, ':', l, ': ', m, ': ', args.join(' ')) if ( *(self.is_verbose)) }
+func _bn (Str f) { File(f).basename.split('.').first }
+
+class SLog (Bool is_trace = true, Bool is_verbose = false, Block logger = { |*a| STDERR.say( a... ) } ) {
+  -> wrn (Str f, Num l, Str m, *args) { say "[WARN]\t#{_bn(f)}:#{l}: #{m}: #{args.join(' ')}" }
+  -> inf (Str f, Num l, Str m, *args) { self.logger.run("[INFO]\t", _bn(f), ':', l, ': ', m, ': ', args.join(' ')) }
+  -> trc (Str f, Num l, Str m, *args) { self.logger.run("[TRACE]\t", _bn(f), ':', l, ': ', m, ': ', args.join(' ')) if ( self.is_trace) }
+  -> vbs (Str f, Num l, Str m, *args) { self.logger.run("[VBOSE]\t", _bn(f), ':', l, ': ', m, ': ', args.join(' ')) if ( self.is_verbose) }
 }
 
 module GuardIO {
   include FactorBashStateless
+
+  func ellipsify_absolute (File name) -> String { '.../'+Dir(name.dir.basename)+File(name.basename) }
+
   module Atomic {
 
     define String temp_read_ext = "\.tmp_read_"
@@ -100,10 +107,36 @@ module GuardIO {
     }
   }
 
-  class GlobLocker {
-    has Array locked_fods
+  subset FsObj < File, Dir
 
-    -> setup {}
+  class GlobLocker (String UUID, Bool remove_old_lock = false, Str lock_ext = ".lock") {
+    has Set _locked_fods
+
+    has Bool _setup_done = false
+
+    has guardio::SLog log
+
+    -> locked_fods { self._locked_fods }
+    -> locked_fods (lf) {
+      die "immutable GlobLocker!" if (self._setup_done)
+      self._locked_fods = Set(lf...)
+      self
+    }
+
+    method setup ( /* iterable<Glob> */ locked_fods, Bool verbose = false) {
+      if (! self._setup_done)  {
+        self.log = guardio::SLog(is_verbose: verbose)
+        # need dclone here?
+        self.locked_fods( locked_fods.map{ .abs.realpath } ) \
+          ._setup_done = true
+
+        if (self.remove_old_lock) {
+          self.log.wrn(__FILE__, __LINE__, __METHOD_NAME__, '!!!',
+            'blindly removing old lockfiles (unsafe/debug)')
+        }
+      }
+      self
+    }
 
     -> _glue_absolute (t) is cached -> File {
       const File lock_file = File(t + self.lock_ext) # expecting t to be absolute
@@ -113,7 +146,7 @@ module GuardIO {
       lock_file
     }
 
-    -> _lock_exists (target, Bool cleanup) {
+    -> _lock_exists (target < FsObj, Bool cleanup) {
       const MN = __METHOD_NAME__
       const lock_file = self._glue_absolute(target)
 
@@ -128,9 +161,9 @@ module GuardIO {
             "\n\tUnnecessary read; MultiFactor bug found! in #{target.basename}")
         }
         lock_file.remove
-        self.vbs(__LINE__, MN, "cleaned up #{_bn(lock_file)}")
+        self.log.vbs(__FILE__, __LINE__, MN, "cleaned up #{ellipsify_absolute(lock_file)}")
       } else {
-        self.vbs(__LINE__, MN, "!! UUID mismatch: #{contents} ≠ #{self.UUID}")
+        self.log.vbs(__FILE__, __LINE__, MN, "!! UUID mismatch: #{contents} ≠ #{self.UUID}")
         die (
           "[ERROR]\t#{MN}: lock file '#{lock_file}' for target '#{target}' contains foreign UUID!" +
           "\n\t(only one MultiFactor process should be active in a directory)" +
@@ -143,9 +176,9 @@ module GuardIO {
       if (self.remove_old_lock) {
         self.locked_fods.each{
           const lf = self._glue_absolute(_)
-          self.vbs(__LINE__, __METHOD_NAME__, "try to clear old lock file #{_bn(lf)}")
+          self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, "try to clear old lock file #{ellipsify_absolute(lf)}")
           lf.exists && (
-            lf.remove || self.wrn(__LINE__, __METHOD_NAME__, "can't remove #{lf} for an unknown reason: #{$!}")
+            lf.remove || self.wrn(__FILE__, __LINE__, __METHOD_NAME__, "can't remove #{lf} for an unknown reason: #{$!}")
           )
         }
       }
@@ -163,36 +196,45 @@ module GuardIO {
         self._lock_exists(target, cleanup)
       } else {
         Atomic::awrite(lock_file, self.UUID)
-        self.vbs(__LINE__, __METHOD_NAME__, "created #{_bn(lock_file)}")
+        self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, "created #{ellipsify_absolute(lock_file)}")
       }
     }
 
     method do_lock_files {
-      self.config_setup
+      self._setup_done || die "#{__METHOD_NAME__}: setup not done!"
       self._do_remove_old_lock
-      self.trc(__LINE__, __METHOD_NAME__, "locking FODs: #{self.locked_fods.map{ _bn(_) }.join(', ')}")
+      self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, "locking FODs: #{self.locked_fods.map{ ellipsify_absolute(_) }.join(', ')}")
       self.locked_fods.each{
           |target|
         self._do_lock_file( target, false )
       }
-      self.vbs(__LINE__, __METHOD_NAME__, "done locking FODs!")
+      self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, "done locking FODs!")
     }
 
-    method cleanup_lock_files {
-      self.config_setup
-      self.trc(__LINE__, __METHOD_NAME__, "cleanup lock files for FODs: #{self.locked_fods.map{ _bn(_) }.join(', ')}")
+    method cleanup {
+      self._setup_done || die "#{__METHOD_NAME__}: setup not done!"
+      self.log.trc(__FILE__, __LINE__, __METHOD_NAME__,
+        "cleanup lock files for FODs: #{self.locked_fods.map{ ellipsify_absolute(_) }.join(', ')}")
       self.locked_fods.each{
           |target|
         self._do_lock_file( target, true )
       }
-      self.vbs(__LINE__, __METHOD_NAME__, "cleaned up lock files!")
+      self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, "cleaned up lock files!")
     }
   }
 
 
+  include util_classes
   module CacheDBStateless {
     include Atomic
-    func _read_disk_db (File name, Object wanted_typename = nil) is cached -> Hash {
+
+    import util_classes::DirSum
+    import util_classes::SrcSums
+    import util_classes::BlobSums
+    import util_classes::BuiltObj
+
+    # look for the database file
+    func _read_disk_db (File name) is cached -> Hash {
       # look for the database file
       # if it doesn't exist, stop
       # otherwise, open it
@@ -210,10 +252,7 @@ module GuardIO {
       if (! eval_contents) {
         return Hash()
       }
-      if ( defined(wanted_typename) ) {
-        # if it contains [Type()...], it's nonempty -> [Type()...]
-        eval_contents.values.all{ .is_a(wanted_typename) } || die "Found garbage in #{name}: #{contents}"
-      }
+
       return eval_contents
     }
 
@@ -227,63 +266,64 @@ module GuardIO {
   }
 
   # todo: make it actually caching
-  class CacheDB (File db_base, Dir db_dir, Bool dry_run) {
+  class CacheDB (File db_base = nil, Dir db_dir = nil, Bool dry_run = nil) < util_classes::CapturedWriter {
 
     has Array change_sequence
     has Hash data
+    has guardio::SLog log
+
+    method setup (Bool verbose = false, Bool replace_existing = false) {
+      self.log = guardio::SLog(is_verbose: verbose)
+      if (self.db_name.exists && replace_existing) {
+        self.log.wrn(__FILE__, __LINE__, __METHOD_NAME__, "!!! removing old DB !!!")
+        self.db_name.cleave({ .remove }, { .touch })
+      }
+      if (! self.db_name.exists) { self.db_name.touch }
+      self
+    }
 
     -> db_name { self.db_dir + self.db_base }
-
-    method capture_write_disk (String caller_name, Block operation) {
-      if (! self.dry_run) {
-        self.vbs(__LINE__, __METHOD_NAME__, "#{caller_name}: writing disk with", operation)
-        return operation.run
-      }
-      self.vbs(__LINE__, __METHOD_NAME__, "#{caller_name}: not writing disk (dry run)")
-      nil
-    }
+    -> wd { self.db_dir }
 
     method read_disk_db () is cached -> Hash {
-      self.config_setup
-      self.trc(__LINE__, __METHOD_NAME__, 'reading', self.db)
+      self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, 'reading', self.db_name)
 
-      CacheDBStateless::_read_disk_db(self.db)
+      self.with_directory{ CacheDBStateless::_read_disk_db(self.db_base) }
     }
 
-    method load_db () is cached -> Hash {
-      self.vbs(__LINE__, __METHOD_NAME__, 'loading db...')
+    method load () is cached -> Hash {
+      self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, 'loading db...')
       static const db_data
       if (! defined(db_data)) {
-        self.vbs(__LINE__, __METHOD_NAME__, 'wasn\'t cached!')
+        self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, 'wasn\'t cached!')
         db_data = self.read_disk_db
       }
       db_data
     }
 
-    method write_disk_db (Hash new_data, Object wanted_typename) {
+    method write_disk_db (Hash new_data) {
       const MN = __METHOD_NAME__
-      self.config_setup
-      self.trc(__LINE__, MN, 'writing', self.db)
+      self.log.trc(__FILE__, __LINE__, MN, 'writing', self.db_name)
 
-      if ( defined(new_data) && Bool(new_data) && new_data.values.all{ .is_a(wanted_typename) } ) {
-        self.capture_write_disk(MN, { CacheDBStateless::_write_disk_db(self.db, new_data) } ) #, __METHOD_NAME__ )
+      if ( new_data ) {
+        self.capture_write_disk(MN, { CacheDBStateless::_write_disk_db(self.db_base, new_data) } ) #, __METHOD_NAME__ )
       } else {
-        self.cleanup_lock_files
+        # *(self.parent_obj) -> cleanup
         die "[ERROR]\t#{__METHOD_NAME__}: garbage argument #{new_data}"
       }
     }
 
     # TODO: don't write the disk right away
-    method db_insert (Object new_entry) {
-      self.trc(__LINE__, __METHOD_NAME__, 'inserting', new_entry)
-      const entire_db = self.load_db
+    method insert (Object new_entry) {
+      self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, 'inserting', new_entry)
+      const entire_db = self.load
       entire_db{new_entry.id} = new_entry
       self.write_disk_db( entire_db )
     }
 
-    method db_delete (Object key) {
-      self.trc(__LINE__, __METHOD_NAME__, 'removing id \'', key, "'")
-      const entire_db = self.load_db
+    method delete (Object key) {
+      self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, 'removing id \'', key, "'")
+      const entire_db = self.load
       entire_db.delete(key)
       self.write_disk_db( entire_db )
     }

@@ -1,15 +1,14 @@
-
+#! ruby
 # sidef -WkP8
 # /usr/bin/env
 #`(exit the shell) {
   eval 'exec sidef -WkP8 $0 ${1+"$@"}'
 }
 
-inlcude shell_words
-
 module Optionals {
   # look for rar and 7z
   # look for /usr/share/dict/words
+  # if nonexistent, force words=false in make_uuid
 }
 
 module Compress {

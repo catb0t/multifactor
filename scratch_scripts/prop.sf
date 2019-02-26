@@ -1,0 +1,55 @@
+#! ruby
+# LOL
+# func typeof (obj) { eval(obj.class) }
+
+# class Broken {
+#   # underscore properties are not enumerated in .methods()
+#   # they are actually "private", compared to in Python
+#   has __properties = :( :a => Number )
+#
+#   # can't get the annotated type of a name
+#   has Number _a
+#
+#   method init {
+#     # getters
+#     self.__properties.each_kv{
+#         |name, _|
+#       __CLASS__.def_method(name, -> (self) -> typeof(type) { self{:_ + name} } )
+#     }
+#
+#     # setters
+#     # def_method overrides the previous one; need add_overload
+#     self.__properties.each_kv{
+#         |name, typename|
+#       __CLASS__.def_method(name, -> (self, typeof(typename) type_val) -> __CLASS__ {
+#         # should work but doesn't
+#         die "setter typecheck" if (type_val !~ typename) # self.__properties\{name}
+#         self{:_ + name} = type_val
+#         self
+#       })
+#     }
+#   }
+#
+# }
+
+/* abstract interface */
+class GenerateAccessors {
+  method init {
+    self._do_serial([]){
+        |k, v|
+      # create the slot
+      self{:_ + k} = v()
+
+      -> accessor (self) {          self{:_ + k} }
+      -> accessor (self, new_val) { self{:_ + k} = new_val }
+
+      __CLASS__.def_method(k, accessor)
+    }
+  }
+}
+
+var g = GenerateAccessors()
+
+# say g.methods
+say g.n(1)
+say g.n

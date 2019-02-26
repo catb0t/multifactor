@@ -1,0 +1,59 @@
+include util_classes
+import util_classes::Serializable
+
+class RawProps (p1 = "", p2 = "", p3 = Hash()) < Serializable {
+  has Hash serial_properties = Hash(
+    :p1 => String,
+    :p2 => String,
+    :p3 => Hash,
+  )
+}
+
+class Accessors (String _prop1 = '', String _prop2 = '', Hash _prop_hash = Hash()) < Serializable {
+  has Hash serial_properties = Hash(
+    :prop1 => String,
+    :prop2 => String,
+    # this property is a raw hash
+    :prop_hash => Hash,
+  )
+
+  -> prop1 () -> String { self._prop1 }
+  -> prop2 () -> String { self._prop2 }
+  -> prop_hash () -> Hash { self._prop_hash }
+
+  -> prop1 (String x) { self._prop1 = x; self }
+  -> prop2 (String x) { self._prop2 = x; self }
+  -> prop_hash (Hash x) { self._prop_hash = x; self }
+}
+
+class TestSerial < Serializable {
+  has Hash serial_properties = Hash(
+    :a => String,
+    :acc => Accessors,
+    :rp => RawProps,
+  )
+
+  # builtin type, not serializable
+  has String _a = ""
+  # this serializable property uses setter accessors
+  has Accessors _acc = Accessors()
+  # this serializable property uses bare property assignment
+  has RawProps _rp = RawProps()
+
+  -> a () -> String { self._a }
+  -> a (Str x) { self._a = x }
+
+  -> acc () -> Accessors { self._acc }
+  -> acc (Accessors a) { self._acc = a }
+
+  -> rp () -> RawProps { self._rp }
+  -> rp (RawProps r) { self._rp = r }
+}
+
+var ts = TestSerial()
+ts.a("asd")
+ts.acc( Accessors(_prop1: "abc", _prop2: "def", _prop_hash: Hash(1 => 2)) )
+ts.rp( RawProps(p1: "p1", p2: "p2", p3: Hash(:p => 3) ) )
+var Hash s = ts.serialize
+var new_ts = TestSerial().unserialize(s)
+say (ts.dump == new_ts.dump) # ==> true
