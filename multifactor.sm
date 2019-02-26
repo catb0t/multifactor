@@ -74,7 +74,6 @@ module MultiFactor {
   include FactorBashStateless
   include GuardIO
 
-
   func compare_properties (Array properties, BuiltObj b, Object o, Bool debug = false) {
     if (debug) {
       properties.map{
@@ -89,7 +88,10 @@ module MultiFactor {
     }
   }
 
-  class Runtime (Hash options, Array factor_arguments) < util_classes::CapturedWriter {
+  class Runtime
+      (Hash options, Array factor_arguments)
+      << util_classes::SeriallyAccessible, util_classes::CapturedWriter
+  {
     has Bool _config_setup_done = false # whether the following variables have been written
     has Str _action
     has Array known_actions = ['env-info', 'src-sums', 'run-factor']

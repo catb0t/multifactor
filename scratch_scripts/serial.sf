@@ -55,5 +55,36 @@ ts.a("asd")
 ts.acc( Accessors(_prop1: "abc", _prop2: "def", _prop_hash: Hash(1 => 2)) )
 ts.rp( RawProps(p1: "p1", p2: "p2", p3: Hash(:p => 3) ) )
 var Hash s = ts.serialize
+say ts.dump
+say s
 var new_ts = TestSerial().unserialize(s)
 say (ts.dump == new_ts.dump) # ==> true
+
+var J = "JSON::PP".require
+
+var j = J.new.pretty.convert_blessed
+
+var json = j.encode(s)
+say json
+
+var from_json = j.decode(json)
+
+say from_json
+
+var roundtrip_ts
+try {
+  roundtrip_ts = TestSerial().unserialize(from_json)
+} catch {
+  # this solution can be generalised, and this use of eval does not touch
+  #   the long base64 strings
+  # a transformer function which transforms Sidef::Runtime::7846239478234::main::ClassName
+  #   into main::ClassName and then evals it
+  # and a recursive descent (depth-first) search for serialised / _serial_type entries
+  #   generalised from Serializable.unserialize
+
+  # but can we do it without eval?
+  from_json{:acc}{:_serial_type} = eval("main::Accessors")
+  from_json{:rp}{:_serial_type} = eval("main::RawProps")
+  roundtrip_ts = TestSerial().unserialize(from_json)
+}
+say (roundtrip_ts.dump==ts.dump)

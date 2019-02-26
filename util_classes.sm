@@ -52,6 +52,12 @@ class Object {
   -> serializable {
     self.has_method(:serial_properties)
   }
+  -> grep_methods (Block g) -> Hash {
+    self.methods.grep_kv(g)
+  }
+  -> grep_map_methods (Block g, Block m) -> Hash {
+    self.grep_methods(g).map_kv(m)
+  }
 }
 
 class Array {
@@ -72,16 +78,21 @@ class Array {
 # i really must apologise for writing all these abstract classes, it's unlike me
 # something has come over me... it's simply too easy.....
 
-# can be turned into a pure-perl representation
+# a Sidef object can be turned into a pure-perl representation
 /* abstract interface */ # /
 class Serializable {
   # has Hash serial_properties
 
   -> _serial_properties_excluding (Array x) {
-    self.methods \
-      .grep_kv{ |k, _| k ~~ /^serial_properties/ } \
+    self.grep_methods{ |name, _| name ~~ /^serial_properties/ } \
       .values \
-      .map{ |mth| mth().grep_kv{ |k, _| !x.contains(k) } } \
+      .map{
+          |calls|
+        calls().grep_kv{
+            |prop_name, _|
+          !x.contains(prop_name)
+        }
+      } \
       .reduce{ |l, r| l.merge(r) }
   }
   # -> _do_serial (Array x) -> Block {
@@ -126,7 +137,7 @@ class Serializable {
       if (
         entry.is_a( Hash ) && entry.keys.sort==[:_serial_type, :_serial_value] && entry{:_serial_value}.is_a( Hash )
       ) {
-        die "unserialize typecheck: #{entry{:_serial_type}} !~ #{typename}}" \
+        die "unserialize typecheck: '#{entry{:_serial_type}.dump}' !~ '#{typename.dump}'" \
           if (entry{:_serial_type} !~ typename)
 
         entry{:_serial_type}() \
@@ -195,18 +206,19 @@ class VirtualBase64Blob (Str data = '', Str algo = '', Str sum ='') < SeriallyEq
   has Hash serial_properties = [:data, :algo, :sum].map{ ( (_) => Str ) }.to_h
 }
 
-/* mixin */ # /
-class InitExtender {
-  method init {
-    self.methods.grep_kv{ _ ~~ /^_extend_init_with/ }.each_kv{ |_, v| v().each{ .run(self) } }
-  }
+# call side effecting blocks in methods of obj found by the regex r
+func call_se_blocks_in_methods_by (obj, Regex r) {
+  obj.grep_map_methods(
+    { |name, _| name ~~ r },
+    { |_, calls| calls().each{ |block| block.run(obj) } }
+  )
 }
 
+# mixin class ExtraInitSteps { method init { call_se_blocks_in_methods_by(self, /^extra_init_steps/) } }
+
 # generates accessors based on the serializable properties
-# TODO: add support for the serial_properties values being arrays with defaults
-#   and custom accessors
 /* abstract interface */ # /
-class SeriallyAccessible << InitExtender, SeriallyEquatable {
+class SeriallyAccessible < SeriallyEquatable {
   has Bool _impl_locked = false
   has String _impl_write_locked = 'attempt of write to locked '+__CLASS_NAME__+' object!'
 
@@ -214,10 +226,16 @@ class SeriallyAccessible << InitExtender, SeriallyEquatable {
   -> lock (Bool b) { self._impl_locked = b }
   -> unlock { self._impl_locked = false }
 
-  has Array _extend_init_with_seriallyaccessible = [ { |self| self._generate_serial_accessors } ]
+  has Array extra_init_steps_seriallyaccessible = [
+    { ._do_serial([], ._bind_self_in_accessor_generator) },
+    { .grep_map_methods(
+      { _ ~~ /^serial_property_generators/ },
+      ._bind_self_in_accessor_generator
+    )}
+  ]
 
-  method _generate_serial_accessors {
-    self._do_serial([], {
+  -> _bind_self_in_accessor_generator () -> Block {
+    {
         |k, v|
       const typename = (v[0] || v)
       const default_val = (v[1] || v())
@@ -256,13 +274,20 @@ class SeriallyAccessible << InitExtender, SeriallyEquatable {
 
       # template<typename T>
       __CLASS__.def_method(k, accessor)
-    })
+    }
+  }
+
+  method init {
+    call_se_blocks_in_methods_by(self, /^extra_init_steps/)
   }
 }
 
-# class TimeSpec < Serializable {}
+class TimeSpec < SeriallyAccessible {
+  has Hash serial_properties = [:created, :modified, :accessed, :tombstoned].map { ( (_) => Str ) }.to_h
+}
 
 class BuiltObj < SeriallyAccessible {
+  has Array _blob_targets = [:vm, :lib, :image, :boot]
   has Hash serial_properties = Hash(
     :id => Str,
     :factor_version => Str,
@@ -278,28 +303,27 @@ class BuiltObj < SeriallyAccessible {
     :stored_boot_image => VirtualBase64Blob,
     :src_sums => SrcSums,
     :blob_sums => BlobSums,
-    :blob_algorithm => [Str, :sha256, :( :get => { |self| self.blob_sums.algo || self._blob_algorithm } ) ], # default: sha256
+    :blob_algorithm => [Str, :sha256, :( :get => { .blob_sums.algo || ._blob_algorithm } ) ], # default: sha256
 
-    :time_created => Num,
-    :time_modified => Num,
-    :time_accessed => Num,
-    :time_tombstoned => [Str, :never], # default: never
-
-    # this is probably useless
-    # all same length and support platform-prefixes
-    :vm_format    => Array,
-    :image_format => Array,
-    :lib_format   => Array,
-    :boot_format  => Array
+    :timespec => TimeSpec,
   )
 
+  # going to generate accessors instead of naming them
+  # note the lack of def_method in the block; this simply arbitrarily
+  #   extends the serial_properties hash to make new accessors
+  #
+  # all same length and support platform-prefixes
+  # vm_format, etc
+  has Array serial_property_generators_builtobj = [ { ._blob_targets.map{ ( (_ + :_format) => Array) }.to_h } ]
+
+  # these are not accessors, just methods that glue accessed values together
   # create boot_fullname etc
-  has Array _extend_init_with_builtobj = [ {
-      |self|
-    [:vm, :lib, :image, :boot].each{
+  has Array extra_init_steps_builtobj = [ {
+      # |self|
+    ._blob_targets.each{
         |name|
       const name_format = name+:_format
-      __CLASS__.def_method(name + :_fullname, -> () -> File {
+      __CLASS__.def_method(name + :_fullname, -> (self) -> File {
         File( String( self.method(name_format)[0, 1] ) + self.id + self.method(name_format)[2] )
       })
     }
