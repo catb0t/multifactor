@@ -1,12 +1,19 @@
 include util_classes
 import util_classes::Serializable
 
-class RawProps (p1 = "", p2 = "", p3 = Hash()) < Serializable {
+class Tiny (field = "") < Serializable {
+  has Hash serial_properties = Hash(
+    :field => String
+  )
+}
+
+class RawProps (p2 = Tiny(), p3 = Hash()) < Serializable {
   has Hash serial_properties = Hash(
     :p1 => String,
-    :p2 => String,
+    :p2 => Tiny,
     :p3 => Hash,
   )
+  has String p1 = "default p1"
 }
 
 class Accessors (String _prop1 = '', String _prop2 = '', Hash _prop_hash = Hash()) < Serializable {
@@ -50,10 +57,32 @@ class TestSerial < Serializable {
   -> rp (RawProps r) { self._rp = r }
 }
 
+func transform_typename (String typename) -> Object {
+  eval( (/^Sidef::Runtime::\d+::(main::.+)$/ =~ typename)[0] )
+}
+
+func is_serialized_hash (Object obj) -> Bool {
+  obj.is_a( Hash ) && obj.keys.sort==[:_serial_type, :_serial_value] && obj{:_serial_value}.is_a( Hash )
+}
+
+func make_serial_typenames (Hash data) -> Hash {
+  data.map_kv{
+      |name, entry|
+    ((name) => if ( is_serialized_hash(entry) ) {
+      Hash(
+        :_serial_type => transform_typename( entry{:_serial_type} ),
+        :_serial_value => make_serial_typenames( entry{:_serial_value} )
+      )
+    } else {
+      entry
+    })
+  }
+}
+
 var ts = TestSerial()
 ts.a("asd")
 ts.acc( Accessors(_prop1: "abc", _prop2: "def", _prop_hash: Hash(1 => 2)) )
-ts.rp( RawProps(p1: "p1", p2: "p2", p3: Hash(:p => 3) ) )
+ts.rp( RawProps(p2: Tiny(field: "p2"), p3: Hash(:p => 3) ) )
 var Hash s = ts.serialize
 say ts.dump
 say s
@@ -62,29 +91,36 @@ say (ts.dump == new_ts.dump) # ==> true
 
 var J = "JSON::PP".require
 
-var j = J.new.pretty.convert_blessed
+var j = J.new.pretty # .convert_blessed
 
 var json = j.encode(s)
 say json
 
 var from_json = j.decode(json)
 
-say from_json
+# say from_json
 
-var roundtrip_ts
-try {
-  roundtrip_ts = TestSerial().unserialize(from_json)
-} catch {
-  # this solution can be generalised, and this use of eval does not touch
-  #   the long base64 strings
-  # a transformer function which transforms Sidef::Runtime::7846239478234::main::ClassName
-  #   into main::ClassName and then evals it
-  # and a recursive descent (depth-first) search for serialised / _serial_type entries
-  #   generalised from Serializable.unserialize
-
-  # but can we do it without eval?
-  from_json{:acc}{:_serial_type} = eval("main::Accessors")
-  from_json{:rp}{:_serial_type} = eval("main::RawProps")
-  roundtrip_ts = TestSerial().unserialize(from_json)
-}
+var roundtrip_ts = TestSerial().unserialize(from_json, eval_scope: { eval(_) })
+# try {
+#   roundtrip_ts = TestSerial().unserialize(from_json)
+# } catch {
+#     |_, msg|
+#   say msg
+#   # this solution can be generalised, and this use of eval does not touch
+#   #   the long base64 strings
+#   # a transformer function which transforms Sidef::Runtime::94846239478234::main::ClassName
+#   #   into main::ClassName and then evals it
+#   # and a recursive descent (depth-first) search for serialised / _serial_type entries
+#   #   generalised from Serializable.unserialize
+#   # could it be done inside unserialize? would the classname be in scope there,
+#   #   if the unserialize definition appears before the class declaration, but both
+#   #   have been seen before the unserialize invocation?
+#
+#   # but can we do it without eval?
+#   # from_json{:acc}{:_serial_type} = eval("main::Accessors")
+#   # from_json{:rp}{:_serial_type} = eval("main::RawProps")
+#   var fixed = make_serial_typenames(from_json)
+#   say fixed
+#   roundtrip_ts = TestSerial().unserialize( fixed )
+# }
 say (roundtrip_ts.dump==ts.dump)

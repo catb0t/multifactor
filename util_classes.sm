@@ -1,10 +1,18 @@
 #! ruby
+# Petition to rename this module "Abstract Base Classes" or something
+
+# Hello Mother!
 class Object {
+  # Apply a series of blocks to an object, accumulating the results in an Array
+  # also useful to bind a value to a name or _ without an explicit definition
+  # sort of like `let` in lisp
   method cleave (*blocks) {
     blocks.map{ .run(self) } # ...
   }
+  # Apply the block CARs in the argument to self, using the
+  #   CDRs as the blocks' arguments, and accumulating the results in an array
   method ifold (*bv_pairs) {
-    bv_pairs.map{ |p| p.first.run( self, @(p.second)... ) }
+    bv_pairs.map{ |p| p.first.run( self, @|(p.second) ) }
   }
   # ???
   -> _map_cleave_r (blocks, vals) {
@@ -25,7 +33,28 @@ class Object {
     }
     vals
   }
-  -> has_method (String name, Bool give_msg = false, *args) {
+
+  # Simply whether the object says it declares the method `name`
+  #   without attempting to call that method
+  # Sometimes, especially for builtin types, a method appears in `.methods`
+  #   but cannot actually be called
+
+  # Such methods can be used to tell whether an object is a bare typename
+  # But also very useful to ask whether the method is publically declared
+  #   without calling it
+  # This only searches public methods, and those not starting with an underscore _
+  -> declares_method (String name) -> Bool {
+    self.methods.grep_kv{ |n, _| n ~~ name }
+  }
+
+  # -> Bool or, if give_msg is true, the text of the error messsage
+  # Check whether the object can respond to the method with the given
+  #   number of arguments, without the possibility of changing the object
+  #   itself
+
+  # True if the method call with the number of arguments didn't throw an exception
+  #   false otherwise, or the error message
+  -> has_overload (String name, Bool give_msg = false, *args) {
     try {
       # don't change self
       self.dclone.method(name)(args...)
@@ -36,6 +65,32 @@ class Object {
     }
   }
 
+  # The object has declared the method by the name, and it is invokable
+  #   though it may fail overload resolution with the specific number of arguments
+  # If the invocation throws "no method" for example, it's not even invokable
+
+  # The method is public if it appears in `.methods`
+  # The method is concrete if it can be successfully invoked, or if it can
+  #   be invoked with the wrong number of arguments
+  -> has_public_concrete_method (String name, *args) -> Bool {
+    self.cleave(
+      { .declares_method(name) },
+      {
+        const res = .has_overload(name, give_msg: true, args...)
+        (res ~~ /does not match/) || res
+      }
+    ).all
+  }
+
+  # The object has declared the overload of the method by the name with the
+  #   specific number of arguments
+
+  # The overload is public if its parent LazyMethod name appears in `.methods`
+  # The overload is concrete if it can be successfully invoked with the specific
+  #   number of arguments
+  -> has_public_concrete_overload (String name, *args) -> Bool {
+    self.cleave( { .declares_method(name) }, { .has_overload(name, args...) } ).all
+  }
   # there's no direct way to tell if an object method is a property declared with "has"
   #   or an accessor declared with -> name ...
   # but if we call it with too many / wrong type arguments and it fails, it's a setter accessor
@@ -45,19 +100,33 @@ class Object {
   #   which is what you get for using simple blocks with |_| captures,
   #   or no typed parameters in setter accessors :)
   -> is_property (String name, Object arg) {
-    # if has_method fails for a reason related to invocation,
+    # if has_overload fails for a reason related to invocation,
     #   it's a setter accessor with a parameter list and not a property
-    /does not match/ !~ self.has_method(name, give_msg: true, arg, :extra_arg)
+
+    # assuming the method by that name exists....
+
+    # NOTE: we are intentionally trying to give too many arguments to an
+    #   accessor-or-property method
+    # if it is a declared accessor it will complain about "does not match"
+    #   therefore it's not a property
+    # property "methods" don't care how many arguments they get
+    /does not match/ !~ self.has_overload(name, give_msg: true, arg, :extra_arg)
   }
+
+  # Well, Aren't I special?
   -> serializable {
-    self.has_method(:serial_properties)
+    self.has_overload(:serial_properties)
   }
+
+  # find methods matching the block
   -> grep_methods (Block g) -> Hash {
     self.methods.grep_kv(g)
   }
+  # like grep_methods, but also apply a block to the results
   -> grep_map_methods (Block g, Block m) -> Hash {
     self.grep_methods(g).map_kv(m)
   }
+
 }
 
 class Array {
@@ -75,10 +144,36 @@ class Array {
   }
 }
 
+# Extract the base fully-qualified typename from the "overqualified" Perlescent
+#   stringified typename
+func transform_typename (String typename) -> String {
+  (/^Sidef::Runtime::\d+::(main::.+)$/ =~ typename)[0]
+}
+
+# This will magically disappear as soon as subsets can be ~~ smartmatched against
+func is_serialized_hash (Object obj) -> Bool {
+  obj.is_a( Hash ) && obj.keys.sort==[:_serial_type, :_serial_value] && obj{:_serial_value}.is_a( Hash )
+}
+
+# Try to figure out if the object is a raw typename
+#   If your class defines these specific properties too,
+# Sidef and I will probably scream
+func is_baseclass (Object obj) -> Bool { obj.declares_method(:compile_to_perl) && obj.declares_method(:code_interactive) }
+func is_typename  (Object obj) -> Bool { is_baseclass(obj) }
+
+# Whether the object is a fully-qualified constructed object
+# i.e. an invoked object like String() or MyClass()
+func is_fqco (Object obj, String extra_property) -> Bool {
+  Bool( obj.declares_method(extra_property) && !is_typename(obj) )
+}
+
+
 # i really must apologise for writing all these abstract classes, it's unlike me
 # something has come over me... it's simply too easy.....
 
-# a Sidef object can be turned into a pure-perl representation
+
+# a Sidef object can be turned into a pure-perl representation for the purpose of
+#   use in JSON etc, and then turned back to Sidef again
 /* abstract interface */ # /
 class Serializable {
   # has Hash serial_properties
@@ -101,7 +196,7 @@ class Serializable {
   -> _do_serial (Array x, Block d) -> Hash {
     self._serial_properties_excluding(x).map_kv(d)
   }
-  # every object we encount is either Serializable or builtin
+  # every object we encounter is either Serializable or builtin
   # if it's incorrectly written as non-builtin and non-Serializable
   # then it will appear as a round-trip error
   method serialize (Array exclude = []) -> Hash {
@@ -120,7 +215,9 @@ class Serializable {
     })
   }
 
-  method unserialize (Hash data, Array exclude = [], Bool only_extant_fields = false) -> __CLASS__ {
+  # the justification for the scoping rules that introduce eval_scope
+  #   is entirely legitimate
+  method unserialize (Hash data, Array exclude = [], Bool only_extant_fields = false, eval_scope = false) -> __CLASS__ {
     self._do_serial(exclude, {
         |prop, typename|
       # when only_extant_fields is true, don't fill all missing keys in data as nil
@@ -134,14 +231,32 @@ class Serializable {
       # we need to distinguish "internal" hashes from actual ones
       # missing feature: can't smartmatch against subsets
 
-      if (
-        entry.is_a( Hash ) && entry.keys.sort==[:_serial_type, :_serial_value] && entry{:_serial_value}.is_a( Hash )
-      ) {
-        die "unserialize typecheck: '#{entry{:_serial_type}.dump}' !~ '#{typename.dump}'" \
-          if (entry{:_serial_type} !~ typename)
+      if ( is_serialized_hash(entry) ) {
+        const serial_type = entry{:_serial_type}
+        # say "serial_type: #{serial_type.ref} #{is_baseclass(serial_type)}"
+        # we need to check if serial_type is a second-class stringified typename
 
-        entry{:_serial_type}() \
-          .unserialize( entry{:_serial_value}, exclude: exclude, only_extant_fields: only_extant_fields )
+        if ( serial_type.is_a( String ) && is_fqco(serial_type, :len) ) {
+          # serial_type is a String() object, not the String base class
+          # say "fqco: '#{serial_type.dump}' '#{tfd}' es: #{defined(eval_scope)}"
+          transform_typename( serial_type ).cleave{
+            eval_scope ? eval_scope(_) : eval(_)
+          }.last
+
+        } elsif ( serial_type.is_a( typename ) && is_typename( serial_type ) ) {
+          # serial_type is a base class
+          serial_type
+        } else {
+          # serial_type is either the wrong typename for the property
+          #   or a constructed object, not a typename
+          die "unserialize typecheck: '#{serial_type.dump}' !~ '#{typename.dump}'"
+
+        }().unserialize(
+          entry{:_serial_value},
+          exclude: exclude,
+          only_extant_fields: only_extant_fields,
+          eval_scope: eval_scope
+        )
         #const new_obj = entry{:_serial_type}()
         ### is this ever false?
         #(new_obj.serializable
@@ -229,9 +344,9 @@ class SeriallyAccessible < SeriallyEquatable {
   has Array extra_init_steps_seriallyaccessible = [
     { ._do_serial([], ._bind_self_in_accessor_generator) },
     { .grep_map_methods(
-      { _ ~~ /^serial_property_generators/ },
+      { _ ~~ /^serial_property_generator/ }, # => Hash
       ._bind_self_in_accessor_generator
-    )}
+    ) }
   ]
 
   -> _bind_self_in_accessor_generator () -> Block {
@@ -314,7 +429,7 @@ class BuiltObj < SeriallyAccessible {
   #
   # all same length and support platform-prefixes
   # vm_format, etc
-  has Array serial_property_generators_builtobj = [ { ._blob_targets.map{ ( (_ + :_format) => Array) }.to_h } ]
+  has Array serial_property_generator_builtobj = [ { ._blob_targets.map{ ( (_ + :_format) => Array) }.to_h } ]
 
   # these are not accessors, just methods that glue accessed values together
   # create boot_fullname etc
