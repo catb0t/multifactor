@@ -158,7 +158,7 @@ func is_serialized_hash (Object obj) -> Bool {
 #   If your class defines these specific properties too,
 # Sidef and I will probably scream
 func is_baseclass (Object obj) -> Bool {
-  Bool( obj.declares_method(:compile_to_perl) && obj.declares_method(:code_interactive) )
+  [:compile_to_perl, :code_interactive].all{ obj.declares_method(_) }
 }
 func is_typename  (Object obj) -> Bool { is_baseclass(obj) }
 
@@ -204,11 +204,28 @@ class Serializable {
   # every object we encounter is either Serializable or builtin
   # if it's incorrectly written as non-builtin and non-Serializable
   # then it will appear as a round-trip error
-  method serialize (Array exclude = []) -> Hash {
+  method serialize (Array exclude = [], Bool only_extant_fields = false) -> Hash {
     self._do_serial(exclude, {
         |prop, typename|
+      # the prop name could be a raw property, an accessor, or nonexistent entirely
+      # if it doesn't exist, only die when only_extant_fields is true,
+      #   else pass with nil
+
       # call the accessor if it's an accessor, otherwise call the property-method
-      const value = self.method( prop )()
+      # if the method isn't callable for some reason, try directly accessing the property
+      #   which probably won't yield a different result and still die
+
+      const value = if ( self.has_overload(prop) ) {
+        self.method( prop )()
+      } elsif ( self.is_property(prop) ) {
+        self{prop} \\ (!only_extant_fields
+          ? nil
+          : die (
+            "#{__METHOD_NAME__}: Field #{prop} is a nil field without an ",
+            "accessor, or does not exists entirely! ",
+            "#{__CLASS_NAME__}::#{__METHOD_NAME__}(only_extant_fields: true, ...)")
+          )
+      }
 
       # say "serialize '#{prop}' serializable: #{s10e} type: #{typename} value: #{value.dump}"
       ( (prop) => (
