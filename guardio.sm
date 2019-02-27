@@ -18,7 +18,7 @@
 ##
 ##    You should have received a copy of the GNU General Public License
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-include util_classes
+include ABCs
 include shell_words
 
 func _bn (Str f) { File(f).basename.split('.').first }
@@ -224,14 +224,14 @@ module GuardIO {
   }
 
 
-  include util_classes
+  include ABCs
   module CacheDBStateless {
     include Atomic
 
-    import util_classes::DirSum
-    import util_classes::SrcSums
-    import util_classes::BlobSums
-    import util_classes::BuiltObj
+    import ABCs::DirSum
+    import ABCs::SrcSums
+    import ABCs::BlobSums
+    import ABCs::BuiltObj
 
     # look for the database file
     func _read_disk_db (File name) is cached -> Hash {
@@ -266,7 +266,7 @@ module GuardIO {
   }
 
   # todo: make it actually caching
-  class CacheDB (File db_base = nil, Dir db_dir = nil, Bool dry_run = nil) < util_classes::CapturedWriter {
+  class CacheDB (File db_base = nil, Dir db_dir = nil, Bool dry_run = nil) < ABCs::CapturedWriter {
 
     has Array change_sequence
     has Hash data

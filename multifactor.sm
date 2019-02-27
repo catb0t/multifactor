@@ -17,7 +17,7 @@
 ##
 ##    You should have received a copy of the GNU General Public License
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-include util_classes
+include ABCs
 include argparse
 include guardio
 include shell_words
@@ -64,11 +64,11 @@ module Factor {
 
 module MultiFactor {
 
-  include util_classes
-  import util_classes::DirSum
-  import util_classes::SrcSums
-  import util_classes::BlobSums
-  import util_classes::BuiltObj
+  include ABCs
+  import ABCs::DirSum
+  import ABCs::SrcSums
+  import ABCs::BlobSums
+  import ABCs::BuiltObj
 
   include Factor
   include FactorBashStateless
@@ -90,7 +90,7 @@ module MultiFactor {
 
   class Runtime
       (Hash options, Array factor_arguments)
-      << util_classes::SeriallyAccessible, util_classes::CapturedWriter
+      << ABCs::SeriallyAccessible, ABCs::CapturedWriter
   {
     has Bool _config_setup_done = false # whether the following variables have been written
     has Str _action

@@ -367,10 +367,10 @@ module BuildSh {
   -> blob_file_contents_sum (File f, Str algo) { f |> :open_r |> :slurp |> :encode_utf8 |> (algo || :sha256) }
 }
 
-include util_classes
-import util_classes::BuiltObj
-import util_classes::SrcSums
-import util_classes::DirSum
+include ABCs
+import ABCs::BuiltObj
+import ABCs::SrcSums
+import ABCs::DirSum
 
 module FactorBashStateless {
 
@@ -400,11 +400,11 @@ module FactorBashStateless {
     res
   }
 
-  -> _test_candidate_boot_image (util_classes::BuiltObj bo, File c) {
+  -> _test_candidate_boot_image (ABCs::BuiltObj bo, File c) {
     c.exists && (bo.blob_sums.boot == BuildSh::blob_file_contents_sum(c, bo.blob_sums.algo) )
   }
 
-  -> _choose_boot_image (util_classes::BuiltObj bo_target, File boot_image_file) {
+  -> _choose_boot_image (ABCs::BuiltObj bo_target, File boot_image_file) {
     # Array<Pair<Bool, File>>
     [
       Pair(
@@ -439,7 +439,7 @@ module FactorBashStateless {
   }
 }
 
-class FactorBash (Dir wd, Bool subcommand_output = false) < util_classes::WithDirectory { # < CapturedWriter??
+class FactorBash (Dir wd, Bool subcommand_output = false) < ABCs::WithDirectory { # < CapturedWriter??
 
   const DIR_REGEXES = Hash(
     :core => /^core\//,
