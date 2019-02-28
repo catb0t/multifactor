@@ -33,6 +33,9 @@ class Object {
     vals
   }
 
+  # Needs research: how do the following relate to / overlap with / are obviated by
+  #   Object.respond_to?
+
   # Simply whether the object says it declares the method `name`
   #   without attempting to call that method
   # Sometimes, especially for builtin types, a method appears in `.methods`
@@ -45,6 +48,10 @@ class Object {
   -> declares_method (String name) -> Hash {
     self.methods.grep_kv{ |n, _| n ~~ name }
   }
+
+  # Builtin Object method: test only whether the object has a method by that
+  #   name, regardless of dispatch on arguments
+  /* -> respond_to (String name, *_) -> Bool { self.can(name, _...) } */
 
   # -> Bool or, if give_msg is true, the text of the error messsage
   # Check whether the object can respond to the method with the given
