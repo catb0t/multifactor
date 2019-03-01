@@ -100,7 +100,7 @@ var from_json = j.decode(json)
 
 # say from_json
 
-var roundtrip_ts = TestSerial().unserialize(from_json, eval_scope: { eval(_) })
+var roundtrip_ts = TestSerial().unserialize(from_json)
 # try {
 #   roundtrip_ts = TestSerial().unserialize(from_json)
 # } catch {

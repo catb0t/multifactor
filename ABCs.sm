@@ -156,11 +156,6 @@ func transform_typename (String typename) -> String {
   (/^Sidef::Runtime::\d+::(main::.+)$/ =~ typename)[0]
 }
 
-# This will magically disappear as soon as subsets can be ~~ smartmatched against
-func is_serialized_hash (Object obj) -> Bool {
-  obj.is_a( Hash ) && obj.keys.sort==[:_serial_type, :_serial_value] && obj{:_serial_value}.is_a( Hash )
-}
-
 # Try to figure out if the object is a raw typename
 #   If your class defines these specific properties too,
 # Sidef and I will probably scream
@@ -188,9 +183,11 @@ func is_fqco (Object obj, extra_property = false) -> Bool {
 #   use in JSON etc, and then turned back to Sidef again
 /* abstract interface */ # /
 class Serializable {
+  has String _k_stype = :_serial_type
+  has String _k_svalue = :_serial_value
   # has Hash serial_properties
 
-  -> _serial_properties_excluding (Array x) {
+  -> _impl_serial_properties_excluding (Array x) -> Hash {
     self.grep_methods{ |name, _| name ~~ /^serial_properties/ } \
       .values \
       .map{
@@ -200,14 +197,20 @@ class Serializable {
           !x.contains(prop_name)
         }
       } \
-      .reduce{ |l, r| l.merge(r) }
+      .reduce{ |l, r| l.merge(r) } \\ Hash()
   }
   # -> _do_serial (Array x) -> Block {
   #   func (Block d) { self.serial_properties_excluding(x).map_kv(d) }
   # }
   -> _do_serial (Array x, Block d) -> Hash {
-    self._serial_properties_excluding(x).map_kv(d)
+    self._impl_serial_properties_excluding(x).map_kv(d)
   }
+
+  # This will magically disappear as soon as subsets can be ~~ smartmatched against
+  -> _impl_is_serialized_hash (Object obj) -> Bool {
+    obj.is_a( Hash ) && obj.keys.sort==[self._k_stype, self._k_svalue] && obj{self._k_svalue}.is_a( Hash )
+  }
+
   # every object we encounter is either Serializable or builtin
   # if it's incorrectly written as non-builtin and non-Serializable
   # then it will appear as a round-trip error
@@ -224,11 +227,11 @@ class Serializable {
 
       const value = if ( self.has_overload(prop) ) {
         self.method( prop )()
-      } elsif ( self.is_property(prop) ) {
+      } elsif ( self.is_property(prop, typename()) ) {
         self{prop} \\ (!only_extant_fields
           ? nil
           : die (
-            "#{__METHOD_NAME__}: Field #{prop} is a nil field without an ",
+            "#{__METHOD_NAME__}: Field '#{prop}' is a nil field without an ",
             "accessor, or does not exists entirely! ",
             "#{__CLASS_NAME__}::#{__METHOD_NAME__}(only_extant_fields: true, ...)")
           )
@@ -237,19 +240,23 @@ class Serializable {
       # say "serialize '#{prop}' serializable: #{s10e} type: #{typename} value: #{value.dump}"
       ( (prop) => (
         value.serializable
-          ? Hash(:_serial_type => typename, :_serial_value => value.serialize)
+          ? Hash(
+            (self._k_stype) => typename,
+            (self._k_svalue) => value.serialize(exclude: exclude, only_extant_fields: only_extant_fields))
           : value
         )
       )
     })
   }
 
+  # NOTE: no longer using eval because we have enough type information
+  #   might use it as a backup in the future though
   # the justification for the scoping rules that introduce eval_scope
   #   is entirely legitimate
   # what is not entirely legitimate is the need to use eval to roundtrip
   #   typenames in the first place
   # can we have some kind of python-like globals() and locals() calls for eval?
-  method unserialize (Hash data, Array exclude = [], Bool only_extant_fields = false, eval_scope = false) -> __CLASS__ {
+  method unserialize (Hash data, Array exclude = [], Bool only_extant_fields = false) -> __CLASS__ {
     self._do_serial(exclude, {
         |prop, typename|
       # when only_extant_fields is true, don't fill all missing keys in data as nil
@@ -263,43 +270,38 @@ class Serializable {
       # we need to distinguish "internal" hashes from actual ones
       # missing feature: can't smartmatch against subsets
 
-      if ( is_serialized_hash(entry) ) {
-        const serial_type = entry{:_serial_type}
-        # say "serial_type: #{serial_type.ref} #{is_baseclass(serial_type)}"
-        # we need to check if serial_type is a second-class stringified typename
-
-        if ( serial_type.is_a( String ) && is_fqco(serial_type, extra_property: :len) ) {
-          # serial_type is a String() object, not the String base class
-          # say "fqco: '#{serial_type.dump}' '#{tfd}' es: #{defined(eval_scope)}"
-          transform_typename( serial_type ).cleave{
-            eval_scope ? eval_scope(_) : eval(_)
-          }.last
-
-        } elsif ( serial_type.is_a( typename ) && is_typename( serial_type ) ) {
-          # serial_type is a base class
-          serial_type
-        } else {
-          # serial_type is either the wrong typename for the property
-          #   or a constructed object, not a typename
-          die "unserialize typecheck: '#{serial_type.dump}' !~ '#{typename.dump}'"
-
-        }().unserialize(
-          entry{:_serial_value},
-          exclude: exclude,
-          only_extant_fields: only_extant_fields,
-          eval_scope: eval_scope
-        )
-        #const new_obj = entry{:_serial_type}()
-        ### is this ever false?
-        #(new_obj.serializable
-        #  ? new_obj.unserialize( entry{:_serial_value}, exclude: exclude, only_extant_fields: only_extant_fields )
-        #  : new_obj)
-      } else {
+      if ( !self._impl_is_serialized_hash(entry) ) {
         entry
+      } else {
+        # we need to check if serial_type is a second-class stringified typename
+        # say "serial_type: #{serial_type.ref} #{is_baseclass(serial_type)}"
+        given ( entry{self._k_stype} ) {
+          case ( (
+              .is_a( String ) \
+                && is_fqco(_, extra_property: :len) \
+                && (transform_typename(_) == transform_typename(typename.ref))
+          ) ) {
+            # serial_type is a String() object, not the String base class
+            typename
+          }
+          case ( .is_a( typename ) && is_typename( _ ) ) {
+            # serial_type is a base class
+            _
+          }
+          default {
+            # serial_type is either the wrong typename for the property
+            #   or a constructed object, not a typename
+            die "unserialize typecheck: '#{_.dump}' !~ '#{typename.dump}'"
+          }
+        }().unserialize(
+          entry{self._k_svalue},
+          exclude: exclude,
+          only_extant_fields: only_extant_fields
+        )
       }.cleave{
           |derived|
         # need to test whether prop is an accessor or plain property-method
-        if ( self.is_property(prop, derived) ){
+        if ( self.is_property(prop, derived) ) {
           # say "#{prop} is a property"
           self{prop} = derived
         } else {
@@ -308,7 +310,6 @@ class Serializable {
         }
       }
     })
-
     self
   }
 }
@@ -354,14 +355,13 @@ class VirtualBase64Blob (Str data = '', Str algo = '', Str sum ='') < SeriallyEq
 }
 
 # call side effecting blocks in methods of obj found by the regex r
-func call_se_blocks_in_methods_by (obj, Regex r) {
+-> _call_se_blocks_in_methods_by (Object obj, Regex r) {
   obj.grep_map_methods(
     { |name, _| name ~~ r },
     { |_, calls| calls().each{ |block| block.run(obj) } }
   )
 }
 
-# mixin class ExtraInitSteps { method init { call_se_blocks_in_methods_by(self, /^extra_init_steps/) } }
 
 # generates accessors based on the serializable properties
 /* abstract interface */ # /
@@ -373,20 +373,13 @@ class SeriallyAccessible < SeriallyEquatable {
   -> lock (Bool b) { self._impl_locked = b }
   -> unlock { self._impl_locked = false }
 
-  has Array extra_init_steps_seriallyaccessible = [
-    { ._do_serial([], ._bind_self_in_accessor_generator) },
-    { .grep_map_methods(
-      { _ ~~ /^serial_property_generator/ }, # => Hash
-      ._bind_self_in_accessor_generator
-    ) }
-  ]
-
   -> _bind_self_in_accessor_generator () -> Block {
     {
         |k, v|
-      const typename = (v[0] || v)
-      const default_val = (v[1] || v())
-      const custom_blocks = (v[2] || Hash())
+      -> try_index(Num i, Block b = { _ }) { (is_fqco(v) && v.is_a(Array)) ? v[i] : b.run(v) }
+      const typename = try_index(0)
+      const default_val = try_index(1, { _() } )
+      const custom_blocks = try_index(2, { Hash() } )
 
       (typename ~~ default_val) \
         || die (
@@ -407,30 +400,50 @@ class SeriallyAccessible < SeriallyEquatable {
         die (self._impl_write_locked, ": in ", __METHOD_NAME__) if (self._impl_locked)
       }
 
-      # conditionally define a function in the current scope...
-      ( defined( custom_blocks{:get} )
-        ? -> accessor (self) { custom_blocks{:get}.run(self) }
-        : -> accessor (self) { self{:_ + k} }
-      )
+      # following requires Sidef parser patch
 
-      # ...with an overload
-      ( defined( custom_blocks{:set} )
-        ? -> accessor (self, new_val) { setter_prelude.run(new_val); custom_blocks{:set}.run(self, new_val) }
-        : -> accessor (self, new_val) { setter_prelude.run(new_val); self{:_ + k} = new_val }
-      )
-
-      # template<typename T>
+      # # conditionally define a function in the current scope...
+      # ( defined( custom_blocks{:get} )
+      #   ? func accessor (self) { custom_blocks{:get}.run(self) }
+      #   : func accessor (self) { self{:_ + k} }
+      # )
+      # # ...with an overload
+      # ( defined( custom_blocks{:set} )
+      #   ? func accessor (self, new_val) { setter_prelude.run(new_val); custom_blocks{:set}.run(self, new_val) }
+      #   : func accessor (self, new_val) { setter_prelude.run(new_val); self{:_ + k} = new_val }
+      # )
+      func accessor (self) {
+        static var custom_getter = custom_blocks{:get}
+        if (custom_getter) { custom_getter.run(self) } else { self{:_ + k} }
+      }
+      func accessor (self, new_val) {
+        static var custom_setter = custom_blocks{:set}
+        setter_prelude.run(new_val)
+        if (custom_setter) { custom_setter.run(self, new_val) } else { self{:_ + k} = new_val }
+      }
       __CLASS__.def_method(k, accessor)
     }
   }
 
   method init {
-    call_se_blocks_in_methods_by(self, /^extra_init_steps/)
+    say "#{__CLASS_NAME__}: #{__METHOD_NAME__}"
+    _call_se_blocks_in_methods_by(self, /^extra_init_steps/)
+
   }
 }
 
+# SeriallyAccessible()._init
+
 class TimeSpec < SeriallyAccessible {
-  has Hash serial_properties = [:created, :modified, :accessed, :tombstoned].map { ( (_) => Str ) }.to_h
+  has Array extra_init_steps_base = [
+    { ._do_serial([], ._bind_self_in_accessor_generator) },
+    { .grep_map_methods(
+     { _ ~~ /^serial_property_generator/ }, # => Hash
+     ._bind_self_in_accessor_generator
+    ) },
+  ]
+
+  has Hash serial_properties = [:created, :modified, :accessed, :tombstoned].map { ( (_) => Num ) }.to_h
 }
 
 class BuiltObj < SeriallyAccessible {
@@ -466,8 +479,8 @@ class BuiltObj < SeriallyAccessible {
   # these are not accessors, just methods that glue accessed values together
   # create boot_fullname etc
   has Array extra_init_steps_builtobj = [ {
-      # |self|
-    ._blob_targets.each{
+      |self|
+    self._blob_targets.each{
         |name|
       const name_format = name+:_format
       __CLASS__.def_method(name + :_fullname, -> (self) -> File {

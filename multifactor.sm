@@ -47,8 +47,6 @@ module Factor {
     (regex =~ result)[0]
   }
 
-  # Sidef bug found! these have to be var else they're invoked as barewords
-  # in classmethods outside this module
   const Dir FACTOR_DIR = Dir( Factor::find_config("factor-dir") )
   const Bool QUIET_PIPE = Bool( Factor::find_config("quiet-pipe") )
 
