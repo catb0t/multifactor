@@ -432,8 +432,6 @@ class SeriallyAccessible < SeriallyEquatable {
   }
 }
 
-# SeriallyAccessible()._init
-
 class TimeSpec < SeriallyAccessible {
   has Array extra_init_steps_base = [
     { ._do_serial([], ._bind_self_in_accessor_generator) },
@@ -447,6 +445,15 @@ class TimeSpec < SeriallyAccessible {
 }
 
 class BuiltObj < SeriallyAccessible {
+  has Array extra_init_steps_base = [
+    { ._do_serial([], ._bind_self_in_accessor_generator) },
+    { .grep_map_methods(
+       { _ ~~ /^serial_property_generator/ }, # => Hash
+       # try a bigger gun (different method!)
+       { |k, v| v().map{ .run(self) } }
+     ).map_kv( ._bind_self_in_accessor_generator ) },
+  ]
+
   has Array _blob_targets = [:vm, :lib, :image, :boot]
   has Hash serial_properties = Hash(
     :id => Str,
@@ -474,7 +481,13 @@ class BuiltObj < SeriallyAccessible {
   #
   # all same length and support platform-prefixes
   # vm_format, etc
-  has Array serial_property_generator_builtobj = [ { ._blob_targets.map{ ( (_ + :_format) => Array) }.to_h } ]
+  has Array serial_property_generator_builtobj = [ {
+    var c = ._blob_targets.map{
+      ( (_ + :_format) => Array)
+    }.to_h
+    say c
+    c
+  } ]
 
   # these are not accessors, just methods that glue accessed values together
   # create boot_fullname etc
@@ -483,9 +496,10 @@ class BuiltObj < SeriallyAccessible {
     self._blob_targets.each{
         |name|
       const name_format = name+:_format
-      __CLASS__.def_method(name + :_fullname, -> (self) -> File {
+      func gen (self) -> File {
         File( String( self.method(name_format)[0, 1] ) + self.id + self.method(name_format)[2] )
-      })
+      }
+      __CLASS__.def_method(name + :_fullname, gen)
     }
   } ]
 

@@ -1,13 +1,19 @@
 include ABCs
 import ABCs::TimeSpec
-var ts = TimeSpec()
+# var ts = TimeSpec()
 # say ts{:_accessed}
 # say ts.accessed
-say ts.respond_to(:accessed)
-say ts.has_overload(:accessed)
-say ts.declares_method(:accessed)
-say ts.has_public_concrete_method(:accessed)
-say ts.has_public_concrete_overload(:accessed)
-say ts.is_property(:accessed, 0)
-var x = ts.serialize
-say TimeSpec().unserialize(x).dump==ts.dump
+# say ts.respond_to(:accessed)
+# say ts.has_overload(:accessed)
+# say ts.declares_method(:accessed)
+# say ts.has_public_concrete_method(:accessed)
+# say ts.has_public_concrete_overload(:accessed)
+# say ts.is_property(:accessed, 0)
+# var x = ts.serialize
+# say TimeSpec().unserialize(x).dump==ts.dump
+
+import ABCs::BuiltObj
+var bo = BuiltObj()
+# var v = bo.serialize
+# say BuiltObj().unserialize(v).dump==bo.dump
+
