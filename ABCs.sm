@@ -148,6 +148,10 @@ class Array {
   method all_neq {
     self.combinations(2).map{ !.all_eq }.all
   }
+
+  method merge {
+    self.reduce{ |l, r| l.merge(r) }
+  }
 }
 
 # Extract the base fully-qualified typename from the "overqualified" Perlescent
@@ -197,7 +201,7 @@ class Serializable {
           !x.contains(prop_name)
         }
       } \
-      .reduce{ |l, r| l.merge(r) } \\ Hash()
+      .merge \\ Hash()
   }
   # -> _do_serial (Array x) -> Block {
   #   func (Block d) { self.serial_properties_excluding(x).map_kv(d) }
@@ -434,11 +438,7 @@ class SeriallyAccessible < SeriallyEquatable {
 
 class TimeSpec < SeriallyAccessible {
   has Array extra_init_steps_base = [
-    { ._do_serial([], ._bind_self_in_accessor_generator) },
-    { .grep_map_methods(
-     { _ ~~ /^serial_property_generator/ }, # => Hash
-     ._bind_self_in_accessor_generator
-    ) },
+    { ._do_serial([], ._bind_self_in_accessor_generator) }
   ]
 
   has Hash serial_properties = [:created, :modified, :accessed, :tombstoned].map { ( (_) => Num ) }.to_h
@@ -447,11 +447,12 @@ class TimeSpec < SeriallyAccessible {
 class BuiltObj < SeriallyAccessible {
   has Array extra_init_steps_base = [
     { ._do_serial([], ._bind_self_in_accessor_generator) },
-    { .grep_map_methods(
-       { _ ~~ /^serial_property_generator/ }, # => Hash
-       # try a bigger gun (different method!)
-       { |k, v| v().map{ .run(self) } }
-     ).map_kv( ._bind_self_in_accessor_generator ) },
+    { |self| self.grep_methods( { _ ~~ /^serial_property_generator/ } ) \
+        .values \
+        .map{ _().map{ .run(self) }.merge } \
+        .merge \
+        .map_kv( self._bind_self_in_accessor_generator )
+    }
   ]
 
   has Array _blob_targets = [:vm, :lib, :image, :boot]
@@ -482,18 +483,15 @@ class BuiltObj < SeriallyAccessible {
   # all same length and support platform-prefixes
   # vm_format, etc
   has Array serial_property_generator_builtobj = [ {
-    var c = ._blob_targets.map{
+    ._blob_targets.map{
       ( (_ + :_format) => Array)
     }.to_h
-    say c
-    c
   } ]
 
   # these are not accessors, just methods that glue accessed values together
   # create boot_fullname etc
   has Array extra_init_steps_builtobj = [ {
-      |self|
-    self._blob_targets.each{
+    ._blob_targets.each{
         |name|
       const name_format = name+:_format
       func gen (self) -> File {

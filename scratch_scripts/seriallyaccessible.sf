@@ -16,4 +16,5 @@ import ABCs::BuiltObj
 var bo = BuiltObj()
 # var v = bo.serialize
 # say BuiltObj().unserialize(v).dump==bo.dump
-
+say bo.methods
+say bo.respond_to(:boot_format)
