@@ -95,7 +95,7 @@ class Object {
   # The overload is concrete if it can be successfully invoked with the specific
   #   number of arguments
   -> has_public_concrete_overload (String name, *args) -> Bool {
-    self.cleave( { .declares_method(name) }, { .has_overload(name, args...) } ).all
+    self.cleave( { .declares_method(name) }, { .has_overload(name, give_msg: false, args...) } ).all
   }
   # there's no direct way to tell if an object method is a property declared with "has"
   #   or an accessor declared with -> name ...
@@ -212,7 +212,7 @@ class Serializable {
 
   # This will magically disappear as soon as subsets can be ~~ smartmatched against
   -> _impl_is_serialized_hash (Object obj) -> Bool {
-    obj.is_a( Hash ) && obj.keys.sort==[self._k_stype, self._k_svalue] && obj{self._k_svalue}.is_a( Hash )
+    obj.is_a( Hash ) && is_fqco(obj) && obj.keys.sort==[self._k_stype, self._k_svalue] && ( is_baseclass(obj{self._k_stype}) || (obj{self._k_stype}.is_a( String) && is_fqco(obj{self._k_stype})) )  && obj{self._k_svalue}.is_a( Hash ) && is_fqco( obj{self._k_svalue} )
   }
 
   # every object we encounter is either Serializable or builtin
@@ -275,6 +275,7 @@ class Serializable {
       # missing feature: can't smartmatch against subsets
 
       if ( !self._impl_is_serialized_hash(entry) ) {
+        # say "Builtin branch unserialize for property #{prop} (#{typename})"
         entry
       } else {
         # we need to check if serial_type is a second-class stringified typename
@@ -285,11 +286,13 @@ class Serializable {
                 && is_fqco(_, extra_property: :len) \
                 && (transform_typename(_) == transform_typename(typename.ref))
           ) ) {
+            # say "string: #{_}"
             # serial_type is a String() object, not the String base class
             typename
           }
           case ( .is_a( typename ) && is_typename( _ ) ) {
             # serial_type is a base class
+            # say "typename: #{_}"
             _
           }
           default {
@@ -307,6 +310,7 @@ class Serializable {
         # need to test whether prop is an accessor or plain property-method
         if ( self.is_property(prop, derived) ) {
           # say "#{prop} is a property"
+          # say "NOTE: #{prop} is a property"
           self{prop} = derived
         } else {
           # say "#{prop} is an accessor"
@@ -323,7 +327,7 @@ class Serializable {
 class SeriallyEquatable < Serializable {
   -> _serial_eq (other, exclude_props = []) -> Bool {
 
-    if (other ~~ Serializable) {
+    if ( other.is_a(Serializable) ) {
       other.serialize(exclude: exclude_props) == self.serialize(exclude: exclude_props)
 
     # somehow... maybe other is our superclass
@@ -418,19 +422,21 @@ class SeriallyAccessible < SeriallyEquatable {
       # )
       func accessor (self) {
         static var custom_getter = custom_blocks{:get}
+        # say "get field #{k} (#{typename})"
         if (custom_getter) { custom_getter.run(self) } else { self{:_ + k} }
       }
+
       func accessor (self, new_val) {
         static var custom_setter = custom_blocks{:set}
         setter_prelude.run(new_val)
-        if (custom_setter) { custom_setter.run(self, new_val) } else { self{:_ + k} = new_val }
+        if (custom_setter) { custom_setter.run(self, new_val) \\ self } else { self{:_ + k} = new_val; self }
       }
       __CLASS__.def_method(k, accessor)
     }
   }
 
   method init {
-    say "#{__CLASS_NAME__}: #{__METHOD_NAME__}"
+    # say "#{__CLASS_NAME__}: #{__METHOD_NAME__}"
     _call_se_blocks_in_methods_by(self, /^extra_init_steps/)
 
   }
