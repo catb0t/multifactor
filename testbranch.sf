@@ -1,8 +1,0 @@
-func varargs (a, b, c = false) { if (c) { say a, b }; false }
-func mod_string (str_ref) { *str_ref = "abcdef".reverse ; true }
-
-var String ref
-const res = mod_string(\ref)
-if (res && varargs(:a, ref, c: false) ) {
-  say "blah"
-}

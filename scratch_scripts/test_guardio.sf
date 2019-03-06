@@ -1,0 +1,6 @@
+include("../guardio.sm")
+# import guardio::GuardIO::Atomic
+include GuardIO
+include Atomic
+
+say Atomic::aread( File(__FILE__) )

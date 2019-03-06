@@ -168,8 +168,7 @@ class Serializable {
 }
 class ModularInit {}
 
-class GeneratedAccessors < ModularInit {
-  # has String INIT_METHOD_NAME = :start
+class GeneratedAccessors {
   method _bound_accessor_generator {
     {
         |field_name, field_rhs|
@@ -179,9 +178,9 @@ class GeneratedAccessors < ModularInit {
           : b(field_rhs)
       }
       const typename = try_index(0)
-      const default_val = try_index(1, { TypeUtils::maybe_call_custom_init( _() ) } )
+      const default_val = try_index(1, b: { TypeUtils::maybe_call_custom_init( _() ) } )
       # if this is `const`, its value will get mixed up, causing infinite recursion
-      var custom_blocks = try_index(2, { Hash() } )
+      var custom_blocks = try_index(2, b: { Hash() } )
 
       (typename ~~ default_val) \
         || die (

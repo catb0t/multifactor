@@ -88,7 +88,7 @@ module GuardIO {
       die "Couldn't open file for reading: #{tmp}: #{$!}" if (! tmp_fh)
       const String contents = tmp_fh.slurp
       die "Read file '#{tmp}' failed: #{$!}" if (! defined(contents))
-      contents # won't be eagerly evaluated (will be nil) without this line
+      # contents # won't be eagerly evaluated (will be nil) without this line
       # check error here?
       tmp_fh.close
       Atomic::_finalise_temp_r(tmp)
@@ -114,7 +114,7 @@ module GuardIO {
 
     has Bool _setup_done = false
 
-    has guardio::SLog log
+    has SLog log
 
     -> locked_fods { self._locked_fods }
     -> locked_fods (lf) {
@@ -125,7 +125,7 @@ module GuardIO {
 
     method setup ( /* iterable<Glob> */ locked_fods, Bool verbose = false) {
       if (! self._setup_done)  {
-        self.log = guardio::SLog(is_verbose: verbose)
+        self.log = SLog(is_verbose: verbose)
         # need dclone here?
         self.locked_fods( locked_fods.map{ .abs.realpath } ) \
           ._setup_done = true
@@ -270,10 +270,10 @@ module GuardIO {
 
     has Array change_sequence
     has Hash data
-    has guardio::SLog log
+    has SLog log
 
     method setup (Bool verbose = false, Bool replace_existing = false) {
-      self.log = guardio::SLog(is_verbose: verbose)
+      self.log = SLog(is_verbose: verbose)
       if (self.db_name.exists && replace_existing) {
         self.log.wrn(__FILE__, __LINE__, __METHOD_NAME__, "!!! removing old DB !!!")
         self.db_name.cleave({ .remove }, { .touch })
