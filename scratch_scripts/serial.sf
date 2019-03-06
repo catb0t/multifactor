@@ -57,27 +57,6 @@ class TestSerial < Serializable {
   -> rp (RawProps r) { self._rp = r }
 }
 
-func transform_typename (String typename) -> Object {
-  eval( (/^Sidef::Runtime::\d+::(main::.+)$/ =~ typename)[0] )
-}
-
-func is_serialized_hash (Object obj) -> Bool {
-  obj.is_a( Hash ) && obj.keys.sort==[:_serial_type, :_serial_value] && obj{:_serial_value}.is_a( Hash )
-}
-
-func make_serial_typenames (Hash data) -> Hash {
-  data.map_kv{
-      |name, entry|
-    ((name) => if ( is_serialized_hash(entry) ) {
-      Hash(
-        :_serial_type => transform_typename( entry{:_serial_type} ),
-        :_serial_value => make_serial_typenames( entry{:_serial_value} )
-      )
-    } else {
-      entry
-    })
-  }
-}
 
 var ts = TestSerial()
 ts.a("asd")
@@ -101,26 +80,5 @@ var from_json = j.decode(json)
 # say from_json
 
 var roundtrip_ts = TestSerial().unserialize(from_json)
-# try {
-#   roundtrip_ts = TestSerial().unserialize(from_json)
-# } catch {
-#     |_, msg|
-#   say msg
-#   # this solution can be generalised, and this use of eval does not touch
-#   #   the long base64 strings
-#   # a transformer function which transforms Sidef::Runtime::94846239478234::main::ClassName
-#   #   into main::ClassName and then evals it
-#   # and a recursive descent (depth-first) search for serialised / _serial_type entries
-#   #   generalised from Serializable.unserialize
-#   # could it be done inside unserialize? would the classname be in scope there,
-#   #   if the unserialize definition appears before the class declaration, but both
-#   #   have been seen before the unserialize invocation?
-#
-#   # but can we do it without eval?
-#   # from_json{:acc}{:_serial_type} = eval("main::Accessors")
-#   # from_json{:rp}{:_serial_type} = eval("main::RawProps")
-#   var fixed = make_serial_typenames(from_json)
-#   say fixed
-#   roundtrip_ts = TestSerial().unserialize( fixed )
-# }
+
 say (roundtrip_ts.dump==ts.dump)

@@ -60,7 +60,7 @@ class Object {
 
   # True if the method call with the number of arguments didn't throw an exception
   #   false otherwise, or the error message
-  -> has_overload (String name, Bool give_msg = false, *args) {
+  -> has_overload (Bool give_msg, String name, *args) {
     try {
       # don't change self
       self.dclone.method(name)(args...)
@@ -82,7 +82,7 @@ class Object {
     self.cleave(
       { .declares_method(name) },
       {
-        const res = .has_overload(name, give_msg: true, args...)
+        const res = .has_overload(true, name, args...)
         (res ~~ /does not match/) || (res == true)
       }
     ).all
@@ -95,7 +95,7 @@ class Object {
   # The overload is concrete if it can be successfully invoked with the specific
   #   number of arguments
   -> has_public_concrete_overload (String name, *args) -> Bool {
-    self.cleave( { .declares_method(name) }, { .has_overload(name, give_msg: false, args...) } ).all
+    self.cleave( { .declares_method(name) }, { .has_overload(false, name, args...) } ).all
   }
   # there's no direct way to tell if an object method is a property declared with "has"
   #   or an accessor declared with -> name ...
@@ -116,12 +116,12 @@ class Object {
     # if it is a declared accessor it will complain about "does not match"
     #   therefore it's not a property
     # property "methods" don't care how many arguments they get
-    /does not match/ !~ self.has_overload(name, give_msg: true, arg, :extra_arg)
+    /does not match/ !~ self.has_overload(true, name, arg, :extra_arg)
   }
 
   # Well, Aren't I special?
   -> serializable {
-    self.has_overload(:serial_properties)
+    self.has_overload(false, :serial_properties)
   }
 
   # find methods matching the block
@@ -228,8 +228,8 @@ class Serializable {
       # call the accessor if it's an accessor, otherwise call the property-method
       # if the method isn't callable for some reason, try directly accessing the property
       #   which probably won't yield a different result and still die
-
-      const value = if ( self.has_overload(prop) ) {
+      # say "get #{prop}"
+      const value = if ( self.has_overload(false, prop) ) {
         self.method( prop )()
       } elsif ( self.is_property(prop, typename()) ) {
         self{prop} \\ (!only_extant_fields
@@ -387,7 +387,7 @@ class SeriallyAccessible < SeriallyEquatable {
       -> try_index(Num i, Block b = { _ }) { (is_fqco(v) && v.is_a(Array)) ? v[i] : b.run(v) }
       const typename = try_index(0)
       const default_val = try_index(1, { _() } )
-      const custom_blocks = try_index(2, { Hash() } )
+      const custom_blocks = try_index(2, b: { Hash() } )
 
       (typename ~~ default_val) \
         || die (
@@ -402,7 +402,7 @@ class SeriallyAccessible < SeriallyEquatable {
         .is_a(typename) \
           || die(
             "SeriallyAccessible > #{__CLASS_NAME__}: #{__METHOD_NAME__}: ",
-            "type mismatch in setter '#{k}': want '#{typename}'; got '#{_.class}'  ('#{default_val.dump}')"
+            "type mismatch in setter '#{k}': want '#{typename}'; got '#{_.class}' ('#{_.dump}')"
         )
 
         die (self._impl_write_locked, ": in ", __METHOD_NAME__) if (self._impl_locked)
@@ -438,7 +438,7 @@ class SeriallyAccessible < SeriallyEquatable {
   method init {
     # say "#{__CLASS_NAME__}: #{__METHOD_NAME__}"
     _call_se_blocks_in_methods_by(self, /^extra_init_steps/)
-
+    self
   }
 }
 

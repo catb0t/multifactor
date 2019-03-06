@@ -1,15 +1,16 @@
 include ABCs
-# var ts = TimeSpec()
-# say ts{:_accessed}
-# say ts.accessed
-# say ts.respond_to(:accessed)
-# say ts.has_overload(:accessed)
-# say ts.declares_method(:accessed)
-# say ts.has_public_concrete_method(:accessed)
-# say ts.has_public_concrete_overload(:accessed)
-# say ts.is_property(:accessed, 0)
-# var x = ts.serialize
-# say TimeSpec().unserialize(x).dump==ts.dump
+#import ABCs::TimeSpec
+#var ts = TimeSpec().start
+#say ts{:_accessed}
+#say ts.accessed
+#say ts.respond_to(:accessed)
+#say ts.has_overload(false, :accessed)
+#say ts.declares_method(:accessed)
+#say ts.has_public_concrete_method(:accessed)
+#say ts.has_public_concrete_overload(:accessed)
+#say ts.is_property(:accessed, 0)
+#var x = ts.serialize
+#say TimeSpec().unserialize(x).dump==ts.dump
 
 import ABCs::BuiltObj
 var bo = BuiltObj()
@@ -18,6 +19,7 @@ var bo = BuiltObj()
 bo.id(:1).factor_version('0.99').is_git(true).git_branch(:master).git_hash(:2349876234) \
   .os_type(:unix).os_name(:linux).arch_name(:x86).word_size(:64)
 # say bo.dump
+# say "bo: #{bo}"
 var f = bo.serialize
 # say f
 var new_bo = BuiltObj().unserialize(f)

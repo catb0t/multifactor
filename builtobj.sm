@@ -1,0 +1,40 @@
+include ABCs2
+import ABCs2::GeneratedAccessors
+
+class BlobSums (Str _algo = '', Str _vm = '', Str _lib = '', Str _boot = '') < GeneratedAccessors {
+  has Hash serial_properties = [:algo, :vm, :lib, :boot].map{ ( (_) => Str ) }.to_h
+}
+
+class TimeSpec < GeneratedAccessors {
+  has Hash serial_properties = [:created, :modified, :accessed, :tombstoned].map { ( (_) => Num ) }.to_h
+}
+
+class BuiltObj < GeneratedAccessors {
+  has Hash serial_properties = Hash(
+    :id => Str,
+    :factor_version => Str,
+    :is_git => Bool,
+    :git_branch => Str,
+    :git_hash => Str,
+
+    # :os_type => Str,
+    # :os_name => Str,
+    # :arch_name => Str,
+    :word_size => Str,
+
+    # :stored_boot_image => VirtualBase64Blob,
+    # :src_sums => SrcSums,
+    :blob_sums => BlobSums,
+    :blob_algorithm => [Str, :sha256, :( :get => {
+        |self|
+      say "ok"
+      var x = self.blob_sums.algo
+      say "ok2"
+      var y = self{:_blob_algorithm}
+      say "#{x} / #{y}"
+      x || y || nil
+    } ) ], # default: sha256
+
+    :timespec => TimeSpec,
+  )
+}
