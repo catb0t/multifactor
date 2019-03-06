@@ -1,3 +1,4 @@
+#! ruby 
 class Object {
   method cleave (*b) { b.map{ .run(self) } }
 
