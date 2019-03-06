@@ -9,7 +9,7 @@ import builtobj::BlobSums
 # say "set algo: sha256"
 # b.algo(:sha256)
 # say "algo: #{b.algo}"
-var bo = BuiltObj().start
+var bo = BuiltObj()# .start
 bo.id(:1).factor_version('0.99').is_git(true).git_branch(:master).git_hash(:2349876234) \
  .word_size(:64)
 say bo.id
