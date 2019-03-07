@@ -1,15 +1,45 @@
 include ABCs2
 import ABCs2::GeneratedAccessors
 
-class BlobSums (Str _algo = '', Str _vm = '', Str _lib = '', Str _boot = '') < GeneratedAccessors {
-  has Hash serial_properties = [:algo, :vm, :lib, :boot].map{ ( (_) => Str ) }.to_h
+class DirSum (Str algo = '', Str names = '', Str contents = '') < SeriallyEquatable {
+  has Hash serial_properties = [:algo, :names, :contents].map{ ( (_) => Str ) }.to_h
 }
 
-class TimeSpec < GeneratedAccessors {
+class SrcSums (DirSum vm = DirSum(), DirSum core = DirSum(), DirSum basis = DirSum(), Bool basis_ignored = false ) < SeriallyEquatable {
+  has Hash serial_properties = Hash(
+    :basis_ignored => Bool,
+    [:vm, :core, :basis].map{ ( (_) => DirSum ) }...
+  )
+}
+
+class BlobSums (Str algo = '', Str vm = '', Str lib = '', Str boot = '') < SeriallyEquatable {
+  has Hash serial_properties = [:algo, :vm, :lib, :boot].map{ ( (_) => Str ) }.to_h
+  method =~ (other) { self._serial_eq(other, exclude_props: [:boot]) }
+}
+
+class VirtualBase64Blob (Str data = '', Str algo = '', Str sum ='') < SeriallyEquatable {
+  has Hash serial_properties = [:data, :algo, :sum].map{ ( (_) => Str ) }.to_h
+}
+
+class TimeSpec < SeriallyAccessible {
+  has Array init_steps_base = [
+    { ._do_serial([], ._bound_accessor_generator ) }
+  ]
+
   has Hash serial_properties = [:created, :modified, :accessed, :tombstoned].map { ( (_) => Num ) }.to_h
 }
 
-class BuiltObj < GeneratedAccessors {
+class BuiltObj < SeriallyAccessible {
+  has Array init_steps_base = [
+    { ._do_serial([], ._bound_accessor_generator ) },
+    { |self| self.grep_methods( { _ ~~ /^serial_property_generator/ } ) \
+        .values \
+        .map{ _().map{ .run(self) }.merge_reduce } \
+        .merge_reduce \
+        .map_kv( self._bound_accessor_generator )
+    }
+  ]
+  has Array _blob_targets = [:vm, :lib, :image, :boot]
   has Hash serial_properties = Hash(
     :id => Str,
     :factor_version => Str,
@@ -17,24 +47,49 @@ class BuiltObj < GeneratedAccessors {
     :git_branch => Str,
     :git_hash => Str,
 
-    # :os_type => Str,
-    # :os_name => Str,
-    # :arch_name => Str,
+    :os_type => Str,
+    :os_name => Str,
+    :arch_name => Str,
     :word_size => Str,
 
-    # :stored_boot_image => VirtualBase64Blob,
-    # :src_sums => SrcSums,
+    :stored_boot_image => VirtualBase64Blob,
+    :src_sums => SrcSums,
     :blob_sums => BlobSums,
-    :blob_algorithm => [Str, :sha256, :( :get => {
-        |self|
-      say "ok"
-      var x = self.blob_sums.algo
-      say "ok2"
-      var y = self{:_blob_algorithm}
-      say "#{x} / #{y}"
-      x || y || nil
-    } ) ], # default: sha256
+    :blob_algorithm => [Str, :sha256, :( :get => { .blob_sums.algo || ._blob_algorithm } ) ], # default: sha256
 
     :timespec => TimeSpec,
   )
+
+  # going to generate accessors instead of naming them
+  # note the lack of def_method in the block; this simply arbitrarily
+  #   extends the serial_properties hash to make new accessors
+  #
+  # all same length and support platform-prefixes
+  # vm_format, etc
+  has Array serial_property_generator_builtobj = [ {
+    ._blob_targets.map{
+      ( (_ + :_format) => Array)
+    }.to_h
+  } ]
+
+  # these are not accessors, just methods that glue accessed values together
+  # create boot_fullname etc
+  has Array extra_init_steps_builtobj = [ {
+    ._blob_targets.each{
+        |name|
+      const name_format = name+:_format
+      func gen (self) -> File {
+        File( String( self.method(name_format)[0, 1] ) + self.id + self.method(name_format)[2] )
+      }
+      __CLASS__.def_method(name + :_fullname, gen)
+    }
+  } ]
+
+  # next step: code generation for these methods too, by a special _extra_init_blocks
+  #   property that get invoked at the end of init() to generate these methods
+  # want a version of insert that doesn't change its object unless ! is used
+  # -> vm_fullname ()    -> File { File( "#{self.vm_format[0, 1]}#{self.id}#{self.vm_format[2]}" ) }
+  # -> image_fullname () -> File { File( "#{self.image_format[0, 1]}#{self.id}#{self.image_format[2]}" ) }
+  # -> lib_fullname ()   -> File { File( "#{self.lib_format[0, 1]}#{self.id}#{self.lib_format[2]}" ) }
+  # -> boot_fullname ()  -> File { File( "#{self.boot_format[0, 1]}#{self.id}#{self.boot_format[2]}" ) }
 }

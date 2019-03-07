@@ -1,4 +1,4 @@
-#! ruby 
+#! ruby
 class Object {
   method cleave (*b) { b.map{ .run(self) } }
 
@@ -10,16 +10,31 @@ class Object {
   }
 
   # test if it can be called with the specific number and type of arguments
-  method has_overload (name, clone_call = false, catch_msg_ref = null, retval_ref = null, *args) -> Bool {
-    self.respond_to(name) && try {
-      const r = (clone_call ? self.dclone : self).method(name)(args...)
-      if (retval_ref != null) { *retval_ref = r }
-      true
-    } catch {
-        |_, msg|
-      if (null != catch_msg_ref) { *catch_msg_ref = msg }
-      false
-    }
+  method has_overload (Hash overload_spec) -> Bool {
+    ( Hash(
+      :clone_call => false,
+      :catch_msg_ref => null,
+      :retval_ref => null,
+      :args => []
+    ) + overload_spec ).cleave{
+        |spec|
+      die "invalid spec when calling has_overload: caller must identify themself" \
+        if ( ! spec{:caller} )
+      die "invalid spec when calling has_overload; name must be nonempty" \
+        if ( ! spec{:name} )
+      die "invalid spec when calling has_overload; args must be iterable" \
+        if ( ! spec{:args}.respond_to("...") )
+      try {
+        # say "\tcaller: #{spec{:caller}}: try calling #{spec{:name}} with #{spec{:args}} clone_call: #{spec{:clone_call}} catch_msg_ref: #{spec{:catch_msg_ref}} retval_ref: #{spec{:retval_ref}}"
+        const r = ( spec{:clone_call} ? self.dclone : self).method( spec{:name} )( @|( spec{:args} ) )
+        if (null != spec{:retval_ref}) { *( spec{:retval_ref} ) = r }
+        true
+      } catch {
+          |_e, msg|
+        if (null != spec{:catch_msg_ref}) { *( spec{:catch_msg_ref} ) = msg }
+        false
+      }
+    }.last
   }
 
   # declared, exists, can be called
@@ -27,7 +42,7 @@ class Object {
     self.cleave(
       { .respond_to(name) },
       { .declares_method(name) },
-      { .has_overload(name, clone_call: true) }
+      { .has_overload( Hash( :caller => __METHOD_NAME__, :name => name, :clone_call => true ) ) }
     ).all
   }
 
@@ -36,18 +51,27 @@ class Object {
       { .respond_to(name) },
       { .declares_method(name) },
       {
-        var String msg
-        const res = .has_overload(name, clone_call: true, catch_msg_ref: \msg, args...)
-        res || (msg !~ /does not match/)
+        .has_overload( Hash(
+          :caller => __METHOD_NAME__,
+          :name => name,
+          :clone_call => true,
+          :catch_msg_ref => \var String msg,
+          :args => args)
+        ) || (msg !~ /does not match/)
       }
     ).all
   }
 
   method is_property (String name, Object type_example_arg) {
-    var String msg
     # self-respecting explicitly declared accessors are typed, and not varargs
     # field accessors generated with "has X" are untyped varargs
-    self.has_overload(name, clone_call: true, catch_msg_ref: \msg, type_example_arg, :extra_garbage_arg) && (/does not match/ !~ msg)
+    self.has_overload( Hash(
+      :caller => __METHOD_NAME__,
+      :name => name,
+      :clone_call => true,
+      :catch_msg_ref => \var String msg,
+      :args => [type_example_arg, :extra_garbage_arg]
+    ) ) && (/does not match/ !~ msg)
   }
 
   method grep_methods (Block b) {
@@ -65,7 +89,7 @@ class Array {
 
 module TypeUtils {
   func is_serializable (Object obj) {
-    obj.has_overload(:serial_properties)
+    obj.has_overload( Hash( :caller => __FUNC_NAME__, :name => :serial_properties) )
   }
   # Fully-Qualified Sidef::Runtime:92349879234::main::Typename Typename
   #   to Universal Main-Derived Typename main::Typename
@@ -89,7 +113,10 @@ module TypeUtils {
   }
 
   func maybe_call_custom_init (Object obj) {
-    if ( obj.has_overload(:INIT_METHOD_NAME) ) {
+    if ( obj.has_overload( Hash(
+        :caller => __FUNC_NAME__,
+        :name => :INIT_METHOD_NAME) )
+    ) {
       obj.method( obj.INIT_METHOD_NAME )()
     } else {
       obj
@@ -97,91 +124,191 @@ module TypeUtils {
   }
 }
 
+func process_serial_prop_rhs (String name, Object obj, typename, default_val, custom_blocks) {
+  ([typename, default_val, custom_blocks].any{ !defined(_) || _==null } &&
+    die "invalid argument list for #{__FUNC_NAME__}")
+
+  const is_fqa = TypeUtils::is_a_fqco(obj, Array, must_have_prop: :merge_reduce)
+
+  # maybe the following can be vectorised?
+
+  if ( !is_fqa ) {
+    TypeUtils::is_typename(obj) || die ("RHS in serial property declaration '#{name}' isn't a typename: #{obj} (perhaps you accidentally initialised the object?)")
+    *typename      = obj
+    *default_val   = TypeUtils::maybe_call_custom_init( obj )
+    *custom_blocks = Hash()
+
+  } else {
+    die (
+      "#{__FILE__}:#{__LINE__}: #{__FUNC_NAME__}: malformed array in RHS when declaring field '#{name}': must have positive length (1, 2 or 3)"
+    ) if ( is_fqa && !obj )
+
+    if (obj.len == 1) {
+      __FUNC__(name, obj[0], typename, default_val, custom_blocks )
+    } else {
+      *typename      = obj[0]
+      *default_val   = obj[1] \\ TypeUtils::maybe_call_custom_init( obj[1] )
+      *custom_blocks = obj[2] \\ Hash()
+    }
+  }
+}
+
 class Serializable {
   has String _k_svalue = :_serial_value
 
-  -> _all_serial_properties () is cached -> Hash {
+  -> _grep_serial_properties (Array excl) is cached -> Hash {
     self.grep_methods{ |name, _| name ~~ /^serial_properties/ } \
       .values \ # Array<LazyMethod>
-      .map{ _() } \ # not a constructor; just a method call on self.serial_properties*
+      # not a constructor; just a method call on self.serial_properties*
+      .map{
+        _().grep_kv{ |name, _| !excl.contains(name) }
+      } \
       .merge_reduce \\ Hash()
   }
 
-  -> _do_serial (Block d) {
-    self._all_serial_properties.map_kv(d)
+  -> _do_serial (Array exclude, Block d) {
+    self._grep_serial_properties(exclude).map_kv(d)
   }
 
   -> _is_serialized_obj (Object obj) {
-    TypeUtils::is_a_fqco(obj, Hash, must_have_prop: :merge) && obj.keys==[self._k_svalue] && TypeUtils::is_a_fqco( obj{self._k_svalue}, Hash, must_have_prop: :merge )
+    (
+      TypeUtils::is_a_fqco(obj, Hash, must_have_prop: :merge) &&
+      obj.keys==[self._k_svalue] &&
+      TypeUtils::is_a_fqco( obj{self._k_svalue}, Hash, must_have_prop: :merge )
+    )
   }
 
-  method serialize () -> Hash {
-    self._do_serial{
-        |field_name, field_type|
-      var Object prelim_val
-      const Bool res = self.has_overload(field_name, retval_ref: \prelim_val)
-      const value = if ( res ) {
-        prelim_val
-      } elsif ( self.is_property(field_name, TypeUtils::maybe_call_custom_init( field_type() ) ) ) {
-        self{field_name}
-      } else {
-        die "#{__FILE__}:#{__LINE__}: #{__METHOD_NAME__}: #{field_name} (#{field_type}) appears to be neither a property nor declared getter"
-      }
+  method serialize (Array exclude = []) -> Hash {
+    self._do_serial(exclude, {
+        |field_name, field_rhs|
 
-      assert(defined(value), "#{__FILE__}:#{__LINE__}: Assertion `self.#{field_name} != nil' failed!")
+      process_serial_prop_rhs(field_name, field_rhs, \var typename, \var default_val, \var _)
+      var type
+      const value = (if ( self.is_property(field_name, default_val) ) {
+        type = :property
+        self{field_name}
+      } elsif (
+        self.has_overload( Hash(
+          :caller => __METHOD_NAME__,
+          :name => field_name,
+          :retval_ref => \var Object prelim_val
+        ) )
+      ) {
+        type = :getter
+        prelim_val
+      } else {
+        die "#{__FILE__}:#{__LINE__}: #{__METHOD_NAME__}: #{field_name} (#{typename}) appears to be neither a property nor declared getter"
+      } \\ default_val)
+      # say "serialize '#{field_name}': type '#{type}': value: #{value}"
+
+      # assert(defined(value), "#{__FILE__}:#{__LINE__}: Assertion `self.#{field_name} != nil' failed!")
 
       ( (field_name) => (
         TypeUtils::is_serializable(value)
           ? Hash( (self._k_svalue) => value.serialize )
           : value
       ) )
-    }
+    })
   }
 
-  method unserialize (Hash data) -> __CLASS__ {
-    self._do_serial{
-        |field_name, field_type|
+  method unserialize (Hash data, Array exclude = [], /* eval_scope = { eval(_) } */ ) -> __CLASS__ {
+    self._do_serial(exclude, {
+        |field_name, field_rhs|
+      process_serial_prop_rhs(field_name, field_rhs, \var Object typename, \var _, \var _)
+
       const entry = data{field_name}
 
+      # var sd
       if ( ! self._is_serialized_obj(entry) ) {
+        # say "unserialize Builtin type #{field_name} (#{field_type}) = #{entry}"
+        # sd = false
         entry
       } else {
-        TypeUtils::maybe_call_custom_init( field_type() ).unserialize( entry{self._k_svalue} )
+        # sd = true
+        # say "unserialize #{field_name} (#{field_type})"
+        # careful! if this is "default_val" instead of a newly invoked typename, it will break
+        TypeUtils::maybe_call_custom_init( typename() ).unserialize(
+          entry{self._k_svalue},
+          exclude: exclude,
+          # eval_scope: eval_scope
+        )
       }.cleave{
           |derived|
-        var Object retval
-        # the well-behaved setter returns `self'
-        const Bool res = self.has_overload(field_name, retval_ref: \retval, derived)
-        if ( res && TypeUtils::is_a_fqco(retval, __CLASS__) ) {
-        # say "first branch has overload getter #{field_name}"
-          # pass, it's already done
-        } elsif ( self.is_property(field_name, derived) ) {
+        # var type
+        if ( self.is_property(field_name, derived) ) {
           self{field_name} = derived
+          # type = :property
         } else {
-          die "#{__FILE__}:#{__LINE__}: #{__METHOD_NAME__}: #{field_name} (#{field_type}) (value #{derived}) appears to be neither a property nor declared setter"
-        }
-      }
+          # type = :getter
+          # the well-behaved setter returns `self'
+          const Bool res = self.has_overload( Hash(
+            :caller => __METHOD_NAME__,
+            :name => field_name,
+            :retval_ref => \var Object retval,
+            :args => [derived]
+          ) )
 
-    }
+          # say "res: #{res} retval: #{retval.dump} value now: #{self.method(field_name)().dump}"
+          # if ( res ) {
+            # const own_class = eval_scope( TypeUtils::fqtn_to_umdtn(self.ref) )
+            # assert(
+            #   TypeUtils::is_a_fqco( retval, own_class ),
+            #   (
+            #     "#{__FILE__}:#{__LINE__}: #{__METHOD_NAME__}: malformed setter " +
+            #     "for '#{field_name}': setters must return 'self' (arg: #{derived})"
+            #   )
+            # )
+          if (! res ) {
+            die "#{__FILE__}:#{__LINE__}: #{__METHOD_NAME__}: #{field_name} (#{typename}) (value #{derived}) appears to be neither a property nor declared setter"
+          }
+        }
+        # say "unserialize '#{field_name}': type '#{type}': was serialized: #{sd}: value: #{derived}"
+      }
+    })
     self
   }
-
 }
-class ModularInit {}
 
-class GeneratedAccessors {
+# use the serializable functionality to equate two objects
+/* abstract interface */ # /
+class SeriallyEquatable < Serializable {
+  -> _serial_eq (other, exclude_props = []) -> Bool {
+
+    if ( other.is_a(Serializable) ) {
+      other.serialize(exclude: exclude_props) == self.serialize(exclude: exclude_props)
+
+    # somehow... maybe other is our superclass
+    } elsif (other ~~ self) {
+     [self, other].map{
+       |obj| self._do_serial(exclude_props, { obj.method(_)() } )
+     }«==»
+
+    } else { self._do_serial(exclude_props, { other{_} == self{_} } ).all }
+  }
+  method == (other) { self._serial_eq(other) }
+}
+
+
+func _call_methods_blocks_by (Object obj, Regex r) {
+  obj.grep_map_methods(
+    { |name, _| name ~~ r },
+    { |_, calls| calls().each{ |block| block.run(obj) } }
+  )
+}
+
+class ModularInit {
+  method init {
+    _call_methods_blocks_by(self, /^init_steps/)
+    self
+  }
+}
+
+class SeriallyAccessible << ModularInit, SeriallyEquatable {
   method _bound_accessor_generator {
     {
         |field_name, field_rhs|
-      func try_index (Num i, Block b = { _ } ) {
-        ( TypeUtils::is_a_fqco(field_rhs, Array, must_have_prop: :merge_reduce) )
-          ? field_rhs[i]
-          : b(field_rhs)
-      }
-      const typename = try_index(0)
-      const default_val = try_index(1, b: { TypeUtils::maybe_call_custom_init( _() ) } )
-      # if this is `const`, its value will get mixed up, causing infinite recursion
-      var custom_blocks = try_index(2, b: { Hash() } )
+
+      process_serial_prop_rhs(field_name, field_rhs, \var Object typename, \var Object default_val, \var Object custom_blocks)
 
       (typename ~~ default_val) \
         || die (
@@ -192,9 +319,7 @@ class GeneratedAccessors {
       die "class already has property accessor named '#{field_name}' (did you forget to declare a raw property with a leading '_' underscore?)" if ( self.is_property(field_name, default_val) )
 
       # create the private slot
-      say "set _#{field_name} to #{default_val}"
-      # if const, custom_blocks should be observed here
-      # say "custom_blocks: #{custom_blocks.dump}"
+      # say "set _#{field_name} to #{default_val}"
       self{:_ + field_name} = default_val
 
       const Block setter_prelude = {
@@ -208,8 +333,8 @@ class GeneratedAccessors {
 
       func acc (self) {
         static var custom_getter = custom_blocks{:get}
-        say "get field #{field_name} (#{typename}) with #{custom_getter}"
-        if (custom_getter) { say "running..."; custom_getter.run(self); say "done" } else { self{:_ + field_name} }
+        # say "get field #{field_name} (#{typename}) with #{custom_getter}"
+        if (custom_getter) { custom_getter.run(self) } else { self{:_ + field_name} }
       }
 
       func acc (self, new_val) {
@@ -220,12 +345,6 @@ class GeneratedAccessors {
       }
       __CLASS__.def_method(field_name, acc)
     }
-  }
-
-  method init {
-    say "#{__CLASS_NAME__}: #{__METHOD_NAME__}"
-    self.serial_properties.map_kv( self._bound_accessor_generator )
-    self
   }
 }
 

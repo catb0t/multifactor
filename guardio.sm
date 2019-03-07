@@ -88,7 +88,6 @@ module GuardIO {
       die "Couldn't open file for reading: #{tmp}: #{$!}" if (! tmp_fh)
       const String contents = tmp_fh.slurp
       die "Read file '#{tmp}' failed: #{$!}" if (! defined(contents))
-      # contents # won't be eagerly evaluated (will be nil) without this line
       # check error here?
       tmp_fh.close
       Atomic::_finalise_temp_r(tmp)
