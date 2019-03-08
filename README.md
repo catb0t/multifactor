@@ -4,7 +4,9 @@ To end the hassle of having to manage [Factor](https://github.com/factor/factor)
 
 ## Overview
 
-`multifactor.sm [options] [--] [parameters to Factor]`
+Written in Trizen's [Sidef](https://github.com/trizen/sidef).
+
+`sidef multifactor.sm [options] [--] [parameters to Factor]`
 
 Use `multifactor.sm --help` or `-h` for more information on MultiFactor invocation:
 

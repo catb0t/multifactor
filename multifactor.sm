@@ -21,6 +21,7 @@ include ABCs
 include argparse
 include guardio
 include shell_words
+include withdirectory
 
 define Hash SCRIPT = :(
   "version" => "0.3",
@@ -62,11 +63,11 @@ module Factor {
 
 module MultiFactor {
 
-  include ABCs
-  import ABCs::DirSum
-  import ABCs::SrcSums
-  import ABCs::BlobSums
-  import ABCs::BuiltObj
+  include builtobj
+  import builtobj::DirSum
+  import builtobj::SrcSums
+  import builtobj::BlobSums
+  import builtobj::BuiltObj
 
   include Factor
   include FactorBashStateless
@@ -86,10 +87,7 @@ module MultiFactor {
     }
   }
 
-  class Runtime
-      (Hash options, Array factor_arguments)
-      << ABCs::SeriallyAccessible, ABCs::CapturedWriter
-  {
+  class Runtime (Hash options, Array factor_arguments) << ABCs2::SeriallyAccessible, withdirectory::CapturedWriter {
     has Bool _config_setup_done = false # whether the following variables have been written
     has Str _action
     has Array known_actions = ['env-info', 'src-sums', 'run-factor']

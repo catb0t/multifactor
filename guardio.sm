@@ -107,6 +107,7 @@ module GuardIO {
   }
 
   subset FsObj < File, Dir
+  import guardio::SLog
 
   class GlobLocker (String UUID, Bool remove_old_lock = false, Str lock_ext = ".lock") {
     has Set _locked_fods
@@ -223,14 +224,14 @@ module GuardIO {
   }
 
 
-  include ABCs
+  include builtobj
   module CacheDBStateless {
     include Atomic
 
-    import ABCs::DirSum
-    import ABCs::SrcSums
-    import ABCs::BlobSums
-    import ABCs::BuiltObj
+    import builtobj::DirSum
+    import builtobj::SrcSums
+    import builtobj::BlobSums
+    import builtobj::BuiltObj
 
     # look for the database file
     func _read_disk_db (File name) is cached -> Hash {
