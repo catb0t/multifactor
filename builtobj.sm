@@ -1,5 +1,7 @@
 include ABCs2
-import ABCs2::GeneratedAccessors
+import ABCs2::SeriallyEquatable
+import ABCs2::SeriallyAccessible
+import ABCs2::Lockable
 
 class DirSum (Str algo = '', Str names = '', Str contents = '') < SeriallyEquatable {
   has Hash serial_properties = [:algo, :names, :contents].map{ ( (_) => Str ) }.to_h
@@ -22,23 +24,11 @@ class VirtualBase64Blob (Str data = '', Str algo = '', Str sum ='') < SeriallyEq
 }
 
 class TimeSpec < SeriallyAccessible {
-  has Array init_steps_base = [
-    { ._do_serial([], ._bound_accessor_generator ) }
-  ]
-
   has Hash serial_properties = [:created, :modified, :accessed, :tombstoned].map { ( (_) => Num ) }.to_h
 }
 
-class BuiltObj < SeriallyAccessible {
-  has Array init_steps_base = [
-    { ._do_serial([], ._bound_accessor_generator ) },
-    { |self| self.grep_methods( { _ ~~ /^serial_property_generator/ } ) \
-        .values \
-        .map{ _().map{ .run(self) }.merge_reduce } \
-        .merge_reduce \
-        .map_kv( self._bound_accessor_generator )
-    }
-  ]
+class BuiltObj << Lockable, SeriallyAccessible {
+  # has Array init_steps_serial_propgen = [...]
   has Array _blob_targets = [:vm, :lib, :image, :boot]
   has Hash serial_properties = Hash(
     :id => Str,
@@ -55,7 +45,7 @@ class BuiltObj < SeriallyAccessible {
     :stored_boot_image => VirtualBase64Blob,
     :src_sums => SrcSums,
     :blob_sums => BlobSums,
-    :blob_algorithm => [Str, :sha256, :( :get => { .blob_sums.algo || ._blob_algorithm } ) ], # default: sha256
+    :blob_algorithm => [Str, :sha256, :( :get => { .blob_sums.algo || _{:_blob_algorithm} } ) ], # default: sha256
 
     :timespec => TimeSpec,
   )
