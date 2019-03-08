@@ -358,6 +358,7 @@ class SeriallyAccessible << ModularInit, SeriallyEquatable {
         # say "set field #{field_name} to #{new_val} (#{typename})"
         if (custom_setter) { custom_setter.run(self, new_val) \\ self } else { self{:_ + field_name} = new_val; self }
       }
+      # say "declare accessor for #{field_name}"
       __CLASS__.def_method(field_name, acc)
     }
   }
