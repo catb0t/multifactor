@@ -1,11 +1,11 @@
 #! ruby
-# functional / reflective extensions
 include msg_classes
+include combi
 
 subset ArrStr < Array, String { .len }
 
 class Object {
-  # method form of "with"
+  # method form of "with", but defined-agnostic
   method in_scope (b) { b.run(self) }
   method cleave (*b) { b.map{ .run(self) } }
 
@@ -44,7 +44,7 @@ class Object {
         true
       } catch {
           |_e, msg|
-        say "\t\t\t"+'invocation failed! reason: '+CommaTools::apply( msg_classes::classify(msg) )(
+        say "\t\t\t"+'invocation failed! reason: '+Combi::apply( msg_classes::classify(msg) )(
           { _ + ' => '},
           { .captures.map{ .dump }.join(' ')
         } ).join
@@ -138,7 +138,7 @@ module TypeUtils {
     obj.is_a(typename) && TypeUtils::is_fqco(obj, must_have_prop: must_have_prop)
   }
 
-  func maybe_call_custom_init (callers < frext::ArrStr, Object obj) {
+  func maybe_call_custom_init (callers < main::ArrStr, Object obj) {
     if ( /* obj.has_overload( Hash(
         :callers => [@|callers, __FUNC_NAME__],
         :name => :INIT_METHOD_NAME) ) */

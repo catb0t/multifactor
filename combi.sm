@@ -1,0 +1,153 @@
+module Combi {
+  # travelling in a fighter Combi(nators)
+  # similar to with, but allows more arguments and doesn't care about definedness
+  func rescope (*args) {
+    func _bind_rs (b) {
+      b.run(@|args)
+    }
+  }
+
+  func rescope_n (Num n, *args) {
+    func _bind_rsn (b) {
+      b.run( args[0..^n], args.last(args.len - n) )
+    }
+  }
+
+  -> rescope_1 (*a) { Combi::rescope_n(1, @|a) }
+
+  func cleave (*args) {
+    func _bind_cleave (*b) {
+      b.map{ .run(@|args) }
+    }
+  }
+
+  const Block _bind_apply_block = func (args, Bool ffork) -> Block {
+    func _apply_block (*blocks) -> Array {
+      const method_name = (ffork ? :ffork : :run)
+      const args_padding = ([ nil ] * blocks.len-args.len)
+      const blocks_padding = ([ { _ } ] * args.len-blocks.len)
+
+      # rescope could be used here, but isn't necessary, not even for readability
+      with (
+        [args + args_padding, blocks + blocks_padding] \
+          .zip.map{ _[1] |> ( method_name, _[0] ) }
+      ) {
+        del args
+        (ffork ? .map{ .wait } : _)
+      }
+    }
+  }
+
+  func applyc   (Bool ffork, *args) -> Block { Combi::_bind_apply_block(args, ffork) }
+  func apply_a  (Array args) -> Block { Combi::_bind_apply_block(args, false) }
+  func apply    (*args) -> Block { Combi::_bind_apply_block(args, false) }
+  func applyf_a (Array args) -> Block { Combi::_bind_apply_block(args, true) }
+  func applyf   (*args) -> Block { Combi::_bind_apply_block(args, true) }
+
+  func binop (a, b) -> Block {
+    func _op (op) -> Object {
+      given (op) {
+        when (Block) { continue }
+        when (String) { op.run(a, b) }
+        when (LazyMethod) { continue }
+        default { op(a, b) }
+      }
+    }
+  }
+
+  func _binop_pair_fewer_wrap (Array _args, Array ops) {
+    func _recur_binop_pair_fewer_wrap (Array args, Num index) {
+      !args ? [] : [
+        Combi::binop( args[0, 1] )( ops[ index % ops.len ] ),
+        @|__FUNC__( args.last(args.len - 2), index + 1)
+      ]
+    }(_args, 0)
+  }
+
+  func _bind_recur_binop_pair_n_op (Bool _single) {
+    func _recur_binop_pair_n_op (Array args, Array ops) -> Array {
+      !args ? [] : [
+        Combi::binop( args[0, 1] )( ops[0] ),
+        @|__FUNC__( args.last(args.len - 2), _single ? ops : ops.last(ops.len - 1) )
+      ]
+    }
+  }
+
+  func _bind_binop_pairs (Array args) -> Block {
+    func _binops (*ops) {
+      # make up an argument if there was 1 less than even
+      const Array padded_args = args+(args.len.is_odd ? [args.last.new] : [])
+      with ( ops.len.is_one || (args.len / ops.len -> int == 2 ) ) {
+        del args
+        # assert(args.len+args.len.is_odd / ops.len -> eq(2) )
+        .? _bind_recur_binop_pair_n_op( ops.len.is_one  )( padded_args, ops )
+        :  _binop_pair_fewer_wrap( padded_args, ops )
+      }
+    }
+  }
+  func binop_pairs_a (Array args) -> Block { Combi::_bind_binop_pairs(args) }
+  func binop_pairs (*args) -> Block { Combi::_bind_binop_pairs(args) }
+
+  # how to deal with multiple return values, without assigning a local?
+  # use rescope_n! or apply, maybe
+  func with_finalizer (obj, name, *final_args) {
+    func _finalizer (block, *bargs) -> (Bool, Object) {
+      try {
+        (true, block.run(obj, @|bargs))
+      } catch {
+          |_, msg|
+        (false, obj.method(name)(msg, @|final_args))
+      }
+    }
+  }
+
+  func with_destructor (o, n, *f) { with_finalizer(o, n, *f) }
+
+  func with_finalizers (Array specs) {
+    func _finalizers (*ba_pairs) {
+      try {
+        (true, [specs, ba_pairs].zip.map{ _[1].key.run(_[0], @|.value ) } )
+      } catch {
+          |_, msg|
+        (false, specs.map{ .method( _[1] )( msg, @|_.last(_.len - 2) ) } )
+      }
+    }
+  }
+
+  func with_destructors (s) { with_finalizers(s) }
+}
+
+if (__FILE__ == __MAIN__) {
+  -> A((0), n) { n + 1 }
+  -> A(m, (0)) { A(m - 1, 1) }
+  -> A(m,  n)  { A(m-1, A(m, n-1)) }
+
+  Combi::applyf( )(
+    { |_| assert_eq( 0, Combi::binop(1, 2)('&') ) },
+    { |_| assert_eq( [61, 125], Combi::applyf( ([3, 3], [3, 4]) )( { A(_...) }, { A(_...) } ) ) },
+    { |_| assert_eq( [3, 7], Combi::binop_pairs(1, 2, 3, 4)('+') ) },  # '
+    { |_| assert_eq( [3, 12], Combi::binop_pairs(1, 2, 3, 4)('+', '*') ) }, # '
+    { |_| assert_eq( [3, 12, 11], Combi::binop_pairs(1, 2, 3, 4, 5, 6)('+', '*') ) } # '
+    { |_| assert_eq( [3, 12, 11, 0], Combi::binop_pairs(1, 2, 3, 4, 5, 6, 7)('+', '*') ) } # '
+    { |_| assert_eq( [Pair(1, 2), Pair(3, 4), Pair(5, 6), Pair(7, 0)], Combi::binop_pairs(1, 2, 3, 4, 5, 6, 7)(Pair) ) }
+  )
+
+  class A {
+    method be { say __CLASS_NAME__+': i feel sick...'; die "i am dead" }
+    method destroy (msg, *rest) {
+      say "#{__CLASS_NAME__}: destructor called: #{msg.dump}; #{rest}"
+      "OHNOES!"
+    }
+  }
+
+  var a = A()
+
+  Combi::rescope_1(
+    Combi::with_finalizer(a, :destroy, :args)({
+      .be
+    })
+  )({
+      |v, r|
+    say (v ? "the code worked" : "the code has failed! #{r.dump}")
+  })
+}

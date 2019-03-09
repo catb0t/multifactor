@@ -1,9 +1,9 @@
-include commatools
+include combi
 
 define Array MSG_REGEXES = [
   Pair(:NO_ERROR, /^$/)
   Pair(:DOES_NOT_MATCH,
-    /^(?:\[ERROR\] )?(func|method) `(.*)` does not match (.*), invoked as (.*)\n\nPossible candidates are: ?\n([\S\s]*)/
+    /^(?:\[ERROR\] )?(func|method) `(.*)` does not match (.*), invoked as (.*)\n\nPossible candidates are: ?\n([\S\s]*)\n*/
   ),
   Pair(:NO_METHOD, /^(?:\[AUTOLOAD\] )?Undefined method `(.*)' called from (.*)/),
   Pair(:BAD_ENCODING, /^Unknown encoding '(.*)'/)
@@ -21,8 +21,7 @@ func classify (String msg) -> (String, Object) {
 
 if (__FILE__ == __MAIN__) {
   DATA.slurp.split("\n%\n").each{
-      |n|
-    CommaTools::apply( classify(n) )(
+    Combi::apply( classify(.apply_escapes) )(
       { |x| x+' => ' },
       { |x| x.captures.map{ .dump }.join(' ') },
     ).join.say
@@ -40,7 +39,7 @@ method `_g` does not match _g(Number), invoked as _g(2)
 
 Possible candidates are:
     __FUNC__()
-    __FUNC__(Array)
+    __FUNC__(GGGG)
 %
 [AUTOLOAD] Undefined method `Hash.asdasd' called from main()
 %
@@ -49,3 +48,5 @@ Unknown encoding '' at /home/cat/perl5/lib/perl5/Sidef/Types/String/String.pm li
 Not a HASH reference at (eval 30) line 5.
 %
 Can't use string ("Sidef::Types::Hash::Hash") as a HASH ref while "strict refs" in use at (eval 38) line 5.
+%
+method `x` does not match x(X, Number), invoked as x(X(), 1)\n\nPossible candidates are: \n    X.x(self)\n
