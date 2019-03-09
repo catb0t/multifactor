@@ -1,0 +1,17 @@
+module CommaTools {
+  const Block make_apply_block = -> (args, Bool ffork) {
+    func _apply_block (*blocks) {
+      const method_name = (ffork ? :ffork : :run)
+      const args_padding = ([ nil ] * blocks.len-args.len)
+      const blocks_padding = ([ { _ } ] * args.len-blocks.len)
+
+      with ( [args + args_padding, blocks + blocks_padding].zip.map{ _[1] |> ( method_name, _[0] ) } ) {
+        (ffork ? .map{ .wait } : _)
+      }
+    }
+  }
+
+  func applyc (Bool ffork, *args) { CommaTools::make_apply_block(args, ffork) }
+  func apply (*args) { CommaTools::make_apply_block(args, false) }
+  func applyf (*args) { CommaTools::make_apply_block(args, true) }
+}

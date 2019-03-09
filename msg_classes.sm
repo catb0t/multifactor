@@ -1,0 +1,51 @@
+include commatools
+
+define Array MSG_REGEXES = [
+  Pair(:NO_ERROR, /^$/)
+  Pair(:DOES_NOT_MATCH,
+    /^(?:\[ERROR\] )?(func|method) `(.*)` does not match (.*), invoked as (.*)\n\nPossible candidates are: ?\n([\S\s]*)/
+  ),
+  Pair(:NO_METHOD, /^(?:\[AUTOLOAD\] )?Undefined method `(.*)' called from (.*)/),
+  Pair(:BAD_ENCODING, /^Unknown encoding '(.*)'/)
+  Pair(:PERL_COMPILER, /Bareword/)
+  Pair(:PERL_RUNTIME, /^(?:Not an? (.*) reference|Can't use (.*) \(("[^"]+")\) as an? (.*) ref .*) at .*/)
+  Pair(:OTHER_UNCLASSIFIED, /^(.*)/)
+  # Pair(:PERL_INTERNAL, /^(.*)/)
+]
+
+func classify (String msg) -> (String, Object) {
+  const type = MSG_REGEXES.find{ .value ~~ msg }
+  if (!type) { die "#{__FUNC_NAME__}: can't classify THAT!"}
+  (type.key, msg =~ type.value)
+}
+
+if (__FILE__ == __MAIN__) {
+  DATA.slurp.split("\n%\n").each{
+      |n|
+    CommaTools::apply( classify(n) )(
+      { |x| x+' => ' },
+      { |x| x.captures.map{ .dump }.join(' ') },
+    ).join.say
+  }
+}
+
+__DATA__
+[ERROR] func `__FUNC__` does not match __FUNC__(Number), invoked as __FUNC__(2)
+
+Possible candidates are:
+    __FUNC__()
+    __FUNC__(Array)
+%
+method `_g` does not match _g(Number), invoked as _g(2)
+
+Possible candidates are:
+    __FUNC__()
+    __FUNC__(Array)
+%
+[AUTOLOAD] Undefined method `Hash.asdasd' called from main()
+%
+Unknown encoding '' at /home/cat/perl5/lib/perl5/Sidef/Types/String/String.pm line 1179.
+%
+Not a HASH reference at (eval 30) line 5.
+%
+Can't use string ("Sidef::Types::Hash::Hash") as a HASH ref while "strict refs" in use at (eval 38) line 5.
