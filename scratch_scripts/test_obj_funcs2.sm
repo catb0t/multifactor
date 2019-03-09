@@ -10,46 +10,6 @@ class X {
 }
 var i = X()
 
-module TypeUtils {
-  func is_serializable (Object obj) {
-    obj.has_overload( Hash( :caller => __FUNC_NAME__, :name => :serial_properties) )
-  }
-  # Fully-Qualified Sidef::Runtime:92349879234::main::Typename Typename
-  #   to Universal Main-Derived Typename main::Typename
-  func fqtn_to_umdtn (String fqtn) -> String {
-    (/^Sidef::Runtime::\d+::(main::.+)$/ =~ fqtn)[0]
-  }
-
-  func is_typename (Object obj) -> Bool {
-    [:compile_to_perl, :code_interactive].all{ obj.declares_method(_) } && obj.refaddr==0
-  }
-
-  # is Fully-Qualified Constructed Object
-  func is_fqco (obj, must_have_prop = false) -> Bool {
-  # say "is fqco #{obj} #{must_have_prop}"
-    Bool( !is_typename(obj) && (obj.refaddr != 0) && (must_have_prop ? obj.declares_method(must_have_prop) : true) )
-  }
-
-  func is_a_fqco (obj, typename, must_have_prop = false) {
-  # say "is a + is fqco #{obj} #{typename} #{must_have_prop}"
-    obj.is_a(typename) && TypeUtils::is_fqco(obj, must_have_prop: must_have_prop)
-  }
-
-  func maybe_call_custom_init (Object obj) {
-    if ( obj.has_overload( Hash(
-        :caller => __FUNC_NAME__,
-        :name => :INIT_METHOD_NAME) )
-    ) {
-      obj.method( obj.INIT_METHOD_NAME )()
-    } elsif ( TypeUtils::is_typename(obj) ) {
-      # invoke raw typenames
-      obj()
-    } else {
-      obj
-    }
-  }
-}
-
 assert( i.declares_method(:property) )
 assert( i.declares_method(:no_arg) )
 assert( i.declares_method(:arg_1) )
@@ -63,41 +23,41 @@ assert( i.respond_to(:_hidden_method) )
 assert( ! Object.respond_to(:compile_to_perl) )
 assert( ! i.respond_to(:non_existent__) )
 
-assert( i.has_overload(Hash( :caller => :test, :name => :no_arg) )  )
-assert( i.has_overload(Hash( :caller => :test, :name => :_hidden_method) ) )
-assert( i.has_overload(Hash( :caller => :test, :name => :property) ) )
-assert( i.has_overload(Hash( :caller => :test, :name => :property, :args => [1] ) ) )
-assert( i.has_overload(Hash( :caller => :test, :name => :property, :args => [1, 2]) ) )
-assert( i.has_overload(Hash( :caller => :test, :name => :property, :args => [1, 2, 3]) ) )
-assert( i.has_overload(Hash( :caller => :test, :name => :arg_1,    :args => [1] ) ) )
+assert( i.has_overload(Hash( :callers => [:test], :name => :no_arg) )  )
+assert( i.has_overload(Hash( :callers => [:test], :name => :_hidden_method) ) )
+assert( i.has_overload(Hash( :callers => [:test], :name => :property) ) )
+assert( i.has_overload(Hash( :callers => [:test], :name => :property, :args => [1] ) ) )
+assert( i.has_overload(Hash( :callers => [:test], :name => :property, :args => [1, 2]) ) )
+assert( i.has_overload(Hash( :callers => [:test], :name => :property, :args => [1, 2, 3]) ) )
+assert( i.has_overload(Hash( :callers => [:test], :name => :arg_1,    :args => [1] ) ) )
 
-assert( ! i.has_overload(Hash( :caller => :test1, :name => :no_arg, :args => [1]) ) )
-assert( ! i.has_overload(Hash( :caller => :test1, :name => :no_arg, :args => [1, 2]) ) )
-assert( ! i.has_overload(Hash( :caller => :test1, :name => :_hidden_method, :args => [1]) ) )
-assert( ! i.has_overload(Hash( :caller => :test1, :name => :_hidden_method, :args => [1]) ) )
-assert( ! i.has_overload(Hash( :caller => :test1, :name => :arg_1) ) )
-assert( ! i.has_overload(Hash( :caller => :test1, :name => :arg_1, :args => [1, 2]) ) )
+assert( ! i.has_overload(Hash( :callers => [:test1], :name => :no_arg, :args => [1]) ) )
+assert( ! i.has_overload(Hash( :callers => [:test1], :name => :no_arg, :args => [1, 2]) ) )
+assert( ! i.has_overload(Hash( :callers => [:test1], :name => :_hidden_method, :args => [1]) ) )
+assert( ! i.has_overload(Hash( :callers => [:test1], :name => :_hidden_method, :args => [1]) ) )
+assert( ! i.has_overload(Hash( :callers => [:test1], :name => :arg_1) ) )
+assert( ! i.has_overload(Hash( :callers => [:test1], :name => :arg_1, :args => [1, 2]) ) )
 
-assert( i.has_public_concrete_method(:no_arg) )
-assert( i.has_public_concrete_method(:arg_1) )
-assert( i.has_public_concrete_method(:property) )
-assert( ! i.has_public_concrete_method(:_hidden_method) )
-assert( ! Object.has_public_concrete_method(:compile_to_perl) )
+assert( i.has_public_concrete_method(:test2, :no_arg) )
+assert( i.has_public_concrete_method(:test2, :arg_1) )
+assert( i.has_public_concrete_method(:test2, :property) )
+assert( ! i.has_public_concrete_method(:test2, :_hidden_method) )
+assert( ! Object.has_public_concrete_method(:test2, :compile_to_perl) )
 
-assert( i.has_public_concrete_overload(:no_arg) )
-assert( i.has_public_concrete_overload(:arg_1, 1) )
-assert( i.has_public_concrete_overload(:property, 1) )
-assert( i.has_public_concrete_overload(:property, 1, 2) )
-assert( ! i.has_public_concrete_overload(:no_arg, 1) )
-assert( ! i.has_public_concrete_overload(:arg_1, 1, 2) )
-assert( ! i.has_public_concrete_overload(:_hidden_method) )
-assert( ! i.has_public_concrete_overload(:_hidden_method, 1) )
-assert( ! i.has_public_concrete_overload(:_hidden_method, 1, 2) )
+assert( i.has_public_concrete_overload(:test3, :no_arg) )
+assert( i.has_public_concrete_overload(:test3, :arg_1, 1) )
+assert( i.has_public_concrete_overload(:test3, :property, 1) )
+assert( i.has_public_concrete_overload(:test3, :property, 1, 2) )
+assert( ! i.has_public_concrete_overload(:test3, :no_arg, 1) )
+assert( ! i.has_public_concrete_overload(:test3, :arg_1, 1, 2) )
+assert( ! i.has_public_concrete_overload(:test3, :_hidden_method) )
+assert( ! i.has_public_concrete_overload(:test3, :_hidden_method, 1) )
+assert( ! i.has_public_concrete_overload(:test3, :_hidden_method, 1, 2) )
 
-assert( i.is_property(:property, :arg) )
-assert( ! i.is_property(:no_arg, :arg) )
-assert( ! i.is_property(:arg_1, :arg) )
-assert( ! i.is_property(:_hidden_method, :arg) )
+assert( i.is_property(:test4, :property, :arg) )
+assert( ! i.is_property(:test4, :no_arg, :arg) )
+assert( ! i.is_property(:test4, :arg_1, :arg) )
+assert( ! i.is_property(:test4, :_hidden_method, :arg) )
 
 assert( TypeUtils::is_typename(Object) )
 assert( TypeUtils::is_typename(String) )
@@ -133,3 +93,5 @@ assert( ! ABCs2::Serializable()._is_serialized_obj(Hash(:_serial_type => "", :_s
 assert( ! ABCs2::Serializable()._is_serialized_obj(Hash(:_serial_type => String, :_serial_value => Hash())) )
 assert( ! ABCs2::Serializable()._is_serialized_obj(Hash(:_serial_type => "String", :_serial_value => Hash())) )
 assert( ABCs2::Serializable()._is_serialized_obj( Hash( :_serial_value => Hash() ) ) )
+
+say "\n\n*** Test passed! ***"

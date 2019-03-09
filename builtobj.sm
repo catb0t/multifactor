@@ -45,7 +45,7 @@ class BuiltObj << Lockable, SeriallyAccessible {
     :stored_boot_image => VirtualBase64Blob,
     :src_sums => SrcSums,
     :blob_sums => BlobSums,
-    :blob_algorithm => [Str, :sha256, :( :get => { .blob_sums.algo || _{:_blob_algorithm} } ) ], # default: sha256
+    :blob_algorithm => [Str, :sha256, Hash( :get => { say "got ba acc"; say "self: #{_}"; .blob_sums.algo || _{:_blob_algorithm} } ) ], # default: sha256
 
     :timespec => TimeSpec,
   )

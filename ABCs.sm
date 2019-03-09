@@ -267,7 +267,7 @@ class Serializable {
       if (only_extant_fields && !data.has_key(prop) ) {
         return nil
       }
-      const entry = data{prop}
+      const entry = data{prop}||((typename~~Array && is_fqco(typename)) ? typename[0]() : typename())
       # say "unserialize call method '#{prop}'"
 
       # making a new SerialHash container class would defeat the purpose of Serializable
@@ -275,11 +275,11 @@ class Serializable {
       # missing feature: can't smartmatch against subsets
 
       if ( !self._impl_is_serialized_hash(entry) ) {
-        # say "Builtin branch unserialize for property #{prop} (#{typename})"
+        #say "Builtin branch unserialize for property #{prop} (#{typename}) direct -> #{data{:prop}}"
         entry
       } else {
         # we need to check if serial_type is a second-class stringified typename
-        # say "serial_type: #{serial_type.ref} #{is_baseclass(serial_type)}"
+        #say "serial_type: #{typename.ref} #{is_baseclass(typename)}"
         given ( entry{self._k_stype} ) {
           case ( (
               .is_a( String ) \
@@ -307,6 +307,7 @@ class Serializable {
         )
       }.cleave{
           |derived|
+        # say "#{prop} derived: #{derived}"
         # need to test whether prop is an accessor or plain property-method
         if ( self.is_property(prop, derived) ) {
           # say "#{prop} is a property"
@@ -388,7 +389,8 @@ class SeriallyAccessible < SeriallyEquatable {
       const typename = try_index(0)
       const default_val = try_index(1, { _() } )
       const custom_blocks = try_index(2, b: { Hash() } )
-
+      # say "custom_blocks: #{custom_blocks} v: #{v}"
+      die "BUG FOUND!" if (custom_blocks ~~ Pair)
       (typename ~~ default_val) \
         || die (
           "SeriallyAccessible > #{__CLASS_NAME__}: init: type mismatch in default value for '#{k}': ",
