@@ -6,7 +6,7 @@ subset ArrStr < Array, String { .len }
 
 class Object {
   # method form of "with", but defined-agnostic
-  method in_scope (b) { b.run(self) }
+  method rescope (b) { b.run(self) }
   method cleave (*b) { b.map{ .run(self) } }
 
   # internal; doesn't care about overloads
@@ -17,13 +17,13 @@ class Object {
   }
 
   # test if it can be called with the specific number and type of arguments
-  method has_overload (Hash overload_spec) -> Bool {
+  method has_overload (Hash overload_spec) -> Hash {
     ( Hash(
       :clone_call => false,
-      :catch_msg_ref => null,
-      :retval_ref => null,
-      :args => []
-    ) + overload_spec ).in_scope{
+      :give_return => false,
+      :args => [],
+      :debug => false
+    ) + overload_spec ).rescope{
         |spec|
       die 'invalid has_overload spec: \'callers\' must be a non-empty array of non-empty strings' \
         if ( ! spec{:callers}.cleave( { _ }, { .is_an(Array) }, { .all }, { .all{ .is_a(String) } } ).all  )
@@ -37,20 +37,31 @@ class Object {
         if ( ! spec{:args}.respond_to("...") )
 
       try {
-        say "\t** has_overload < (#{spec{:callers}.reverse.join(' < ')}):\n\t\t.method( '#{spec{:name}}' )( #{spec{:args}.map{.dump}.join(', ')} ) ;; clone_call: #{spec{:clone_call}} catch_msg_ref: #{spec{:catch_msg_ref}} retval_ref: #{spec{:retval_ref}}"
+        if (spec{:debug}) {
+          say "\t** has_overload < (#{spec{:callers}.reverse.join(' < ')}):\n\t\t.method( '#{spec{:name}}' )( #{spec{:args}.map{.dump}.join(', ')} ) ;; clone_call: #{spec{:clone_call}}"
+        }
+
         const r = ( spec{:clone_call} ? self.dclone : self).method( spec{:name} )( spec{:args}... )
-        if (null != spec{:retval_ref}) { *( spec{:retval_ref} ) = r }
-        say "\t\t\tinvocation worked!"
-        true
+        spec{:debug} && say "\t\t\tinvocation worked!"
+
+        :( :state => true, :return => (spec{:give_return} ? r : nil) )
+
       } catch {
           |_e, msg|
-        say "\t\t\t"+'invocation failed! reason: '+Combi::apply( msg_classes::classify(msg) )(
-          { _ + ' => '},
-          { .captures.map{ .dump }.join(' ')
-        } ).join
-        # if (msg.len > 120) { say "#{@|msg.first(50)} ... #{@|msg.last(70)}" } else { say "#{msg}" }
-        if (null != spec{:catch_msg_ref}) { *( spec{:catch_msg_ref} ) = msg }
-        false
+        Combi::rescope( msg_classes::classify(msg) )({
+            |type, fields|
+          if (spec{:debug}) {
+            say("\t\t\t"+'invocation failed! reason: ' + type + ' => ' +
+              fields.grep_kv{ .!= :block_tried_invoke }
+            )
+          }
+
+          :(
+            :state => false,
+            :why => type,
+            :details => fields
+          )
+        })
       }
     }
   }
@@ -60,13 +71,14 @@ class Object {
     self.cleave(
       { .respond_to(name) },
       { .declares_method(name) },
-      {
-        .has_overload( Hash(
+      { .has_overload( Hash(
           :callers => [@|callers, __METHOD_NAME__],
           :name => name,
           :clone_call => true,
-          :catch_msg_ref => \var String msg
-        ) ) || (msg ~~ /does not match/)
+          # :catch_msg_ref => \var String msg
+        ) ).rescope{
+          .{:state} || (MsgTypes::METHOD_EXISTS.contains( .{:why} ))
+        }
       }
     ).all
   }
@@ -75,28 +87,32 @@ class Object {
     self.cleave(
       { .respond_to(name) },
       { .declares_method(name) },
-      {
-        .has_overload( Hash(
+      { .has_overload( Hash(
           :callers => [@|callers, __METHOD_NAME__],
           :name => name,
           :clone_call => true,
-          :catch_msg_ref => \var String msg,
-          :args => args)
-        ) || (msg !~ /does not match/)
+          :args => args
+        ) ).rescope{
+          .{:state} || (MsgTypes::OVERLOAD_EXISTS.contains( .{:why} ) )
+        }
       }
     ).all
   }
 
-  method is_property (callers < ArrStr, Str name, Object type_example_arg) {
+  # TODO: use hash as arg / return val, and allow getting the value etc (prevent replaying as much as possible)
+  method is_property (callers < ArrStr, Str name, Object type_example_arg) -> Bool {
     # self-respecting explicitly declared accessors are typed, and not varargs
     # field accessors generated with "has X" are untyped varargs
     self.has_overload( Hash(
-      :callers => [@|callers, __METHOD_NAME__],
-      :name => name,
-      :clone_call => true,
-      :catch_msg_ref => \var String msg,
-      :args => [type_example_arg, :extra_garbage_arg]
-    ) ) && (/does not match/ !~ msg)
+        :callers => [@|callers, __METHOD_NAME__],
+        :name => name,
+        :clone_call => true,
+        :args => [type_example_arg, :extra_garbage_arg],
+        # :debug => true
+    ) ).rescope{
+      # say "is_property: #{self.class}::#{name} :: #{.{:state}}"
+      .{:state} || ( ! [MsgTypes::NO_METHOD, MsgTypes::DOES_NOT_MATCH, MsgTypes::BAD_ENCODING].contains( .{:why} ) )
+    }
   }
 
   method grep_methods (Block b) {
@@ -112,6 +128,20 @@ class Array {
   method merge_reduce { self.reduce{ |l, r| l.merge(r) } }
 }
 
+class Hash {
+  # inverse of + / merge: only update keys that are already in the LHS
+  method clobber_existing_by (other) {
+    self.map_kv{
+        |k, v|
+      ((k) => if ( v && other.has_key(k) ) {
+        other{k}.run(k, v)
+      } else {
+        v
+      })
+    }
+  }
+}
+
 module TypeUtils {
   func is_serializable (Object obj) {
     obj.respond_to(:serial_properties)
@@ -124,13 +154,16 @@ module TypeUtils {
   }
 
   func is_typename (Object obj) -> Bool {
-    [:compile_to_perl, :code_interactive].all{ obj.declares_method(_) } && obj.refaddr==0
+    # print "#{obj} "
+    [:compile_to_perl, :code_interactive].all{
+      obj.declares_method(_) # .rescope{ |b| say("\tdeclares #{_}: #{Bool(b)}"); b }
+    } && obj.refaddr==0
   }
 
   # is Fully-Qualified Constructed Object
   func is_fqco (obj, must_have_prop = false) -> Bool {
   # say "is fqco #{obj} #{must_have_prop}"
-    Bool( !is_typename(obj) && (obj.refaddr != 0) && (must_have_prop ? obj.declares_method(must_have_prop) : true) )
+    Bool( !is_typename(obj) && (must_have_prop ? obj.declares_method(must_have_prop) : true) )
   }
 
   func is_a_fqco (obj, typename, must_have_prop = false) {
@@ -138,18 +171,28 @@ module TypeUtils {
     obj.is_a(typename) && TypeUtils::is_fqco(obj, must_have_prop: must_have_prop)
   }
 
-  func maybe_call_custom_init (callers < main::ArrStr, Object obj) {
-    if ( /* obj.has_overload( Hash(
-        :callers => [@|callers, __FUNC_NAME__],
-        :name => :INIT_METHOD_NAME) ) */
-        obj.respond_to(:INIT_METHOD_NAME)
-    ) {
+  func maybe_call_custom_init (Object obj) {
+    if ( obj.respond_to(:INIT_METHOD_NAME) ) {
+
       obj.method( obj.INIT_METHOD_NAME )()
     } elsif ( TypeUtils::is_typename(obj) ) {
       # invoke raw typenames
       obj()
     } else {
       obj
+    }
+  }
+
+  func object_hash_ref (callers < frext::ArrStr, Object obj, String field_name) {
+    try {
+      # say "#{callers.last}: \t\tREF PROPERTY #{obj.class} #{field_name}"
+      \(obj{field_name})
+    } catch {
+        |_e, msg|
+      Combi::rescope( msg_classes::classify(msg) )({
+          |type, fields|
+        die "\t** object_hash_ref < (#{callers.reverse.join(' < ')}):\n\t\t#{obj.class} { #{field_name} } FAILED! reason: #{type}"
+      })
     }
   }
 }

@@ -1,7 +1,7 @@
-include ABCs2
-import ABCs2::SeriallyEquatable
-import ABCs2::SeriallyAccessible
-import ABCs2::Lockable
+include ABCs
+import ABCs::SeriallyEquatable
+import ABCs::SeriallyAccessible
+import ABCs::Lockable
 
 class DirSum (Str algo = '', Str names = '', Str contents = '') < SeriallyEquatable {
   has Hash serial_properties = [:algo, :names, :contents].map{ ( (_) => Str ) }.to_h
@@ -45,7 +45,11 @@ class BuiltObj << Lockable, SeriallyAccessible {
     :stored_boot_image => VirtualBase64Blob,
     :src_sums => SrcSums,
     :blob_sums => BlobSums,
-    :blob_algorithm => [Str, :sha256, Hash( :get => { say "got ba acc"; say "self: #{_}"; .blob_sums.algo || _{:_blob_algorithm} } ) ], # default: sha256
+    :blob_algorithm => [Str, :sha256, Hash(
+      :get => {
+        .blob_sums.algo || *TypeUtils::object_hash_ref([:custom_getter], _, :_blob_algorithm)
+      }
+    ) ], # default: sha256
 
     :timespec => TimeSpec,
   )
@@ -60,11 +64,11 @@ class BuiltObj << Lockable, SeriallyAccessible {
     ._blob_targets.map{
       ( (_ + :_format) => Array)
     }.to_h
-  } ]
+  }, { Hash(:junk => Number) } ]
 
   # these are not accessors, just methods that glue accessed values together
   # create boot_fullname etc
-  has Array extra_init_steps_builtobj = [ {
+  has Array init_steps_builtobj = [ {
     ._blob_targets.each{
         |name|
       const name_format = name+:_format

@@ -1,4 +1,4 @@
-# include ABCs2
+# include ABCs
 #import ABCs::TimeSpec
 #var ts = TimeSpec().start
 #say ts{:_accessed}
@@ -17,8 +17,8 @@ import builtobj::BuiltObj
 var bo = BuiltObj()
 # var v = bo.serialize
 # say BuiltObj().unserialize(v).dump==bo.dump
-# bo.id(:1).factor_version('0.99').is_git(true).git_branch(:master).git_hash(:2349876234) \
-  # .os_type(:unix).os_name(:linux).arch_name(:x86).word_size(:64)
+bo.id(:1).factor_version('0.99').is_git(true).git_branch(:master).git_hash(:2349876234) \
+  .os_type(:unix).os_name(:linux).arch_name(:x86).word_size(:64)
 # say bo.dump
 # say "bo: #{bo}"
 say bo.blob_algorithm

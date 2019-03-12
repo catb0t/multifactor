@@ -1,7 +1,7 @@
 # include ABCs
 # import ABCs::Serializable
-include ABCs2
-import ABCs2::Serializable
+include ABCs
+import ABCs::Serializable
 
 class Tiny (field = "") < Serializable {
   has Hash serial_properties = Hash(
@@ -61,27 +61,26 @@ class TestSerial < Serializable {
 
 # const eval_scope = { eval(_) }
 
-var ts = TestSerial()
-ts.a("asd")
-ts.acc( Accessors(_prop1: "abc", _prop2: "def", _prop_hash: Hash(1 => 2)) )
-ts.rp( RawProps(p2: Tiny(field: "p2"), p3: Hash(:p => 3) ) )
-var Hash s = ts.serialize
+var first_ts = TestSerial() \
+  .a("asd") \
+  .acc( Accessors(_prop1: "abc", _prop2: "def", _prop_hash: Hash(1 => 2)) ) \
+  .rp( RawProps(p2: Tiny(field: "p2"), p3: Hash(:p => 3) ) ) \
+
+const Hash h1 = first_ts.serialize
 # say ts.dump
 # say s
-var new_ts = TestSerial().unserialize(s, ) # eval_scope: eval_scope)
-say (s == new_ts.serialize) # ==> true
+var second_ts = TestSerial().unserialize(h1)
+say (first_ts.dump == second_ts.dump) # ==> true
 
 var J = "JSON::PP".require
-
 var j = J.new.pretty # .convert_blessed
 
-var json = j.encode(s)
+var json = j.encode(h1)
 # say json
-
-var from_json = j.decode(json)
-
-# say from_json
-
-var roundtrip_ts = TestSerial().unserialize(from_json, ) #  eval_scope: eval_scope)
-
-say (roundtrip_ts.dump==ts.dump)
+var h2 = j.decode(json)
+# say h2
+var roundtrip_ts = TestSerial().unserialize(h2)
+#
+say h2==h1
+say (roundtrip_ts.dump==first_ts.dump)
+say (roundtrip_ts.dump==second_ts.dump)

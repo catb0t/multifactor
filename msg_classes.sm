@@ -1,45 +1,77 @@
 include combi
 
+module MsgTypes {
+  define NO_ERROR           = :NO_ERROR
+  define DOES_NOT_MATCH     = :DOES_NOT_MATCH
+  define NO_METHOD          = :NO_METHOD
+  define BAD_ENCODING       = :BAD_ENCODING
+  define PERL_COMPILER      = :PERL_COMPILER
+  define PERL_RUNTIME       = :PERL_RUNTIME
+  define OTHER_UNCLASSIFIED = :OTHER_UNCLASSIFIED
+
+  define Array METHOD_EXISTS = [:NO_ERROR, :DOES_NOT_MATCH, :BAD_ENCODING]
+  define Array OVERLOAD_EXISTS = [:NO_ERROR, :BAD_ENCODING]
+}
+
 define Array MSG_REGEXES = [
   Pair(:NO_ERROR, /^$/)
   Pair(:DOES_NOT_MATCH,
-    /^(?:\[ERROR\] )?(func|method) `(.*)` does not match (.*), invoked as (.*)\n\nPossible candidates are: ?\n([\S\s]*)\n*/
+    /^(?:\[ERROR\] )?(?<block_type>func|method) `(?<block_name>[\S\s]*)` does not match \g{block_name}\((?<block_tried_proto>.*)\), invoked as \g{block_name}\((?<block_tried_invoke>[\S\s]*)\)\n\nPossible candidates are: ?\n(?<block_dispatches>[\S\s]*)\n*/m
   ),
-  Pair(:NO_METHOD, /^(?:\[AUTOLOAD\] )?Undefined method `(.*)' called from (.*)/),
-  Pair(:BAD_ENCODING, /^Unknown encoding '(.*)'/)
+  Pair(:NO_METHOD, /^(?:\[AUTOLOAD\] )?Undefined method `(?<method_name>.*)' called from (?<method_invoked_from>.*)/),
+  Pair(:BAD_ENCODING, /^Unknown encoding '(?<encoding>.*)'/)
   Pair(:PERL_COMPILER, /Bareword/)
-  Pair(:PERL_RUNTIME, /^(?:Not an? (.*) reference|Can't use (.*) \(("[^"]+")\) as an? (.*) ref .*) at .*/)
-  Pair(:OTHER_UNCLASSIFIED, /^(.*)/)
+  Pair(:PERL_RUNTIME, /^(?:Not an? (?<tried_ref>.*) reference|Can't use (?<tried_ref_type>.*) \((?<tried_ref_with>"[^"]+")\) as an? (?<tried_ref>.*) ref while.*) at .*/)
+  Pair(:OTHER_UNCLASSIFIED, /^(?<value>[\S\s]*)/)
   # Pair(:PERL_INTERNAL, /^(.*)/)
 ]
 
-func classify (String msg) -> (String, Object) {
+func block_dispatches_cleanup (String ds) -> Hash {
+  define Regex r = /\G\s+(?<block_name>.+)\((?<block_dispatch>.*?)\)/
+  r.global_matches(ds, {
+      |i, _|
+    .named_captures.map_kv{
+        |k, v|
+      ( ("#{k}:#{i}") => v )
+    }
+  } ).reduce{ |l, r| l.merge(r) }
+}
+
+func msg_fields (m) is cached -> Hash {
+  m.named_captures.map_kv{
+      |k, v|
+    ( (k) => k==:block_dispatches ? block_dispatches_cleanup(v) : v )
+  }
+}
+
+func classify (String msg) is cached -> (String, Object) {
   const type = MSG_REGEXES.find{ .value ~~ msg }
-  if (!type) { die "#{__FUNC_NAME__}: can't classify THAT!"}
-  (type.key, msg =~ type.value)
+  if (!type) { die "#{__FUNC_NAME__}: can't classify THAT!\n\t#{msg.dump}"}
+  (type.key, msg_fields(msg =~ type.value) )
 }
 
 if (__FILE__ == __MAIN__) {
   DATA.slurp.split("\n%\n").each{
-    Combi::apply( classify(.apply_escapes) )(
-      { |x| x+' => ' },
-      { |x| x.captures.map{ .dump }.join(' ') },
+    Combi::applyf( classify(.apply_escapes) )(
+      { _+' => ' },
+      { _ },
     ).join.say
   }
 }
 
 __DATA__
-[ERROR] func `__FUNC__` does not match __FUNC__(Number), invoked as __FUNC__(2)
+[ERROR] func `MaybeArr` does not match MaybeArr(Number), invoked as MaybeArr(2)
 
 Possible candidates are:
-    __FUNC__()
-    __FUNC__(Array)
+    MaybeArr()
+    MaybeArr(Array)
 %
-method `_g` does not match _g(Number), invoked as _g(2)
+method `GG` does not match GG(Number), invoked as GG(2)
 
 Possible candidates are:
-    __FUNC__()
-    __FUNC__(GGGG)
+    GG()
+    GG(Num)
+    GG(GGGG)
 %
 [AUTOLOAD] Undefined method `Hash.asdasd' called from main()
 %

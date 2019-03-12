@@ -2,18 +2,26 @@ module Combi {
   # travelling in a fighter Combi(nators)
   # similar to with, but allows more arguments and doesn't care about definedness
   func rescope (*args) {
-    func _bind_rs (b) {
+    # say "\trescope args: #{args.dump}"
+    func _bind_rs (Block b) {
       b.run(@|args)
     }
   }
 
   func rescope_n (Num n, *args) {
-    func _bind_rsn (b) {
+    func _bind_rsn (Block b) {
       b.run( args[0..^n], args.last(args.len - n) )
     }
   }
 
-  -> rescope_1 (*a) { Combi::rescope_n(1, @|a) }
+  -> rescope_first (*a) { Combi::rescope_n(1, @|a) }
+  -> drop (*a) { Combi::rescope( a[1..a.len-1] ) }
+  -> nip (*a) { Combi::rescope( a[0..a.len-2] ) }
+
+  -> drop_n (Number n, *a) { Combi::rescope( a[n..a.len-1] ) }
+  -> nip_n  (Number n, *a) { Combi::rescope( a[0 .. a.len-(n + 1) ] ) }
+
+  # TODO: ways to make lists from iteration without Array....
 
   func cleave (*args) {
     func _bind_cleave (*b) {
@@ -21,11 +29,19 @@ module Combi {
     }
   }
 
+  func combinate (*blocks) {
+    func _combinate_args (*args) {
+      func _r_combinate (last_res, Num i) {
+        __FUNC__( blocks[i].run(last_res), i )
+      }(blocks[0].run(args), 1)
+    }
+  }
+
   const Block _bind_apply_block = func (args, Bool ffork) -> Block {
     func _apply_block (*blocks) -> Array {
       const method_name = (ffork ? :ffork : :run)
       const args_padding = ([ nil ] * blocks.len-args.len)
-      const blocks_padding = ([ { _ } ] * args.len-blocks.len)
+      const blocks_padding = ([ { |*_| (@|_) } ] * args.len-blocks.len)
 
       # rescope could be used here, but isn't necessary, not even for readability
       with (
@@ -142,12 +158,38 @@ if (__FILE__ == __MAIN__) {
 
   var a = A()
 
-  Combi::rescope_1(
+  Combi::rescope_first(
     Combi::with_finalizer(a, :destroy, :args)({
       .be
     })
   )({
       |v, r|
-    say (v ? "the code worked" : "the code has failed! #{r.dump}")
+    assert(/failed! \["OHNOES!"\]/ ~~ (v ? "the code worked" : "the code has failed! #{r.dump}"))
   })
+
+  Combi::rescope( true, :was_true )({
+      |_, v|
+    assert( .&& v )
+  })
+
+  Combi::rescope( false, nil )({
+      |_, v|
+    assert( .|| !defined(v) )
+  })
+
+  func multi (c) {
+    c ? (true, @| c*2) : (false, nil)
+  }
+
+  Combi::rescope( multi([1, 2]) )({
+      |*_|
+    assert_eq( _, [true, 1, 2, 1, 2] )
+  })
+
+  Combi::rescope( multi([]) )({
+      |*_|
+    assert_eq(_, [false, nil])
+  })
+
+  say "\n*** Combi tests passed! "
 }
