@@ -284,10 +284,12 @@ class SeriallyAccessible << ModularInit, SeriallyEquatable {
           if (custom_setter) {
             custom_setter.run(self, new_val) \\ self
           } else {
+            # say "new value for #{field_name}: #{new_val}"
             *TypeUtils::object_hash_ref(
               [MN, :V_gen_accessor, :V_gen_setter, :V_builtin_setter],
               self,
-              field_name
+              # note the underscore
+              :_ + field_name
             ) = new_val
             self
             # self{:_ + field_name} = new_val; self
@@ -301,14 +303,16 @@ class SeriallyAccessible << ModularInit, SeriallyEquatable {
 
   method _property_generator {
     define Regex serial_pg_name = /^serial_property_generator(\w+)$/
-    self.grep_methods( { _ ~~ serial_pg_name } ) \
-      .each_kv{
+
+    self.grep_methods{ _ ~~ serial_pg_name } \
+      .map_kv{
           |name, calls|
-        say "createproperty #{name} => calls #{calls}"
-        __CLASS__.def_method(
-          :serial_properties + (name =~ serial_pg_name)[0],
-          func new_ser_props (self) { calls().map{ .run(self) } }
-        )
+        const method_name = (:serial_properties + (name =~ serial_pg_name)[0])
+        say "createproperty #{method_name}"
+        # func new_ser_props (self) { const r = calls().map{ .run(self) }; say r; r }
+        # this does not create an entry in .methods
+        # __CLASS__.def_method( method_name, new_ser_props )
+        calls().each{ .run(self).each_kv( self._bound_accessor_generator ) }
       }
   }
 

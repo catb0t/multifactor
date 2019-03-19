@@ -90,7 +90,7 @@ class BuiltObj << Lockable, SeriallyAccessible {
         |name|
       const name_format = name+:_format
       func gen (self) -> File {
-        File( String( self.method(name_format)[0, 1] ) + self.id + self.method(name_format)[2] )
+        File( String( self.method(name_format)()[0, 1] ) + self.id + self.method(name_format)()[2] )
       }
       __CLASS__.def_method(name + :_fullname, gen)
     }

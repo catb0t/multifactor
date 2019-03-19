@@ -1,19 +1,23 @@
 include lib::ABCs
+include lib::shell_words
 # import ABCs2::TypeUtils
 include providers::builtobj
 import providers::builtobj::BuiltObj
 import providers::builtobj::BlobSums
 
 var bo = BuiltObj().id(:1).factor_version('0.99').is_git(true).git_branch(:master).git_hash(:2349876234).word_size(:64)
-say bo.id
-assert(:sha256 == bo.blob_algorithm)
+say "id: #{bo.id}"
+# say ""
+assert_eq(:sha256, bo.blob_algorithm)
+assert_eq(:1, bo.id)
+assert_eq(:64, bo.word_size)
 
 var h = bo.serialize
 # say h
 var new_bo = BuiltObj().unserialize(h)
-assert(bo == new_bo)
-assert(new_bo.serialize == h)
+assert_eq(bo, new_bo)
+assert_eq(new_bo.serialize, h)
 
-var bo2 = BuiltObj()
-# say bo2.vm_fullname
-say bo2.serial_properties_builtobj
+var bo2 = BuiltObj().id(:1234).vm_format([ '', :fvm_, BuildSh::platform_vm_ext() ])
+assert_eq("fvm_1234#{BuildSh::platform_vm_ext()}", bo2.vm_fullname)
+say "vm fullname: #{bo2.vm_fullname}"
