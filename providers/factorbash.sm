@@ -1,0 +1,230 @@
+include lib::guardio
+include lib::shell_words
+include lib::withdirectory
+
+include providers::builtobj
+
+module FactorBashStateless {
+  -> _test_candidate_boot_image (providers::builtobj::BuiltObj bo, File c) {
+    c.exists && (bo.blob_sums.boot == BuildSh::blob_file_contents_sum(c, bo.blob_sums.algo) )
+  }
+
+  -> _choose_boot_image (providers::builtobj::BuiltObj bo_target, File boot_image_file) {
+    # Array<Pair<Bool, File>>
+    [
+      (
+        FactorBashStateless::_test_candidate_boot_image(bo_target, bo_target.boot_fullname) \
+          ¦ { bo_target.boot_fullname }
+      ),
+      (
+        FactorBashStateless::_test_candidate_boot_image(bo_target, boot_image_file) \
+          || BuildSh::update_boot_image() \
+            ¦ { boot_image_file }
+      ),
+      (
+        bo_target.stored_boot_image.cleave(
+          { .{:data}.len },
+          { .{:data}.base64_decode.method( .{:algo} ) },
+          { .{:sum} },
+          { GuardIO::write_binary_b64( bo_target.boot_fullname, _{:data} ) }
+        ).cleave(
+          { .first && .last },
+          { [ .[1, 2] ]«==» },
+        ).all \
+          ¦ { bo_target.boot_fullname }
+      ),
+      (
+        "give up" \
+          ¦ { die "[FATAL] #{__FUNC_NAME__}: can't find or download boot image\n\tno boot image, can't compile (sorry!)" }
+      )
+    ].find{ .first }.cleave{ .second.run }.last.cleave(
+      { say "#{__FUNC_NAME__}: !!! Chose #{_}" },
+      { _ }
+    ).last
+  }
+}
+
+class FactorBash (Dir wd, Bool subcommand_output = false) < lib::withdirectory::WithDirectory { # < CapturedWriter??
+
+  const DIR_REGEXES = Hash(
+    :core => /^core\//,
+    :basis => /^basis\//,
+    :vm => /^vm\//
+  )
+
+  # TODO: compare egrep with PCRE to figure out which files are being matched differently
+  -> git_files_matching (Dir d) -> Array {
+    const Array files = `git ls-files`.lines.grep{ _ ~~ DIR_REGEXES{d} }
+    die "[FATAL] #{__METHOD_NAME__}: no files matched #{DIR_REGEXES{d}} in #{Dir.cwd}" if (! files)
+    # say "git listing #{files.len} files: #{r}"
+    files
+  }
+
+  # aka hash_directory_filenames
+  -> sum_git_names_matching (Dir d, Str algo) is cached -> String {
+    die "#{__METHOD_NAME__}: empty 'algo'! dir: #{d}" if (algo.is_empty)
+    # allow utf-8 with SHA
+    self.git_files_matching(d).join("\n") |> :encode_utf8 |> algo
+  }
+
+  # TODO: make this not so slow so we don't have to use shell syntax directly
+  # aka hash_directory_contents
+  -> sum_git_contents_matching (Dir d, Str algo) is cached -> String {
+    die "#{__METHOD_NAME__}: empty 'algo'! dir: #{d}" if (algo.is_empty)
+    self.git_files_matching(d).map{
+      File(_) |> :open_r |> :slurp |> :encode_utf8
+    }.join("\n") |> algo
+  }
+
+  -> src_sums (String algo, Bool basis_ignored) is cached -> providers::builtobj::SrcSums {
+    die "#{__METHOD_NAME__}: empty 'algo'!" if (algo.is_empty)
+    self.with_directory{
+      providers::builtobj::SrcSums([:vm, :core, :basis].map{
+          |dir|
+        dir ⫶ providers::builtobj::DirSum(
+          algo: algo,
+          names: self.sum_git_names_matching(Dir(dir), algo),
+          contents: self.sum_git_contents_matching(Dir(dir), algo)
+        )
+      }..., basis_ignored: basis_ignored)
+    }
+  }
+
+  -> delegate (String name, Block default = {}, args = ()) {
+    # say "#{name} #{[@|args]}"
+    var fn
+    try { fn = eval("BuildSh::#{name}") } catch {}
+    if ( self |> :methods |> :keys |> (:contains, name) ) {
+      self.method(name)(@|args)
+    } elsif (fn) {
+      self.with_directory{ fn() }
+    } else {
+      default.run(@|args)
+    }
+  }
+
+  -> say_src_sums {
+    say "#{self.src_sums(:sha256, false).vm.names}  vm names"
+    say "#{self.src_sums(:sha256, false).vm.contents}  vm contents"
+    say "#{self.src_sums(:sha256, false).core.names}  core names"
+    say "#{self.src_sums(:sha256, false).core.contents}  core contents"
+    say "#{self.src_sums(:sha256, false).basis.names}  basis names"
+    say "#{self.src_sums(:sha256, false).basis.contents}  basis contents"
+  }
+
+  -> say_env_info {
+    const l = BuildSh::platform_lib_name()
+    var cc = BuildSh::cc()
+    var cxx = BuildSh::cxx()
+    say "cc=#{cc}"
+    say "cxx=#{cxx}"
+    say "os_name=#{self.delegate(:os_name)}"
+    say "os_type=#{self.delegate(:os_type)}"
+    say "arch_name=#{self.delegate(:arch_name)}"
+    say "word_size=#{self.delegate(:word_size)}"
+    say "is_git=#{self.delegate(:is_git)}"
+    say "git_branch=#{self.delegate(:git_branch)}"
+    say "git_hash=#{self.delegate(:git_hash)}"
+    say "platform_vm_ext=factor#{BuildSh::platform_vm_ext()}"
+    say "platform_lib_name=#{l.first}factor#{l.second}"
+    say "factor_version=#{self.delegate(:factor_version)}"
+  }
+
+  -> build_factor (providers::builtobj::BuiltObj bo_target) {
+    self.with_directory{
+      bo_target.cleave(
+        { .lock }, { BuildSh::make_clean_factor(_, output: self.subcommand_output) },
+        { .vm_fullname.exists }, { .lib_fullname.exists }, { .unlock }
+      ).all
+    }
+  }
+
+  -> _refresh_image (providers::builtobj::BuiltObj bo_target) {
+    self.with_directory{
+      Command::spawn_se(
+        './' + bo_target.vm_fullname, '-no-user-init', "-i='#{bo_target.image_fullname}'",
+        "-e='USING: vocabs.loader vocabs.refresh system memory ; refresh-all save 0 exit'",
+        output: self.subcommand_output
+      )
+    }
+  }
+  -> _make_boot_image (providers::builtobj::BuiltObj bo_target, Str target, File want_name) {
+    self.with_directory{
+      Command::spawn_se(
+        './' + bo_target.vm_fullname, '-no-user-init', "-i='#{bo_target.image_fullname}'",
+        "-e='USING: system bootstrap.image memory ; \"#{target}\" make-image image-path save-image 0 exit'",
+        output: self.subcommand_output
+      ) && BuildSh::generate_make_targets(){:boot_image}.move(want_name)
+    }
+  }
+
+  -> build_image (providers::builtobj::BuiltObj bo_target) {
+    self.with_directory{
+      define String lead = "==== "
+      bo_target.lock
+
+      const make_targets = BuildSh::generate_make_targets()
+      const File default_boot_image_file = make_targets{:boot_image}
+
+      # try the local one with our id
+      const using_boot_image = FactorBashStateless::_choose_boot_image(bo_target, default_boot_image_file)
+      # this side-effecting code will be deferred until used, except that isn't acutally what we want
+      using_boot_image
+
+      -> run_boot_image {
+        Command::spawn_se("echo \"USE: system 255 (exit)\"", '|', './' + bo_target.vm_fullname, '-no-user-init' "-i='#{using_boot_image}'", output: self.subcommand_output)
+      }
+      var count_refresh = 1
+      # NOTE: STEP 1: run from boot image
+      say "#{lead}Compiling from boot image, pass \##{count_refresh}"
+      if (! run_boot_image() ) {
+        say "[WARN]\t#{__METHOD_NAME__}: First pass not OK, trying again"
+
+        const updated = BuildSh::update_boot_image()
+
+        die "[FATAL] #{__METHOD_NAME__}: Failed to update, can't recover" \
+          if (!updated)
+
+        die "[FATAL] #{__METHOD_NAME__}: Still can't run from the new boot image, something is deeply wrong" \
+          if ( updated && !run_boot_image() )
+
+        say "#{lead}Second pass OK"
+      } else {
+        say "#{lead}First pass OK"
+      }
+
+      const Str boot_image_base = make_targets{:boot_image_base}
+      # NOTE: STEP 2: refresh-all from newly compiled image
+      var Bool image_fails_refresh = !self._refresh_image(bo_target)
+      # NOTE: STEP 3: re-bootstrap and refresh until it doesn't break
+      while (image_fails_refresh && (count_refresh < 25) ) {
+        say "#{lead}Boot image refresh \##{count_refresh} failed! bootstrapping again..."
+
+        # NOTE: STEP 3a: new boot image
+        if (! self._make_boot_image(bo_target, boot_image_base, using_boot_image) ) {
+          die "[FATAL] #{__METHOD_NAME__}: failed to make a boot image (refresh \##{count_refresh}): #{$!}"
+        }
+
+        # NOTE: STEP 3b: repeat STEP 1
+        run_boot_image()
+        # NOTE: STEP 3b: repeat STEP 2
+        image_fails_refresh = !self._refresh_image(bo_target)
+        count_refresh++
+      }
+      die "[FATAL] Can't possibly compile a working image" if (image_fails_refresh)
+      # NOTE: STEP 4: build a final boot image with the working factor.image
+      const retval = using_boot_image.cleave(
+        { self._make_boot_image(bo_target, boot_image_base, _) },
+        { _ == bo_target.boot_fullname ? true : .copy(bo_target.boot_fullname) }
+      ).all
+
+      bo_target.unlock
+
+      # don't delete the boot image?
+      # mv boot_image my_boot_image_name
+      say "#{lead}Finished image compilation after #{count_refresh} refresh#{count_refresh > 1 ? 'es' : '' }"
+
+      retval
+    }
+  }
+}

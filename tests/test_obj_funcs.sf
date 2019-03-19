@@ -1,4 +1,7 @@
-include ABCs
+include lib::ABCs
+import lib::ABCs::Serializable
+
+include lib::frext
 
 class X {
   -> no_arg { }
@@ -82,18 +85,16 @@ assert( ! TypeUtils::is_serializable( Object.new ) )
 assert( ! TypeUtils::is_serializable( String() ) )
 assert( ! TypeUtils::is_serializable( Hash() ) )
 
-assert( ! ABCs::Serializable()._is_serialized_obj(Hash) )
-assert( ! ABCs::Serializable()._is_serialized_obj(Hash()) )
-assert( ! ABCs::Serializable()._is_serialized_obj(Hash(1)) )
-assert( ! ABCs::Serializable()._is_serialized_obj(Hash(:_serial_type => "")) )
-assert( ! ABCs::Serializable()._is_serialized_obj(Hash(:_serial_type => String)) )
-assert( ! ABCs::Serializable()._is_serialized_obj(Hash(:_serial_value => "value")) )
-assert( ! ABCs::Serializable()._is_serialized_obj(Hash(:_serial_value => Hash)) )
-assert( ! ABCs::Serializable()._is_serialized_obj(Hash(:_serial_type => "", :_serial_value => "value")) )
-assert( ! ABCs::Serializable()._is_serialized_obj(Hash(:_serial_type => String, :_serial_value => "value")) )
-assert( ! ABCs::Serializable()._is_serialized_obj(Hash(:_serial_type => "", :_serial_value => Hash)) )
-assert( ! ABCs::Serializable()._is_serialized_obj(Hash(:_serial_type => String, :_serial_value => Hash())) )
-assert( ! ABCs::Serializable()._is_serialized_obj(Hash(:_serial_type => "String", :_serial_value => Hash())) )
-assert( ABCs::Serializable()._is_serialized_obj( Hash( :_serial_value => Hash() ) ) )
-
-say "\n*** Test passed! ***"
+assert( ! Serializable()._is_serialized_obj(Hash) )
+assert( ! Serializable()._is_serialized_obj(Hash()) )
+assert( ! Serializable()._is_serialized_obj(Hash(1)) )
+assert( ! Serializable()._is_serialized_obj(Hash(:_serial_type => "")) )
+assert( ! Serializable()._is_serialized_obj(Hash(:_serial_type => String)) )
+assert( ! Serializable()._is_serialized_obj(Hash(:_serial_value => "value")) )
+assert( ! Serializable()._is_serialized_obj(Hash(:_serial_value => Hash)) )
+assert( ! Serializable()._is_serialized_obj(Hash(:_serial_type => "", :_serial_value => "value")) )
+assert( ! Serializable()._is_serialized_obj(Hash(:_serial_type => String, :_serial_value => "value")) )
+assert( ! Serializable()._is_serialized_obj(Hash(:_serial_type => "", :_serial_value => Hash)) )
+assert( ! Serializable()._is_serialized_obj(Hash(:_serial_type => String, :_serial_value => Hash())) )
+assert( ! Serializable()._is_serialized_obj(Hash(:_serial_type => "String", :_serial_value => Hash())) )
+assert( Serializable()._is_serialized_obj( Hash( :_serial_value => Hash() ) ) )

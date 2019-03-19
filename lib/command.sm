@@ -1,0 +1,39 @@
+module Command {
+  define Regex RETVAL_REGEX = /__RETURNED=(\d+)/
+
+  func spawn_se (Bool output = false, *cmdline) -> Bool {
+    $| = 1
+
+    STDERR.say("\t\b\b-> #{cmdline.join(' ')}")
+    0 == Number(
+      (Pipe( [cmdline..., ";", "echo", '"__RETURNED=$?\n"'].join(' ') ) \
+        .open_r.cleave(
+          { .autoflush(true) },
+          { "\n\t\t".print if (output) },
+          {
+            var c = ''
+            .each_char{
+                |b|
+              if (output) {
+                if (c.last == "\n") { "\t\t".print }
+                b.print
+              }
+              c += b
+            }
+            c
+          }
+        ).last \
+        .lines.find{ _ ~~ RETVAL_REGEX } =~ RETVAL_REGEX
+      )[0].to_n
+    )
+  }
+  func ql (Array args) -> String {
+    args.map{ "#{_.quotemeta} " }.join
+  }
+  func make (Bool output = false, *args) -> Bool {
+    Command::spawn_se('make', '-j', args..., output: output)
+  }
+  func nmake (Bool output = false, *args) -> Bool {
+    Command::spawn_se('set CL=/MP & nmake', args..., output: output)
+  }
+}

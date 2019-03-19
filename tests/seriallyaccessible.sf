@@ -12,8 +12,8 @@
 #var x = ts.serialize
 #say TimeSpec().unserialize(x).dump==ts.dump
 
-include builtobj
-import builtobj::BuiltObj
+include providers::builtobj
+import providers::builtobj::BuiltObj
 var bo = BuiltObj()
 # var v = bo.serialize
 # say BuiltObj().unserialize(v).dump==bo.dump
@@ -26,3 +26,5 @@ var f = bo.serialize
 say f
 var new_bo = BuiltObj().unserialize(f)
 say new_bo==bo
+assert(new_bo == bo)
+assert_eq(new_bo, bo)

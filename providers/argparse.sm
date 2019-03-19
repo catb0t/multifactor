@@ -1,3 +1,4 @@
+#! ruby
 #! sidef -WkP8
 # # https://unix.stackexchange.com/questions/484152/how-to-distinguish-between-a-positional-parameter-and-an-option
 
@@ -26,7 +27,7 @@ class String {
   method third { return self.char(2) }
 }
 
-class ArgParse (argv: Array) {
+class ArgParse (Array argv) {
 
   class Option (long, short, req, param, doc) {
 
@@ -128,6 +129,11 @@ class ArgParse (argv: Array) {
   #     "verbose" => true
   # )
 
+  # NOTE:
+  # MISSING: combined short options (needs re-processing)
+  # MISSING: context for options with parameters with space delimeters
+  # MISSING: parameter support in combined short options
+
   method option (
     String long_name,
     String short_name = false,
@@ -204,7 +210,7 @@ class ArgParse (argv: Array) {
 
   # allow options and arguments to be required, obviated, enabled, disabled, and set by other options/arguments
   # allows implementation of "synonym"
-  method _trigger (s, t, d) { ...; self }
+  method _trigger (s, t, d) { ...; [s, t, d]; self }
   method trigger (source, target, String doc = "") { self._trigger(source, target, doc) }
 
   method use_option_terminator (String doc = "") {
@@ -408,7 +414,7 @@ class ArgParse (argv: Array) {
           # rest of long option processing
           # handle parameters here
 
-          in_opts += Pair(opt_name, value ? value : true)
+          in_opts += (opt_name ¦ value ? value : true)
 
         # short options
         } elsif (param =~ self.opt_short_re) {
@@ -446,13 +452,13 @@ class ArgParse (argv: Array) {
               # parse backwards and forwards to find the last non-nr and the end of the current nr
               opts[-(opt_index-1) .. 0] # reversed previous section of the opt
               opts[opt_index+1 .. @opts->last_index] # next section of the opt
-              in_opts += Pair(long_name_of, 12)
+              in_opts += (long_name_of ¦ 12)
 
             } else {
               # remember to use value if the current char is the last one
               # so that -WkP=12 etc works
-              in_opts += Pair(
-                long_name_of,
+              in_opts += (
+                long_name_of ¦
                 opt_index==(@opts).last_index && value
                   ? value
                   : true
@@ -462,7 +468,7 @@ class ArgParse (argv: Array) {
           }
 
           # not necessary here, we already did each part
-          # in_opts += opts.:value
+          # in_opts += Pair(opts, value)
         } else {
 
         }
@@ -478,7 +484,7 @@ class ArgParse (argv: Array) {
           next
         }
 
-        in_args += param.:true
+        in_args += (param ¦ true)
       }
     }
 
@@ -496,9 +502,9 @@ func test {
     .info(:(name => "argparse", version => "1", doc => "argparse test")) \
     .option("force", "f", doc: "Force a rebuild in any case") \
     .option("dry-run", "n", doc: "Print configuration; commit no changes") \
-    .option("clean", "c", negate: "Always":"Never", doc: "'make clean'") \
-    .option("sums", "s",  negate: "Always":"Never", doc: "use checksums") \
-    .option("db", "d", param: "file":".multi", doc: "Use this database instead") \
+    .option("clean", "c", negate: (:Always ¦ :Never), doc: "'make clean'") \
+    .option("sums", "s",  negate: (:Always ¦ :Never), doc: "use checksums") \
+    .option("db", "d", param: (:file ¦ ".multi"), doc: "Use this database instead") \
     .use_option_terminator("Further arguments are given to Factor") \
     .use_stdin_file_arg \
     .use_arg_list_terminator \

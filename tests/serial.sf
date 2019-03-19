@@ -1,7 +1,7 @@
 # include ABCs
 # import ABCs::Serializable
-include ABCs
-import ABCs::Serializable
+include lib::ABCs
+import lib::ABCs::Serializable
 
 class Tiny (field = "") < Serializable {
   has Hash serial_properties = Hash(
@@ -71,6 +71,7 @@ const Hash h1 = first_ts.serialize
 # say s
 var second_ts = TestSerial().unserialize(h1)
 say (first_ts.dump == second_ts.dump) # ==> true
+assert_eq(first_ts.dump, second_ts.dump) # ==> true
 
 var J = "JSON::PP".require
 var j = J.new.pretty # .convert_blessed
@@ -82,5 +83,8 @@ var h2 = j.decode(json)
 var roundtrip_ts = TestSerial().unserialize(h2)
 #
 say h2==h1
+assert_eq(h2, h1)
 say (roundtrip_ts.dump==first_ts.dump)
+assert_eq(roundtrip_ts.dump, first_ts.dump)
 say (roundtrip_ts.dump==second_ts.dump)
+assert_eq(roundtrip_ts.dump, second_ts.dump)

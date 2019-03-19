@@ -1,8 +1,8 @@
-include ABCs
+include lib::ABCs
 # import ABCs2::TypeUtils
-include builtobj
-import builtobj::BuiltObj
-import builtobj::BlobSums
+include providers::builtobj
+import providers::builtobj::BuiltObj
+import providers::builtobj::BlobSums
 
 var bo = BuiltObj().id(:1).factor_version('0.99').is_git(true).git_branch(:master).git_hash(:2349876234).word_size(:64)
 say bo.id

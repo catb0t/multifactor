@@ -1,7 +1,24 @@
-include ABCs
-import ABCs::SeriallyEquatable
-import ABCs::SeriallyAccessible
-import ABCs::Lockable
+#! ruby
+
+##  builtobj, data class provider for various disk and database compiled objects
+##    Copyright Cat Stevens 2018
+##  This program is free software: you can redistribute it and/or modify
+##    it under the terms of the GNU General Public License as published by
+##    the Free Software Foundation, either version 3 of the License, or
+##    (at your option) any later version.
+##
+##    This program is distributed in the hope that it will be useful,
+##    but WITHOUT ANY WARRANTY; without even the implied warranty of
+##    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+##    GNU General Public License for more details.
+##
+##    You should have received a copy of the GNU General Public License
+##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+include lib::ABCs
+import lib::ABCs::SeriallyEquatable
+import lib::ABCs::SeriallyAccessible
+import lib::ABCs::Lockable
 
 class DirSum (Str algo = '', Str names = '', Str contents = '') < SeriallyEquatable {
   has Hash serial_properties = [:algo, :names, :contents].map{ ( (_) => Str ) }.to_h

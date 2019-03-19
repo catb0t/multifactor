@@ -1,0 +1,118 @@
+#! ruby
+
+##  CacheDB, a transactional minimalism-oriented JSON "data base" implementation
+##    Copyright Cat Stevens 2018
+##  This program is free software: you can redistribute it and/or modify
+##    it under the terms of the GNU General Public License as published by
+##    the Free Software Foundation, either version 3 of the License, or
+##    (at your option) any later version.
+##
+##    This program is distributed in the hope that it will be useful,
+##    but WITHOUT ANY WARRANTY; without even the implied warranty of
+##    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+##    GNU General Public License for more details.
+##
+##    You should have received a copy of the GNU General Public License
+##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+include lib::guardio
+include lib::withdirectory
+
+module CacheDBStateless {
+  include Atomic
+
+  # look for the database file
+  func _read_disk_db (File name) is cached -> Hash {
+    # look for the database file
+    # if it doesn't exist, stop
+    # otherwise, open it
+    const contents = Atomic::aread(name)
+    # if it's empty, get a new one -> []
+    if (! contents) {
+      return Hash()
+    }
+    const eval_contents = eval(contents)
+    # if it's not empty, but contains invalid / throwing code, THAT's an error!
+    if (! defined(eval_contents)) {
+      die "Malformed db: #{name} (it failed to eval): #{contents}"
+    }
+    # if it contains only [], it's also empty -> []
+    if (! eval_contents) {
+      return Hash()
+    }
+
+    return eval_contents
+  }
+
+  func _write_disk_db (File name, Hash new_data) {
+    const String new_contents = new_data.dump # safe ???
+    # look for the database file
+    # if it doesn't exist, stop
+    # otherwise, open it
+    Atomic::awrite(name, new_contents)
+  }
+}
+
+# todo: make it actually caching
+class CacheDB (File db_base = nil, Dir db_dir = nil, Bool dry_run = nil) < lib::withdirectory::CapturedWriter {
+
+  has Array change_sequence
+  has Hash data
+  has GuardIO::SLog log
+
+  method setup (Bool verbose = false, Bool replace_existing = false) {
+    self.log = GuardIO::SLog(is_verbose: verbose)
+    if (self.db_name.exists && replace_existing) {
+      self.log.wrn(__FILE__, __LINE__, __METHOD_NAME__, "!!! removing old DB !!!")
+      self.db_name.cleave({ .remove }, { .touch })
+    }
+    if (! self.db_name.exists) { self.db_name.touch }
+    self
+  }
+
+  -> db_name { self.db_dir + self.db_base }
+  -> wd { self.db_dir }
+
+  method read_disk_db () is cached -> Hash {
+    self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, 'reading', self.db_name)
+
+    self.with_directory{ CacheDBStateless::_read_disk_db(self.db_base) }
+  }
+
+  method load () is cached -> Hash {
+    self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, 'loading db...')
+    static const db_data
+    if (! defined(db_data)) {
+      self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, 'wasn\'t cached!')
+      db_data = self.read_disk_db
+    }
+    db_data
+  }
+
+  method write_disk_db (Hash new_data) {
+    const MN = __METHOD_NAME__
+    self.log.trc(__FILE__, __LINE__, MN, 'writing', self.db_name)
+
+    if ( new_data ) {
+      self.capture_write_disk(MN, { CacheDBStateless::_write_disk_db(self.db_base, new_data) } ) #, __METHOD_NAME__ )
+    } else {
+      # *(self.parent_obj) -> cleanup
+      die "[ERROR]\t#{__METHOD_NAME__}: garbage argument #{new_data}"
+    }
+  }
+
+  # TODO: don't write the disk right away
+  method insert (Object new_entry) {
+    self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, 'inserting', new_entry)
+    const entire_db = self.load
+    entire_db{new_entry.id} = new_entry
+    self.write_disk_db( entire_db )
+  }
+
+  method delete (Object key) {
+    self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, 'removing id \'', key, "'")
+    const entire_db = self.load
+    entire_db.delete(key)
+    self.write_disk_db( entire_db )
+  }
+}
