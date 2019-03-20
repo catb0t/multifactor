@@ -28,9 +28,14 @@ module FRExt {
 
     # internal; doesn't care about overloads
     /* -> respond_to (String name, *_) -> Bool { self.can(name, _...) } */
+    /* -> can        (String name, *_) -> CODE { UNIVERSAL::can(self, name, _...) } */
 
     method declares_method (String name) -> Hash {
       self.grep_methods{ |n, _| n ~~ name }
+    }
+
+    method is_an_object (typename) {
+      self.is_a(typename) && self.is_object
     }
 
     # test if it can be called with the specific number and type of arguments
@@ -132,11 +137,19 @@ module FRExt {
       }
     }
 
-    method grep_methods (Block b) {
-      self.methods.grep_kv(b)
+    method grep_methods (Block g) {
+      self.methods.grep_kv(g)
     }
+
+    method grep_sorted_methods (Block g, Block s) {
+      self.grep_methods(g).pairs.sort_by(s) # { |l, r| l.first <=> r.first }
+    }
+
     method grep_map_methods (Block g, Block m) {
       self.grep_methods(g).map_kv(m)
+    }
+    method grep_sorted_map_methods (Block g, Block s, Block m) {
+      self.grep_sorted_methods(g, s).map{ m.run( .key, .value ) }
     }
   }
 
@@ -170,29 +183,11 @@ module FRExt {
       (/^Sidef::Runtime::\d+::(main::.+)$/ =~ fqtn)[0]
     }
 
-    func is_typename (Object obj) -> Bool {
-      # print "#{obj} "
-      [:compile_to_perl, :code_interactive].all{
-        obj.declares_method(_) # .rescope{ |b| say("\tdeclares #{_}: #{Bool(b)}"); b }
-      } && obj.refaddr==0
-    }
-
-    # is Fully-Qualified Constructed Object
-    func is_fqco (obj, must_have_prop = false) -> Bool {
-    # say "is fqco #{obj} #{must_have_prop}"
-      Bool( !is_typename(obj) && (must_have_prop ? obj.declares_method(must_have_prop) : true) )
-    }
-
-    func is_a_fqco (obj, typename, must_have_prop = false) {
-    # say "is a + is fqco #{obj} #{typename} #{must_have_prop}"
-      obj.is_a(typename) && TypeUtils::is_fqco(obj, must_have_prop: must_have_prop)
-    }
-
     func maybe_call_custom_init (Object obj) {
       if ( obj.respond_to(:INIT_METHOD_NAME) ) {
 
         obj.method( obj.INIT_METHOD_NAME )()
-      } elsif ( TypeUtils::is_typename(obj) ) {
+      } elsif ( obj.is_typename ) {
         # invoke raw typenames
         obj()
       } else {
@@ -215,4 +210,6 @@ module FRExt {
   }
 }
 
-assert_eq( Object.has_overload(:(:callers => [:main], :name => :respond_to, :give_return => true)), :( :return => false, :state => true ) )
+if (__FILE__ == __MAIN__) {
+  assert_eq( Object.has_overload(:(:callers => [:main], :name => :respond_to, :give_return => true)), :( :return => false, :state => true ) )
+}

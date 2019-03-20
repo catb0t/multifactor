@@ -91,8 +91,6 @@ module MultiFactor {
   }
 
   class MFRuntime (Hash options, Array factor_arguments) << lib::ABCs::SeriallyAccessible, lib::withdirectory::CapturedWriter {
-    has Bool _config_setup_done = false # whether the following variables have been written
-    has Str _action
     has Array known_actions = ['env-info', 'src-sums', 'run-factor']
 
     has GuardIO::SLog                      log
@@ -100,98 +98,112 @@ module MultiFactor {
     has GuardIO::GlobLocker                locker
     has providers::factorbash::FactorBash  fbash
 
-    has Bool _force
-    has Bool _debug = false
-    has Bool _info
-    has Bool _dry_run
-    has Bool _clean
-    has Bool _sums
-    has Bool _basis_dev
+    # todo: collect generated methods that don't appear in .methods
+    has Array field_groups = [
+      (Bool   ¦ [:force, :debug, :info, :dry_run, :clean, :sums, :basis_dev]),
+      (String ¦ [:sum_blob_algo, :sum_src_algo, :action, :uuid]),
+      (Dir    ¦ [:initial_wd] )
+    ]
 
-    has String _sum_blob_algo = :sha256
-    has String _sum_src_algo = :sha256
+    has Array serial_property_generator_mfruntime = [ {
+      .field_groups.map{
+        const tn = .first
+        .second.map{ ((_) => tn) }.to_h
+      }.merge_reduce
+    } ]
+
+    # has Bool _force
+    # has Bool _debug = false
+    # has Bool _info
+    # has Bool _dry_run
+    # has Bool _clean
+    # has Bool _sums
+    # has Bool _basis_dev
+
+    # has Str _action
+    # has String _sum_blob_algo = :sha256
+    # has String _sum_src_algo = :sha256
     # set in config file etc, not a cmdline option
     # has Number uuid_len
 
     # where the process started before any chdir
-    has Dir initial_wd
+    # has Dir initial_wd
 
-    has String _UUID
 
-    -> UUID ()         { self._UUID }
-    -> action          { self._action }
-    -> force           { self._force }
-    -> debug           { self._debug }
-    -> info            { self._info }
-    -> dry_run         { self._dry_run }
-    -> clean           { self._clean }
-    -> sums            { self._sums }
-    -> basis_dev       { self._basis_dev }
-    -> sum_src_algo    { self._sum_src_algo }
-    -> sum_blob_algo   { self._sum_blob_algo }
-    -> wd { self.initial_wd }
+    # -> UUID ()         { self._UUID }
+    # -> action          { self._action }
+    # -> force           { self._force }
+    # -> debug           { self._debug }
+    # -> info            { self._info }
+    # -> dry_run         { self._dry_run }
+    # -> clean           { self._clean }
+    # -> sums            { self._sums }
+    # -> basis_dev       { self._basis_dev }
+    # -> sum_src_algo    { self._sum_src_algo }
+    # -> sum_blob_algo   { self._sum_blob_algo }
+    # -> wd { self.initial_wd }
+    # -> UUID (Str u)             { self._UUID = u; self }
+    # -> action (Str a)           { self._action = a; self }
+    # -> force (Bool b)           { self._force = b; self }
+    # -> debug (Bool b)           { self._debug = b; self }
+    # -> info (Bool b)            { self._info = b; self }
+    # -> dry_run (Bool b)         { self._dry_run = b; self }
+    # -> clean (Bool b)           { self._clean = b; self }
+    # -> sums (Bool b)            { self._sums = b; self }
+    # -> basis_dev (Bool b)       { self._basis_dev = b; self }
+    # -> sum_src_algo (Str a)     { self._sum_src_algo = a; self }
+    # -> sum_blob_algo (Str a)    { self._sum_blob_algo = a; self }
 
-    -> UUID (Str u)             { self._UUID = u; self }
-    -> action (Str a)           { self._action = a; self }
-    -> force (Bool b)           { self._force = b; self }
-    -> debug (Bool b)           { self._debug = b; self }
-    -> info (Bool b)            { self._info = b; self }
-    -> dry_run (Bool b)         { self._dry_run = b; self }
-    -> clean (Bool b)           { self._clean = b; self }
-    -> sums (Bool b)            { self._sums = b; self }
-    -> basis_dev (Bool b)       { self._basis_dev = b; self }
-    -> sum_src_algo (Str a)     { self._sum_src_algo = a; self }
-    -> sum_blob_algo (Str a)    { self._sum_blob_algo = a; self }
+    has Array init_steps_10_mfruntime = [ {
+        |self|
+      say "MFRuntime init called"
+      self.uuid( GuardIO::make_uuid(words: true) )
+      self.initial_wd( Dir.cwd )
 
-    method config_setup {
-      if (! self._config_setup_done) {
-        self.UUID( GuardIO::make_uuid(words: true) )
-        self.initial_wd = Dir.cwd
-
-        var props = Hash(
-          :action => { _ },
-        ).merge(
-          [:force, :dry_run, :info, :clean, :sums, :basis_dev] \
-            .map{ ( (_) => { Bool(_) } ) }.to_h # all these parentheses are important
-        )
-        props.each_kv{
-            |name, convert|
-          self.method( name )( convert( self.options(){ name.replace_all("_", "-") } ) )
-        }
-
-        # need a way for the consumer ofthe ArgParse API to know the exact syntax of the command line
-        self.known_actions.contains(self.action) \
-          || die "[FATAL] #{__FILE__, __LINE__}: #{__METHOD_NAME__}: don't know action '#{self.action}' [--action | -a]"
-
-        # initialise helper objects
-
-        self.log = GuardIO::SLog(
-          is_trace: ( [:trace, :verbose, 'dry-run'].any{ self.options(){_} } ),
-          is_verbose: ( [:verbose, 'dry-run'].any{ self.options(){_} } ),
-          logger: { |*a| Factor::say_stderr( a... ) }
-        )
-
-        self.fbash = providers::factorbash::FactorBash(
-          Dir( self.options(){'factor-dir'} || Factor::FACTOR_DIR ), #
-          subcommand_output: !( self.options(){'quiet-subcom'} || Factor::QUIET_PIPE )  #
-        )
-
-        self.db_man = providers::cachedb::CacheDB(
-          db_base: File( self.options(){'db-name'} ),
-          db_dir: Dir( self.options(){'db-dir'} ),
-          dry_run: self.dry_run
-        ).setup( verbose: self.options(){:verbose}, replace_existing: Bool( self.options(){'from-scratch'} ) )
-
-        self.locker = GuardIO::GlobLocker(
-          self.UUID,
-          remove_old_lock: self.options(){'remove-old-lock'},
-          lock_ext: '.multifactor_lock'
-        ).setup( [ self.db_man.db_name, self.fbash.wd ], verbose: self.options(){:verbose} )
-
-        self._config_setup_done = true
-        self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, "finished configuration") #, wd now: '#{self.db_dir}'")
+      var props = Hash(
+        :action => { _ },
+      ).merge(
+        [:force, :dry_run, :info, :clean, :sums, :basis_dev] \
+          .map{ ( (_) => { Bool(_) } ) }.to_h # all these parentheses are important
+      )
+      props.each_kv{
+          |name, convert|
+        self.method( name )( convert( self.options(){ name.replace_all("_", "-") } ) )
       }
-    }
+
+      # need a way for the consumer ofthe ArgParse API to know the exact syntax of the command line
+      self.known_actions.contains(self.action) \
+        || die "[FATAL] #{__FILE__, __LINE__}: init_steps_mfruntime: don't know action '#{self.action}' [--action | -a]"
+
+      # initialise helper objects
+
+      self.log = GuardIO::SLog(
+        is_trace: ( [:trace, :verbose, 'dry-run'].any{ self.options(){_} } ),
+        is_verbose: ( [:verbose, 'dry-run'].any{ self.options(){_} } ),
+        logger: { |*a| Factor::say_stderr( a... ) }
+      )
+
+      self.fbash = providers::factorbash::FactorBash(
+        Dir( self.options(){'factor-dir'} || Factor::FACTOR_DIR ), #
+        subcommand_output: !( self.options(){'quiet-subcom'} || Factor::QUIET_PIPE )  #
+      )
+
+      self.db_man = providers::cachedb::CacheDB(
+        db_base: File( self.options(){'db-name'} ),
+        db_dir: Dir( self.options(){'db-dir'} ),
+        dry_run: self.dry_run
+      ).setup( verbose: self.options(){:verbose}, replace_existing: Bool( self.options(){'from-scratch'} ) )
+
+      self.locker = GuardIO::GlobLocker(
+        self.uuid,
+        remove_old_lock: self.options(){'remove-old-lock'},
+        lock_ext: '.multifactor_lock'
+      ).setup( [ self.db_man.db_name, self.fbash.wd ], verbose: self.options(){:verbose} )
+
+      self._config_setup_done = true
+      self.log.trc(__FILE__, __LINE__, :init_steps_mfruntime, "finished configuration") #, wd now: '#{self.db_dir}'")
+
+    } ]
 
      method show_info {}
      #  self.config_setup
@@ -375,7 +387,6 @@ module MultiFactor {
     #TDOO: DON"T HASH FACTOR IMAGE
     method go (Bool is_restart = false) {
       const MN = __METHOD_NAME__
-      self.config_setup
       if (self.info) { self.show_info; return nil }
 
       self.locker.do_lock_files
@@ -595,5 +606,5 @@ func main {
 }
 
 if (__FILE__ == __MAIN__) {
-  # main()
+  main()
 }

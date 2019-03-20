@@ -20,12 +20,12 @@ include lib::frext
 func process_serial_prop_rhs (callers < FRExt::ArrStr, String name, Object obj, Hash want_vals) -> Hash {
   const FN = __FUNC_NAME__
 
-  const is_fqa = TypeUtils::is_a_fqco(obj, Array, must_have_prop: :merge_reduce)
+  const is_fqa = obj.is_an_object(Array)
 
   want_vals.rescope{
     # maybe the following can be vectorised?
     if ( !is_fqa ) {
-      TypeUtils::is_typename(obj) || die ("RHS in serial property declaration '#{name}' isn't a typename: '#{obj}' (ref #{obj.ref}) (perhaps you accidentally initialised the object?)\n\t#{__FUNC_NAME__}: called from: #{callers.reverse.join(' < ')}")
+      obj.is_typename || die ("RHS in serial property declaration '#{name}' isn't a typename: '#{obj}' (ref #{obj.ref}) (perhaps you accidentally initialised the object?)\n\t#{__FUNC_NAME__}: called from: #{callers.reverse.join(' < ')}")
 
       .clobber_existing_by( Hash(
         :typename => { obj },
@@ -40,7 +40,7 @@ func process_serial_prop_rhs (callers < FRExt::ArrStr, String name, Object obj, 
       if (obj.len == 1) {
         __FUNC__([@|callers, :V_recursing] name, obj[0], _ )
       } else {
-        defined(obj[2]) && ( TypeUtils::is_a_fqco(obj[2], Hash ) \
+        defined(obj[2]) && ( obj[2].is_an_object(Hash) \
           || die "#{__FILE__}:#{__LINE__}: #{FN}: malformed custom get/set blocks in RHS when declaring field '#{name}': RHS item \#3: want type 'Hash'; got '#{obj[2].ref}'"
         )
 
@@ -72,11 +72,7 @@ class Serializable {
   }
 
   -> _is_serialized_obj (Object obj) {
-    (
-      TypeUtils::is_a_fqco(obj, Hash, must_have_prop: :merge) &&
-      obj.keys==[self._k_svalue] &&
-      TypeUtils::is_a_fqco( obj{self._k_svalue}, Hash, must_have_prop: :merge )
-    )
+    ( obj.is_an_object(Hash) && obj.keys==[self._k_svalue] && obj{self._k_svalue}.is_an_object(Hash) )
   }
 
   -> _find_getter (Array callers, String field_name, Hash props) {
@@ -203,15 +199,22 @@ class SeriallyEquatable < Serializable {
 
 
 func _call_methods_blocks_by (Object obj, Regex r) {
-  obj.grep_map_methods(
+  # 0..30 -> map{ "sdf"+.to_s+"abcde" }.sort{ |l, r| [l, r].all{ _ ~~ /(\d+)/ } ? [l, r].map{ (_ =~ /(\d+)/ )[0].to_n }.reduce{ |p, q| p <=> q } : (l <=> r) }
+  obj.grep_sorted_map_methods(
     { |name, _| name ~~ r },
-    { |_, calls| calls().each{ |block| block.run(obj) } }
+    {
+        |l, r|
+      [l, r].all{ _ ~~ /(\d+)/ }
+        ? [l, r].map{ (_ =~ /(\d+)/ )[0].to_n }.reduce{ |p, q| p <=> q }
+        : (l <=> r)
+    },
+    { |_, calls| .say; calls().each{ |block| block.run(obj) } }
   )
 }
 
 class ModularInit {
   method init {
-    _call_methods_blocks_by(self, /^init_steps/)
+    _call_methods_blocks_by(self, /^init_steps_/)
     self
   }
 }
@@ -223,7 +226,7 @@ define Array global_init_steps_sa_base = [
 ]
 
 class SeriallyAccessible << ModularInit, SeriallyEquatable {
-  has Array init_steps_sa_base = global_init_steps_sa_base
+  has Array init_steps_00_sa_base = global_init_steps_sa_base
   method _bound_accessor_generator {
     const MN = __METHOD_NAME__
     {
@@ -306,9 +309,9 @@ class SeriallyAccessible << ModularInit, SeriallyEquatable {
 
     self.grep_methods{ _ ~~ serial_pg_name } \
       .map_kv{
-          |name, calls|
-        const method_name = (:serial_properties + (name =~ serial_pg_name)[0])
-        say "createproperty #{method_name}"
+          |_, calls|
+        # const method_name = (:serial_properties + (name =~ serial_pg_name)[0])
+        # say "createproperty #{method_name}"
         # func new_ser_props (self) { const r = calls().map{ .run(self) }; say r; r }
         # this does not create an entry in .methods
         # __CLASS__.def_method( method_name, new_ser_props )
