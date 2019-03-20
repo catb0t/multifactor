@@ -204,9 +204,10 @@ func _call_methods_blocks_by (Object obj, Regex r) {
     { |name, _| name ~~ r },
     {
         |l, r|
-      [l, r].all{ _ ~~ /(\d+)/ }
-        ? [l, r].map{ (_ =~ /(\d+)/ )[0].to_n }.reduce{ |p, q| p <=> q }
-        : (l <=> r)
+        const names = [l, r].map{ .key }
+        names.all{ _ ~~ /(\d+)/ }
+          ? names.map{ (_ =~ /(\d+)/ )[0].to_n }.reduce{ |p, q| p <=> q }
+          : (l <=> r)
     },
     { |_, calls| .say; calls().each{ |block| block.run(obj) } }
   )

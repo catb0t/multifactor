@@ -142,7 +142,7 @@ module FRExt {
     }
 
     method grep_sorted_methods (Block g, Block s) {
-      self.grep_methods(g).pairs.sort_by(s) # { |l, r| l.first <=> r.first }
+      self.grep_methods(g).pairs.sort(s) # { |l, r| l.first <=> r.first }
     }
 
     method grep_map_methods (Block g, Block m) {

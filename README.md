@@ -4,7 +4,7 @@ To end the hassle of having to manage [Factor](https://github.com/factor/factor)
 
 ## Overview
 
-Written in Trizen's [Sidef](https://github.com/trizen/sidef).
+Written in Trizen's [Sidef](https://github.com/trizen/sidef). **Usually requires Sidef `master`, not a stable release**.
 
 `sidef multifactor.sm [options] [--] [parameters to Factor]`
 
