@@ -20,7 +20,7 @@ assert_eq(
     :bool => "a string",
     :abc => Set(9, 0),
     :something => nil
-  ).template_cast( :( :bool => Bool, :abc => Array, :something => Bool ) ),
+  ).template_transform( :( :bool => Bool, :abc => Array, :something => Bool ) ),
   Hash(
     :bool => true,
     :abc => [Set(9, 0)],
