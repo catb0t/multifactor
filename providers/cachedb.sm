@@ -19,13 +19,13 @@ include lib::guardio
 include lib::withdirectory
 include lib::ABCs
 
-const JSON = "JSON::XS".require
 
-module CacheDBStateless {
+module CacheDBIO {
   include Atomic
+  const JSON = "JSON::XS".require
 
   # look for the database file
-  func _read_disk_db (File name, Serializable element_type) is cached -> Hash {
+  func _read_disk_db (File name, lib::ABCs::Serializable element_type) is cached -> Hash {
 
     # look for the database file
     # if it doesn't exist, stop
@@ -54,24 +54,47 @@ module CacheDBStateless {
   }
 }
 
+module DBTransform {
+  define Array ACTIONS = [:insert, :insert_by, :change, :change_by, :delete, :delete_by, ]
 
-class CacheDB {
+  subset Action < String { ACTIONS.contains(_) }
 
-  has Array change_sequence = []
+  struct Transformation {
+    action < Action,
+    String key,
+    Block action_by,
+    String uuid,
+    Time generated_at
+  }
+
+  # Good afternoon, gentleman, I'm a C compiler
+  func new_transformation ( a < Action, Str k, Block b ) -> Transformation {
+    Transformation(a, k, b, GuardIO::make_uuid(len: 10), Time() )
+  }
+
+  func apply_transformation ( Hash data, Transformation tf ) -> Hash {
+    ...
+    tf
+    data.dclone
+  }
+}
+
+class CacheDB < lib::CapturedWriter {
+
+  has Set change_sequence = Set()
   has Hash orig_data = :()
-  has Hash data = :()
   has GuardIO::SLog log
 
   has Bool dry_run
   has Dir db_dir
   has File filename_base
-  has Serializable element_type
+  has lib::ABCs::Serializable element_type
 
   -> db_name { self.db_dir + self.filename_base }
   # for CapturedWriter
   -> wd { self.db_dir }
 
-  method setup (Hash cdb_opts) {
+  method setup (Hash cdb_opts) -> __CLASS__ {
     (Hash(
       :debug => true,
       :dir => %d(.),
@@ -80,16 +103,15 @@ class CacheDB {
       :verbose => false,
       :replace_existing => false,
       :logger => nil,
-      :element_type => Serializable
+      :element_type => lib::ABCs::Serializable
     ) + cdb_opts).rescope{
-      self.log = ,{:logger} \\ GuardIO::SLog(is_verbose: .{:verbose})
+      self.log = (.{:logger} \\ GuardIO::SLog(is_verbose: Bool( .{:verbose} ) ))
       self.dry_run = .{:dry_run}
 
-      self.db_dir = .{:dir}
-      self.filename_base = .{:filename_base}
+      self.db_dir = Dir( .{:dir} )
+      self.filename_base = File( .{:filename_base} )
 
       self.element_type = .{:element_type}
-
       if (.{:replace_existing} && self.db_name.exists) {
         self.log.wrn(__FILE__, __LINE__, __METHOD_NAME__, "!!! removing old DB !!!")
         self.db_name.cleave({ .remove }, { .touch })
@@ -98,100 +120,55 @@ class CacheDB {
       }
     }
 
-    self.data = (self._orig_data = self._read_disk_db).dclone
+    self._orig_data = self._read_disk_db
     self
   }
 
   method _write_disk_db {
-    const MN = __METHOD_NAME__
-    self.log.trc(__FILE__, __LINE__, MN, 'writing', self.db_name)
-    if ( new_data ) {
-      self.capture_write_disk(MN, { CacheDBStateless::_write_disk_db(self.db_base, self.data) } ) #, __METHOD_NAME__ )
-    } else {
-      # *(self.parent_obj) -> cleanup
-      die "[ERROR]\t#{__METHOD_NAME__}: garbage argument #{new_data}"
-    }
+    static Bool called = false
+    if (called) { die "bug found: you can't call #{__METHOD_NAME__} more than once" }
+
+    self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, 'writing', self.db_name)
+
+    self.capture_write_disk(
+      __METHOD_NAME__,
+      {
+        CacheDBIO::_write_disk_db(
+          self.db_base,
+          self.change_sequence.reduce(
+            { |data, tf| DBTransform::apply_transformation(data, tf) },
+            self.orig_data
+          )
+        )
+      }
+    )
+    called = true
   }
 
   method _read_disk_db () is cached -> Hash {
+    static Bool called = false
+    if (called) { die "bug found: you can't call #{__METHOD_NAME__} more than once" }
     self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, 'reading', self.db_name)
 
-    self.with_directory{ CacheDBStateless::_read_disk_db(self.db_base, self.element_type) }
+    self.with_directory{ CacheDBIO::_read_disk_db(self.db_base, self.element_type) }
+    called = true
   }
-
 
   method destroy {
     self.log.wrn(__FILE__, __LINE__, __METHOD_NAME__, 'shutting down!!!')
     self._write_disk_db
   }
-# }
-# 
-# # todo: make it actually caching
-# class CacheDB (File db_base = nil, Dir db_dir = nil, Bool dry_run = nil) < lib::withdirectory::CapturedWriter {
-# 
-#   has Array change_sequence
-#   has Hash orig_data
-#   has Hash data
-#   has GuardIO::SLog log
-# 
-#   -> db_name { self.db_dir + self.db_base }
-#   -> wd { self.db_dir }
-# 
-#   method setup (Bool verbose = false, Bool replace_existing = false) {
-#     self.log = GuardIO::SLog(is_verbose: verbose)
-#     if (self.db_name.exists && replace_existing) {
-#       self.log.wrn(__FILE__, __LINE__, __METHOD_NAME__, "!!! removing old DB !!!")
-#       self.db_name.cleave({ .remove }, { .touch })
-#     }
-#     if (! self.db_name.exists) { self.db_name.touch }
-# 
-#     self
-#   }
-# 
-#   method destroy {
-#     self.log.wrn(__FILE__, __LINE__, __METHOD_NAME__, 'shutting down!!!')
-#     self._write_disk_db
-#   }
-# 
-#   method _write_disk_db {
-#     const MN = __METHOD_NAME__
-#     self.log.trc(__FILE__, __LINE__, MN, 'writing', self.db_name)
-#     if ( new_data ) {
-#       self.capture_write_disk(MN, { CacheDBStateless::_write_disk_db(self.db_base, self.data) } ) #, __METHOD_NAME__ )
-#     } else {
-#       # *(self.parent_obj) -> cleanup
-#       die "[ERROR]\t#{__METHOD_NAME__}: garbage argument #{new_data}"
-#     }
-#   }
-# 
-#   method _read_disk_db () is cached -> Hash {
-#     self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, 'reading', self.db_name)
-# 
-#     self.with_directory{ CacheDBStateless::_read_disk_db(self.db_base) }
-#   }
-# 
-#   method load () is cached -> Hash {
-#     self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, 'loading db...')
-#     static const db_data
-#     if (! defined(db_data)) {
-#       self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, 'wasn\'t cached!')
-#       db_data = self.read_disk_db
-#     }
-#     db_data
-# 
-#   }
-  # TODO: don't write the disk right away
-  method insert (Object new_entry) {
-    self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, 'inserting', new_entry)
-    const entire_db = self.load
-    entire_db{new_entry.id} = new_entry
-    self.write_disk_db( entire_db )
+
+  method transform (DBTransform::Transformation tf) {
+    self.change_sequence.append(tf)
+    self
+  }
+  method transform ( Array tfs ) {
+    self.change_sequence.append(tfs...)
+    self
   }
 
-  method delete (Object key) {
-    self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, 'removing id \'', key, "'")
-    const entire_db = self.load
-    entire_db.delete(key)
-    self.write_disk_db( entire_db )
-  }
+  method change {}
+  method insert {}
+  method delete {}
 }

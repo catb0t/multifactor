@@ -12,4 +12,36 @@ assert_eq(
   Hash( :change_me => :new_val, :dont_change_me => false, :here => :there )
 )
 
+assert_eq(
+  Hash(
+    :bool => "a string",
+    :abc => Set(9, 0),
+    :something => nil
+  ).cast_values(:( :bool => Bool, :abc => Array, :something => Bool )),
+  Hash(
+    :bool => true,
+    :abc => [9, 0],
+    :something => false
+  )
+)
+
+assert_eq(
+  Hash(
+    :bool => :1,
+    :abc => Set(9, 0),
+    :something => :dont_cast
+  ).template_transform( :(
+    # still want ability to check against subsets directly
+    # but don't necessarily want a subset for each of these entries
+    :bool => :( :type => [String, Number], :default => false ),
+    :abc => :( :type => Array, :maybe_cast => { .to_array }, : ),
+    :something => :( :type => String, :maybe_cast => { die "don't call this" }, :conv => { .reverse } )
+  ) ),
+  Hash(
+    :bool => :1,
+    :abc => [9, 0],
+    :something => :tsac_tnod
+  )
+)
+
 assert_eq( /a/ + /b/, /ab/ )

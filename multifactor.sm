@@ -159,14 +159,12 @@ module MultiFactor {
       say "MFRuntime init called"
       self.uuid( GuardIO::make_uuid(words: true) )
       self.initial_wd( Dir.cwd )
-
-      var props = Hash(
+      Hash(
         :action => { _ },
       ).merge(
         [:force, :dry_run, :info, :clean, :sums, :basis_dev] \
           .map{ ( (_) => { Bool(_) } ) }.to_h # all these parentheses are important
-      )
-      props.each_kv{
+      ).each_kv{
           |name, convert|
         self.method( name )( convert( self.options(){ name.replace_all("_", "-") } ) )
       }
@@ -176,7 +174,6 @@ module MultiFactor {
         || die "[FATAL] #{__FILE__, __LINE__}: init_steps_mfruntime: don't know action '#{self.action}' [--action | -a]"
 
       # initialise helper objects
-
       self.log = GuardIO::SLog(
         is_trace: ( [:trace, :verbose, 'dry-run'].any{ self.options(){_} } ),
         is_verbose: ( [:verbose, 'dry-run'].any{ self.options(){_} } ),
@@ -184,15 +181,19 @@ module MultiFactor {
       )
 
       self.fbash = providers::factorbash::FactorBash(
-        Dir( self.options(){'factor-dir'} || Factor::FACTOR_DIR ), #
-        subcommand_output: !( self.options(){'quiet-subcom'} || Factor::QUIET_PIPE )  #
+        Dir( self.options(){'factor-dir'} || Factor::FACTOR_DIR ),
+        subcommand_output: !( self.options(){'quiet-subcom'} || Factor::QUIET_PIPE )
       )
 
-      self.db_man = providers::cachedb::CacheDB(
-        db_base: File( self.options(){'db-name'} ),
-        db_dir: Dir( self.options(){'db-dir'} ),
-        dry_run: self.dry_run
-      ).setup( verbose: self.options(){:verbose}, replace_existing: Bool( self.options(){'from-scratch'} ) )
+      self.db_man = providers::cachedb::CacheDB().setup( :(
+          :dir =>              Dir( self.options(){'db-dir'} ),
+          :filename_base =>    File( self.options(){'db-name'} ),
+          :dry_run =>          self.dry_run,
+          :verbose =>          self.options(){:verbose},
+          :replace_existing => self.options(){'from-scratch'},
+          :element_type =>     BuiltObj,
+          # :logger => self.log # separate or same loggers?
+      ) )
 
       self.locker = GuardIO::GlobLocker(
         self.uuid,
@@ -200,13 +201,10 @@ module MultiFactor {
         lock_ext: '.multifactor_lock'
       ).setup( [ self.db_man.db_name, self.fbash.wd ], verbose: self.options(){:verbose} )
 
-      self._config_setup_done = true
       self.log.trc(__FILE__, __LINE__, :init_steps_mfruntime, "finished configuration") #, wd now: '#{self.db_dir}'")
-
     } ]
 
      method show_info {}
-     #  self.config_setup
      #  say "MultiFactor #{self.UUID} options"
      #  say "\tverbose: #{self.verbose}\tinfo: #{self.info}\ttrace: #{self.trace}\tdry_run: #{self.dry_run}"
      #  say "\tclean: #{self.clean}\tsums: #{self.sums}\tdb_name: #{self.db_name}\tdb_path: #{self.db_path}"

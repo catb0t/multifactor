@@ -1,0 +1,14 @@
+subset Int   < Number {|n| n.is_int  }
+struct Tri {
+  x < Int,
+  y < Int,
+  z < Int
+}
+class Tri {
+  has x < Int,
+  has y < Int,
+  has z < Int
+}
+
+var c = Tri(x: 1, y: 9, z: 7)
+say c.x

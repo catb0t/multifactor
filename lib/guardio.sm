@@ -25,7 +25,7 @@ include lib::shell_words
 module GuardIO {
   func _bn (Str f) { File(f).basename.split('.').first }
 
-  class SLog (Bool is_trace = true, Bool is_verbose = false, Block logger = { |*a| STDERR.say( a... ) } ) {
+  class SLog (is_trace = true, is_verbose = false, logger = { |*a| STDERR.say( a... ) } ) {
     -> wrn (Str f, Num l, Str m, *args) { say "[WARN]\t#{_bn(f)}:#{l}: #{m}: #{args.join(' ')}" }
     -> inf (Str f, Num l, Str m, *args) { self.logger.run("[INFO]\t", _bn(f), ':', l, ': ', m, ': ', args.join(' ')) }
     -> trc (Str f, Num l, Str m, *args) { self.logger.run("[TRACE]\t", _bn(f), ':', l, ': ', m, ': ', args.join(' ')) if ( self.is_trace) }
