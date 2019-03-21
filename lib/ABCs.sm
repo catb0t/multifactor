@@ -225,7 +225,8 @@ class ModularInit {
   }
 }
 
-
+# if this is defined in SeriallyAccessible and inherited, its contents will be
+#   duplicated or buggy, and will cause infinite recursion in subclasses
 define Array global_init_steps_sa_base = [
   { ._property_generator },
   { ._do_serial([], ._bound_accessor_generator ) },

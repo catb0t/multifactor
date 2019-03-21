@@ -168,7 +168,7 @@ if (__FILE__ == __MAIN__) {
   )
 
   class A {
-    method be { say __CLASS_NAME__+': i feel sick...'; die "i am dead" }
+    method be { say __CLASS_NAME__+': i feel sick...'; die 'i am dead' }
     method destroy (msg, *rest) {
       say "#{__CLASS_NAME__}: destructor called: #{msg.dump}; #{rest}"
       "OHNOES!"
