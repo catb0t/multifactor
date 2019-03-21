@@ -19,7 +19,44 @@ include lib::msg_classes
 include lib::combi
 
 module FRExt {
+
   subset ArrStr < Array, String { .len }
+
+  module TypeUtils {
+    func is_serializable (Object obj) {
+      obj.respond_to(:serial_properties)
+      # obj.has_overload( Hash( :callers => __FUNC_NAME__, :name => :serial_properties) )
+    }
+    # Fully-Qualified Sidef::Runtime:92349879234::main::Typename Typename
+    #   to Universal Main-Derived Typename main::Typename
+    func fqtn_to_umdtn (String fqtn) -> String {
+      (/^Sidef::Runtime::\d+::(main::.+)$/ =~ fqtn)[0]
+    }
+
+    func maybe_call_custom_init (Object obj) {
+      if ( obj.respond_to(:INIT_METHOD_NAME) ) {
+        obj.method( obj.INIT_METHOD_NAME )()
+      } elsif ( obj.is_typename ) {
+        # invoke raw typenames
+        obj()
+      } else {
+        obj
+      }
+    }
+
+    func object_hash_ref (callers < FRExt::ArrStr, Object obj, String field_name) {
+      try {
+        # say "#{callers.last}: \t\tREF PROPERTY #{obj.class} #{field_name}"
+        \(obj{field_name})
+      } catch {
+          |_e, msg|
+        Combi::rescope( lib::msg_classes::classify(msg) )({
+            |type, fields|
+          die "\t** object_hash_ref < (#{callers.reverse.join(' < ')}):\n\t\t#{obj.class} { #{field_name} } FAILED! reason: #{type}"
+        })
+      }
+    }
+  }
 
   class Object {
     # method form of "with", but defined-agnostic
@@ -133,7 +170,7 @@ module FRExt {
           # :debug => true
       ) ).rescope{
         # say "is_property: #{self.class}::#{name} :: #{.{:state}}"
-        .{:state} || ( ! [MsgTypes::NO_METHOD, MsgTypes::DOES_NOT_MATCH, MsgTypes::BAD_ENCODING].contains( .{:why} ) )
+        .{:state} || ( ! MsgTypes::NOT_PROPERTY.exists( .{:why} ) )
       }
     }
 
@@ -158,15 +195,64 @@ module FRExt {
     method merge_reduce { self.reduce{ |l, r| l.merge(r) } }
   }
 
+  func _templ_tform_single (Hash one_spec, String k, Object _v) -> Object {
+    one_spec.rescope{
+      const Bool type_is_name = .{:type}.is_typename
+      const one_type          = ( type_is_name # the typename, or the first one in an iterable
+                                  ? .{:type}
+                                  : .{:type}[0]
+                                )
+      const v                 = ( _v \\ .{:default} \\ TypeUtils::maybe_call_custom_init( one_type() ) )
+      const need_cast         = ( type_is_name # only cast when none of the types fit
+                                  ? ( .{:type}        !~ v )
+                                  : ( .{:type}.all{ _ !~ v } )
+                                )
+
+      (need_cast ? .{:maybe_cast}.run(v) : v).rescope{
+          |v_c|
+        (.{:conv} ~~ Block)
+          ? .{:conv}.run( v_c )
+          : v_c
+      }
+    }
+  }
+
   class Hash {
-    # inverse of + / merge: only update keys that are already in the LHS
-    method clobber_existing_by (other) {
+    # inverse of + / merge: only update keys that are already truthy in the LHS
+    method clobber_existing_by (other) -> Hash {
       self.map_kv{
           |k, v|
         ((k) => if ( v && other.has_key(k) ) {
           other{k}.run(k, v)
         } else {
           v
+        })
+      }
+    }
+
+    method template_cast (Hash spec) -> Hash {
+      self.map_kv{
+          |k, v|
+        ( (k) => if ( spec.has_key(k) ) {
+          TypeUtils::maybe_call_custom_init( spec{k}( v ) )
+        } else {
+          v
+        } )
+      }
+    }
+
+    method template_transform (Hash spec) -> Hash {
+      self.map_kv{
+          |k, v|
+        ((k) => given ( spec{k} ) {
+          when ( nil ) { v }
+          case ( .is_typename ) {
+            TypeUtils::maybe_call_custom_init( _( v ) )
+          }
+          when (Hash) {
+            FRExt::_templ_tform_single(_, k, v)
+          }
+          default { die "don't know that spec value: #{_}"}
         })
       }
     }
@@ -177,45 +263,12 @@ module FRExt {
       Regex( Combi::binop( [self, other].map{ ( .to_s =~ /\/(.*)\// )[0] }... )( '+' ) ) # '
     }
   }
+}
 
-  module TypeUtils {
-    func is_serializable (Object obj) {
-      obj.respond_to(:serial_properties)
-      # obj.has_overload( Hash( :callers => __FUNC_NAME__, :name => :serial_properties) )
-    }
-    # Fully-Qualified Sidef::Runtime:92349879234::main::Typename Typename
-    #   to Universal Main-Derived Typename main::Typename
-    func fqtn_to_umdtn (String fqtn) -> String {
-      (/^Sidef::Runtime::\d+::(main::.+)$/ =~ fqtn)[0]
-    }
-
-    func maybe_call_custom_init (Object obj) {
-      if ( obj.respond_to(:INIT_METHOD_NAME) ) {
-
-        obj.method( obj.INIT_METHOD_NAME )()
-      } elsif ( obj.is_typename ) {
-        # invoke raw typenames
-        obj()
-      } else {
-        obj
-      }
-    }
-
-    func object_hash_ref (callers < FRExt::ArrStr, Object obj, String field_name) {
-      try {
-        # say "#{callers.last}: \t\tREF PROPERTY #{obj.class} #{field_name}"
-        \(obj{field_name})
-      } catch {
-          |_e, msg|
-        Combi::rescope( lib::msg_classes::classify(msg) )({
-            |type, fields|
-          die "\t** object_hash_ref < (#{callers.reverse.join(' < ')}):\n\t\t#{obj.class} { #{field_name} } FAILED! reason: #{type}"
-        })
-      }
-    }
-  }
+-> _test_frext {
+  assert_eq( Object.has_overload(:(:callers => [:main], :name => :respond_to, :give_return => true)), :( :return => false, :state => true ) )
 }
 
 if (__FILE__ == __MAIN__) {
-  assert_eq( Object.has_overload(:(:callers => [:main], :name => :respond_to, :give_return => true)), :( :return => false, :state => true ) )
+  _test_frext()
 }
