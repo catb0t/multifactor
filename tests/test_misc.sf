@@ -11,3 +11,5 @@ assert_eq(
 
   Hash( :change_me => :new_val, :dont_change_me => false, :here => :there )
 )
+
+assert_eq( /a/ + /b/, /ab/ )

@@ -172,6 +172,12 @@ module FRExt {
     }
   }
 
+  class Regex {
+    method + (Regex other) {
+      Regex( Combi::binop( [self, other].map{ ( .to_s =~ /\/(.*)\// )[0] }... )( '+' ) ) # '
+    }
+  }
+
   module TypeUtils {
     func is_serializable (Object obj) {
       obj.respond_to(:serial_properties)

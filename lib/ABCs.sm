@@ -198,16 +198,21 @@ class SeriallyEquatable < Serializable {
 }
 
 
-func _call_methods_blocks_by (Object obj, Regex r) {
+func _call_methods_blocks_by (Object obj, Regex name_match) {
   # 0..30 -> map{ "sdf"+.to_s+"abcde" }.sort{ |l, r| [l, r].all{ _ ~~ /(\d+)/ } ? [l, r].map{ (_ =~ /(\d+)/ )[0].to_n }.reduce{ |p, q| p <=> q } : (l <=> r) }
   obj.grep_sorted_map_methods(
-    { |name, _| name ~~ r },
+    { |name, _| name ~~ name_match },
     {
         |l, r|
-        const names = [l, r].map{ .key }
-        names.all{ _ ~~ /(\d+)/ }
-          ? names.map{ (_ =~ /(\d+)/ )[0].to_n }.reduce{ |p, q| p <=> q }
-          : (l <=> r)
+      define Regex NUMERIC = /^(\d+)/
+      Combi::binop(
+        [l, r].map{ ( .key =~ ( name_match + /(?<unique_part>\d+.*)/ ) ).named_captures(){:unique_part} } \
+        .rescope{
+          .all{ _ ~~  NUMERIC }
+            ? .map{ (_ =~ NUMERIC )[0].to_n }
+            : _
+        }...
+      )( '<=>' )
     },
     { |_, calls| .say; calls().each{ |block| block.run(obj) } }
   )
