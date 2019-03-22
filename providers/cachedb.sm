@@ -139,7 +139,8 @@ class CacheDB < lib::withdirectory::CapturedWriter {
       {
         CacheDBIO::_write_disk_db(
           self.filename_base,
-          self.change_sequence.reduce(
+          # TODO: Set.reduce
+          self.change_sequence.values.reduce(
             { |data, tf| DBTransform::apply_transformation(data, tf) },
             self.orig_data
           )

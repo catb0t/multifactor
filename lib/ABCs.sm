@@ -291,11 +291,11 @@ class SeriallyAccessible << ModularInit, SeriallyEquatable {
         func acc (self, new_val) -> __CLASS__ {
           static var custom_setter = custom_blocks{:set}
           setter_prelude.run(new_val)
-          # say "set field #{field_name} to #{new_val} (#{typename})"
+          # say "\tset field #{field_name} to #{new_val} (#{typename})"
           if (custom_setter) {
             custom_setter.run(self, new_val) \\ self
           } else {
-            # say "new value for #{field_name}: #{new_val}"
+            # say "\tnew value for #{field_name}: #{new_val}"
             *TypeUtils::object_hash_ref(
               [MN, :V_gen_accessor, :V_gen_setter, :V_builtin_setter],
               self,

@@ -173,7 +173,7 @@ module MultiFactor {
 
       # need a way for the consumer ofthe ArgParse API to know the exact syntax of the command line
       self.known_actions.contains(self.action) \
-        || die "[FATAL] #{__FILE__, __LINE__}: init_steps_mfruntime: don't know action '#{self.action}' [--action | -a]"
+        || die "[FATAL] #{__FILE__, __LINE__}: init_steps_mfruntime: don\'t know action '#{self.action}' [--action | -a]"
 
       # initialise helper objects
       self.log = GuardIO::SLog(
@@ -209,8 +209,14 @@ module MultiFactor {
       self.sum_src_algo(cs)
       self.sum_blob_algo(cs)
 
-      self.log.trc(__FILE__, __LINE__, :init_steps_mfruntime, "finished configuration") #, wd now: '#{self.db_dir}'")
+      self.log.trc(__FILE__, __LINE__, :init_steps_10_mfruntime, "finished configuration") #, wd now: '#{self.db_dir}'")
     } ]
+
+    method destroy (msg, *rest) {
+      say "#{__CLASS_NAME__}: destructor called: #{msg.dump}; #{rest}"
+      [self.db_man, self.locker].map{ .destroy }
+      :dead
+    }
 
      method show_info {}
      #  say "MultiFactor #{self.UUID} options"
@@ -397,7 +403,6 @@ module MultiFactor {
       if (self.info) { self.show_info; return nil }
 
       self.locker.do_lock_files
-
       given (self.action) {
         when ('src-sums') {
           self.fbash.say_src_sums
@@ -453,7 +458,6 @@ module MultiFactor {
         # remember, we're not testing *all* properties like .lock or tombstoned
         MultiFactor::compare_properties(undefault(status_properties), b, current_status, debug: self.debug)
       }
-
       # need to generate new ID and compile
       if (! match_bo) { return self.build_new_factor(current_status) }
 
@@ -536,7 +540,7 @@ module MultiFactor {
       # say "\timage_sums_match:\t#{image_blob_sums_match}/#{new_image_blob_sums_match}"
       # say "\tchanged_db:\t\t#{changed_db}\t\t\tnewly_compiled: #{newly_compiled.to_s.chars.grep{|p|![\"\n\",' '].any{p==_} }.join}"
       self.log.trc(__FILE__, __LINE__, MN, "ok, running factor!")
-      self.locker.cleanup
+      self.destroy
       self._detach_factor_thread(match_bo.vm_fullname)
     }
 
@@ -604,10 +608,22 @@ func main {
   var (opts, args, *_) = parser.go...
   # say "#{opts} #{args} #{_}"
 
-  const r = MultiFactor::MFRuntime(opts, args.keys).debug(true)
-
-  # r.show_info()
-  r.go()
+  # const r =
+  Combi::rescope_first(
+    Combi::with_destructor(
+      MultiFactor::MFRuntime(opts, args.keys).debug(true),
+      :destroy
+    )({
+        # MFRuntime object inside with_destructor
+      .go
+    })
+  )({
+      # inside rescope_first
+      |status, destructor_returned|
+    if (!status) {
+      say "~MFRuntime called due to runtime error, it said: #{destructor_returned}"
+    }
+  })
 
   Factor::say_stderr("\n\tΔ#{μsec(μs)} ×1,000μ")
 }

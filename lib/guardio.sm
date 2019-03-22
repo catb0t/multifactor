@@ -166,6 +166,10 @@ module GuardIO {
       self
     }
 
+    method destroy {
+      self.cleanup
+    }
+
     -> _glue_absolute (t) is cached -> File {
       const File lock_file = File(t + self.lock_ext) # expecting t to be absolute
 
