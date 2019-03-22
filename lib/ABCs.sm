@@ -204,17 +204,18 @@ func _call_methods_blocks_by (Object obj, Regex name_match) {
     { |name, _| name ~~ name_match },
     {
         |l, r|
+      # if (!defined(l) || !defined(r)) { return 0 }
       define Regex NUMERIC = /^(\d+)/
       Combi::binop(
         [l, r].map{ ( .key =~ ( name_match + /(?<unique_part>\d+.*)/ ) ).named_captures(){:unique_part} } \
         .rescope{
-          .all{ _ ~~  NUMERIC }
+          .all{ _ ~~ NUMERIC }
             ? .map{ (_ =~ NUMERIC )[0].to_n }
             : _
         }...
-      )( '<=>' )
+      )( '<=>' ) # '
     },
-    { |_, calls| .say; calls().each{ |block| block.run(obj) } }
+    { |_, calls| calls().each{ |block| block.run(obj) } }
   )
 }
 

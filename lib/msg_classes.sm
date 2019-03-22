@@ -28,7 +28,7 @@ module MsgTypes {
 
   define Set METHOD_EXISTS    = Set(:NO_ERROR, :DOES_NOT_MATCH, :BAD_ENCODING)
   define Set OVERLOAD_EXISTS  = Set(:NO_ERROR, :BAD_ENCODING)
-  define Set NOT_PROPERTY     = Set(:NO_METHOOD, :DOES_NOT_MATCH, :BAD_ENCODING)
+  define Set NOT_PROPERTY     = Set(:NO_METHOD, :DOES_NOT_MATCH, :BAD_ENCODING)
 }
 
 define Array MSG_REGEXES = [

@@ -1,55 +1,60 @@
 include lib::frext
 
-lib::frext::_test_frext()
+# lib::frext::_test_frext()
 
-4.times {
-assert_eq(
-  Hash(
-    :change_me => true,
-    :dont_change_me => false,
-    :here => 1
-  ).clobber_existing_by(
-    Hash( :change_me => { :new_val }, :dont_change_me => { :okay_i_wont }, :here => { :there } )
-  ),
+5.times {
+  assert_eq(
+    Hash(
+      :change_me => true,
+      :dont_change_me => false,
+      :here => 1
+    ).clobber_existing_by(
+      Hash( :change_me => { :new_val }, :dont_change_me => { :okay_i_wont }, :here => { :there } )
+    ),
 
-  Hash( :change_me => :new_val, :dont_change_me => false, :here => :there )
-)
-
-assert_eq(
-  Hash(
-    :bool => "a string",
-    :abc => Set(9, 0),
-    :something => nil
-  ).template_transform( :( :bool => Bool, :abc => Array, :something => Bool ) ),
-  Hash(
-    :bool => true,
-    :abc => [Set(9, 0)],
-    :something => false
+    Hash( :change_me => :new_val, :dont_change_me => false, :here => :there )
   )
-)
 
-assert_eq(
-  Hash(
-    :bool => :1,
-    :abc => Set(9, 0, 1),
-    :something => :dont_cast
-    :simple_entry => :2
-  ).template_transform( :(
-    # still want ability to check against subsets directly
-    # but don't necessarily want a subset for each of these entries
-    :bool => :( :type => [String, Number], :default => false ),
-    :abc => :( :type => Array, :maybe_cast => { .to_array }, :conv => { .sort } ),
-    :something => :( :type => String, :maybe_cast => { die "don't call this" }, :conv => { .reverse } )
-    :simple_entry => Number
-  ) ),
-  Hash(
-    :bool => :1,
-    :abc => [0, 1, 9],
-    :something => :tsac_tnod,
-    :simple_entry => 2
+  assert_eq(
+    Hash(
+      :bool => "a string",
+      :abc => "ab",
+      :something => nil
+    ).template_transform( :( :bool => Bool, :abc => Array, :something => Bool ) ),
+    Hash(
+      :bool => true,
+      :abc => [:ab],
+      :something => false
+    )
   )
-)
 
-assert_eq( /a/ + /b/, /ab/ )
+  assert_eq(
+    Hash(
+      :bool => :1,
+      :abc => Set(9, 0, 1),
+      :something => :dont_cast
+      :simple_entry => :2,
+      :boolify => nil
+    ).template_transform( :(
+      # still want ability to check against subsets directly
+      # but don't necessarily want a subset for each of these entries
+      :bool => :( :type => [String, Number], :default => false ),
+      :abc => :( :type => Array, :maybe_cast => { .to_array }, :conv => { .sort } ),
+      :something => :( :type => String, :maybe_cast => { die "don't call this" }, :conv => { .reverse } )
+      :simple_entry => Number,
+      :boolify => Bool
+    ) ),
+    Hash(
+      :bool => :1,
+      :abc => [0, 1, 9],
+      :something => :tsac_tnod,
+      :simple_entry => 2,
+      :boolify => false
+    )
+  )
 
+  assert_eq(
+    Hash( :old_key => :1 ).template_transform( Hash( :old_key => Number, :new_key => Array ) ),
+    Hash( :old_key => 1, :new_key => [] )
+  )
 }

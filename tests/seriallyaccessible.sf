@@ -15,13 +15,14 @@
 include providers::builtobj
 import providers::builtobj::BuiltObj
 var bo = BuiltObj()
+assert_eq(bo.blob_algorithm, :sha256)
+say bo.blob_algorithm
 # var v = bo.serialize
 # say BuiltObj().unserialize(v).dump==bo.dump
 bo.id(:1).factor_version('0.99').is_git(true).git_branch(:master).git_hash(:2349876234) \
   .os_type(:unix).os_name(:linux).arch_name(:x86).word_size(:64)
 # say bo.dump
 # say "bo: #{bo}"
-say bo.blob_algorithm
 var f = bo.serialize
 say f
 var new_bo = BuiltObj().unserialize(f)

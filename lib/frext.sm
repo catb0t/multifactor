@@ -77,13 +77,16 @@ module FRExt {
 
     # test if it can be called with the specific number and type of arguments
     method has_overload (Hash overload_spec) -> Hash {
-      ( Hash(
-        :clone_call => false,
-        :give_return => false,
-        :args => [],
-        :debug => false
-      ) + overload_spec ).rescope{
+      overload_spec.template_transform( :(
+        :args => Array,
+        :callers => Array, # :required => true
+        :name => String,
+        :give_return => Bool,
+        :clone_call => Bool,
+        :debug => Bool,
+      ) ).rescope{
           |spec|
+        # say "#{spec}"
         die 'invalid has_overload spec: \'callers\' must be a non-empty array of non-empty strings' \
           if ( ! spec{:callers}.cleave( { _ }, { .is_an(Array) }, { .all }, { .all{ .is_a(String) } } ).all  )
 
@@ -195,21 +198,31 @@ module FRExt {
     method merge_reduce { self.reduce{ |l, r| l.merge(r) } }
   }
 
-  func _templ_tform_single (Hash one_spec, String k, Object _v) -> Object {
+  func _templ_tform_single (Hash one_spec, String k, _v) -> Object {
     one_spec.rescope{
+      if ( .{:deferred} ) {
+        return .{:deferred}
+      }
+
       const Bool type_is_name = .{:type}.is_typename
       const one_type          = ( type_is_name # the typename, or the first one in an iterable
                                   ? .{:type}
                                   : .{:type}[0]
                                 )
-      const v                 = ( _v \\ .{:default} \\ TypeUtils::maybe_call_custom_init( one_type() ) )
-      const need_cast         = ( type_is_name # only cast when none of the types fit
+      const v                 = ( _v  \\ .{:default} \\ (
+                                  .{:val_is_typename}
+                                    ? .{:type}
+                                    : TypeUtils::maybe_call_custom_init( one_type() ) )
+                                )
+      # say "k: '#{k}' _v: '#{_v}' v: '#{v}' itn: '#{Bool(.{:val_is_typename})}'"
+      const need_cast         = ( (! .{:val_is_typename}) && ( type_is_name # only cast when none of the types fit
                                   ? ( .{:type}        !~ v )
                                   : ( .{:type}.all{ _ !~ v } )
-                                )
+                                ))
 
       (need_cast ? .{:maybe_cast}.run(v) : v).rescope{
           |v_c|
+        # cast tgus retyrb value?
         (.{:conv} ~~ Block)
           ? .{:conv}.run( v_c )
           : v_c
@@ -230,43 +243,33 @@ module FRExt {
       }
     }
 
-    method template_cast (Hash spec) -> Hash {
-      self.map_kv{
-          |k, v|
-        ( (k) => if ( spec.has_key(k) ) {
-          TypeUtils::maybe_call_custom_init( spec{k}( v ) )
-        } else {
-          v
-        } )
-      }
-    }
-
     method template_transform (Hash spec) -> Hash {
-      self.map_kv{
-          |k, v|
-        ((k) => given ( spec{k} ) {
-          when ( nil ) { v }
+      spec.map_kv{
+          |k, spec_v|
+        const self_v = self{k}
+
+        ((k) => given ( spec_v ) {
+          when ( nil ) { self_v }
           case ( .is_typename ) {
-            TypeUtils::maybe_call_custom_init( _( v ) )
+            defined(self_v)
+              ? TypeUtils::maybe_call_custom_init( _( @|self_v ) )
+              : TypeUtils::maybe_call_custom_init( _() )
           }
           when (Hash) {
-            FRExt::_templ_tform_single(_, k, v)
+            FRExt::_templ_tform_single(_, k, self_v)
           }
-          default { die "don't know that spec value: #{_}"}
+          default { die "don't know that spec value: '#{_}' ('#{self_v}'; key: '#{k}')"}
         })
       }
-    }
-  }
-
-  class Regex {
-    method + (Regex other) {
-      Regex( Combi::binop( [self, other].map{ ( .to_s =~ /\/(.*)\// )[0] }... )( '+' ) ) # '
     }
   }
 }
 
 -> _test_frext {
-  assert_eq( Object.has_overload(:(:callers => [:main], :name => :respond_to, :give_return => true)), :( :return => false, :state => true ) )
+  assert_eq( Object.has_overload(
+    :(:callers => [:main], :name => :respond_to, :give_return => true)),
+    :( :return => false, :state => true )
+  )
 }
 
 if (__FILE__ == __MAIN__) {

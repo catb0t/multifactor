@@ -46,14 +46,16 @@ module Factor {
   func find_config (name, Bool must_exist = true) is cached -> String {
     const regex = Regex("^! multifactor:#{name} (.*)")
     const result = Factor::rc_config_lines().find{ _ ~~ regex }
-    if (must_exist && !result) {
-      die "Config 'multifactor:#{name}' not found in #{Factor::RC_FILE}"
+    if ( !result ) {
+      must_exist && die "Config 'multifactor:#{name}' not found in #{Factor::RC_FILE}"
+      return nil
     }
     (regex =~ result)[0]
   }
 
   const Dir FACTOR_DIR = Dir( Factor::find_config("factor-dir") )
   const Bool QUIET_PIPE = Bool( Factor::find_config("quiet-pipe") )
+  const Bool CHECKSUM_WITH = Factor::find_config("default-checksum", must_exist: false)
 
   # ???
   func say_stderr (*args) {
@@ -156,8 +158,8 @@ module MultiFactor {
 
     has Array init_steps_10_mfruntime = [ {
         |self|
-      say "MFRuntime init called"
       self.uuid( GuardIO::make_uuid(words: true) )
+      # say "MFRuntime: #{self.uuid}"
       self.initial_wd( Dir.cwd )
       Hash(
         :action => { _ },
@@ -179,27 +181,33 @@ module MultiFactor {
         is_verbose: ( [:verbose, 'dry-run'].any{ self.options(){_} } ),
         logger: { |*a| Factor::say_stderr( a... ) }
       )
-
       self.fbash = providers::factorbash::FactorBash(
         Dir( self.options(){'factor-dir'} || Factor::FACTOR_DIR ),
         subcommand_output: !( self.options(){'quiet-subcom'} || Factor::QUIET_PIPE )
       )
 
       self.db_man = providers::cachedb::CacheDB().setup( :(
-          :dir =>              Dir( self.options(){'db-dir'} ),
-          :filename_base =>    File( self.options(){'db-name'} ),
+          :dir =>              self.options(){'db-dir'},
+          :filename_base =>    self.options(){'db-name'},
           :dry_run =>          self.dry_run,
           :verbose =>          self.options(){:verbose},
           :replace_existing => self.options(){'from-scratch'},
           :element_type =>     BuiltObj,
           # :logger => self.log # separate or same loggers?
       ) )
+      # assert_eq( self.db_man.element_type, BuiltObj )
+      # say self.options
+      self.locker = GuardIO::GlobLocker().setup( :(
+        :uuid => self.uuid,
+        :remove_old_lock => self.options(){'remove-old-lock'},
+        :lock_ext => '.multifactor_lock',
+        :locked_fods => [ self.db_man.db_name, self.fbash.wd ],
+        :verbose => self.options(){:verbose}
+      ) )
 
-      self.locker = GuardIO::GlobLocker(
-        self.uuid,
-        remove_old_lock: self.options(){'remove-old-lock'},
-        lock_ext: '.multifactor_lock'
-      ).setup( [ self.db_man.db_name, self.fbash.wd ], verbose: self.options(){:verbose} )
+      const cs = (Factor::CHECKSUM_WITH \\ :sha256)
+      self.sum_src_algo(cs)
+      self.sum_blob_algo(cs)
 
       self.log.trc(__FILE__, __LINE__, :init_steps_mfruntime, "finished configuration") #, wd now: '#{self.db_dir}'")
     } ]
@@ -223,11 +231,12 @@ module MultiFactor {
 
     -> current_status_to_builtobj (Hash status) -> BuiltObj {
       self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, 'creating BuiltObj from scratch')
-      var bo = BuiltObj().id(self.UUID)
-      status.keys.each{
-          |prop|
+      var bo = BuiltObj().id(self.uuid)
+      status.each_kv{
+          |prop, val|
         # self.vbs(__FILE__, __LINE__, __METHOD_NAME__, "invoke method / property '#{prop}'")
-        bo.method(prop)( status{prop} )
+        say "got here: #{prop} '#{status{prop}}'"
+        bo.method(prop)( val )
       }
       self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, 'setting creation time')
       bo.time_created(Time.now)
@@ -406,15 +415,15 @@ module MultiFactor {
         :factor_version, :is_git, :git_branch, :git_hash,
         :os_type, :os_name, :arch_name, :word_size,
         # these defaults are kinda pointless
-        [ :vm_format,    default: { [ '', :fvm_, BuildSh::platform_vm_ext() ] } ],
-        [ :image_format, default: { [ '', :fvm_, '.image' ] } ],
-        [ :lib_format,   default: { [ BuildSh::platform_lib_name()..., :fvm_].swap(-2, -1) } ],
-        [ :boot_format,  default: { [ 'boot.', :fvm_, '.image' ] } ]
+        :vm_format,     # [ :vm_format,    default: { [ '', :fvm_, BuildSh::platform_vm_ext() ] } ],
+        :image_format,  # [ :image_format, default: { [ '', :fvm_, '.image' ] } ],
+        :lib_format,    # [ :lib_format,   default: { [ BuildSh::platform_lib_name()..., :fvm_].swap(-2, -1) } ],
+        :boot_format,   # [ :boot_format,  default: { [ 'boot.', :fvm_, '.image' ] } ]
         # the block is called for its default value but without arguments,
         #   because a "normal" version of the :sum_algorithm method in FactorBash
         #   requires knowledge of its containing class
         # this allows setting the blob checksum algorithm from the command line arguments
-        [ :blob_algorithm, default: { self.sum_blob_algo } ],
+        :blob_algorithm, # [ :blob_algorithm, default: { self.sum_blob_algo } ],
         # this allows setting the SrcSums checksum algorithm for the VM on the command line
         [ :src_sums, args: [self.sum_src_algo, self.basis_dev] ],
       ]
@@ -428,8 +437,8 @@ module MultiFactor {
       # it maps string property names in status_properties to the result of
       #   determining their values through FactorBash.delegate
       # '@|' is like '...' but only calls '...' when the object can recieve it
-      const current_status = status_properties.map{ |n| (undefault_single(n), self.fbash.delegate(@|n)) }.to_h
-      const db_data = self.db_man.load
+      const current_status = status_properties.map{ |n| ((undefault_single(n)) => self.fbash.delegate(@|n)) }.to_h
+      const db_data = self.db_man.data
       if (self.debug) {
         say current_status
         say db_data
@@ -595,7 +604,7 @@ func main {
   var (opts, args, *_) = parser.go...
   # say "#{opts} #{args} #{_}"
 
-  const r = MultiFactor::MFRuntime(opts, args.keys)
+  const r = MultiFactor::MFRuntime(opts, args.keys).debug(true)
 
   # r.show_info()
   r.go()

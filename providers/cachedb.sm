@@ -79,7 +79,7 @@ module DBTransform {
   }
 }
 
-class CacheDB < lib::CapturedWriter {
+class CacheDB < lib::withdirectory::CapturedWriter {
 
   has Set change_sequence = Set()
   has Hash orig_data = :()
@@ -94,24 +94,27 @@ class CacheDB < lib::CapturedWriter {
   # for CapturedWriter
   -> wd { self.db_dir }
 
+  -> data { self.orig_data }
+
   method setup (Hash cdb_opts) -> __CLASS__ {
-    (Hash(
-      :debug => true,
-      :dir => %d(.),
-      :filename_base => %f(),
-      :dry_run => false,
-      :verbose => false,
-      :replace_existing => false,
-      :logger => nil,
-      :element_type => lib::ABCs::Serializable
-    ) + cdb_opts).rescope{
-      self.log = (.{:logger} \\ GuardIO::SLog(is_verbose: Bool( .{:verbose} ) ))
+    cdb_opts.template_transform( :(
+      :debug => :( :type => Bool, :default => true ),
+      :dir => Dir,
+      :filename_base => File,
+      :dry_run => Bool,
+      :verbose => Bool,
+      :replace_existing => Bool,
+      :logger => :( :type => GuardIO::SLog, :deferred => { GuardIO::SLog( is_verbose: .{:verbose} ) } ),
+      :element_type => :( :type => lib::ABCs::Serializable, :val_is_typename => true )
+    ) ).rescope{
+      self.log = .{:logger}(_)
       self.dry_run = .{:dry_run}
 
-      self.db_dir = Dir( .{:dir} )
-      self.filename_base = File( .{:filename_base} )
+      self.db_dir = .{:dir}
+      self.filename_base = .{:filename_base}
 
       self.element_type = .{:element_type}
+
       if (.{:replace_existing} && self.db_name.exists) {
         self.log.wrn(__FILE__, __LINE__, __METHOD_NAME__, "!!! removing old DB !!!")
         self.db_name.cleave({ .remove }, { .touch })
@@ -120,13 +123,14 @@ class CacheDB < lib::CapturedWriter {
       }
     }
 
-    self._orig_data = self._read_disk_db
+    self.orig_data = self._read_disk_db
     self
   }
 
   method _write_disk_db {
     static Bool called = false
     if (called) { die "bug found: you can't call #{__METHOD_NAME__} more than once" }
+    called = true
 
     self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, 'writing', self.db_name)
 
@@ -134,7 +138,7 @@ class CacheDB < lib::CapturedWriter {
       __METHOD_NAME__,
       {
         CacheDBIO::_write_disk_db(
-          self.db_base,
+          self.filename_base,
           self.change_sequence.reduce(
             { |data, tf| DBTransform::apply_transformation(data, tf) },
             self.orig_data
@@ -142,16 +146,15 @@ class CacheDB < lib::CapturedWriter {
         )
       }
     )
-    called = true
   }
 
   method _read_disk_db () is cached -> Hash {
     static Bool called = false
     if (called) { die "bug found: you can't call #{__METHOD_NAME__} more than once" }
-    self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, 'reading', self.db_name)
-
-    self.with_directory{ CacheDBIO::_read_disk_db(self.db_base, self.element_type) }
     called = true
+    self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, 'reading', self.filename_base)
+
+    self.with_directory{ CacheDBIO::_read_disk_db(self.filename_base, self.element_type) }
   }
 
   method destroy {

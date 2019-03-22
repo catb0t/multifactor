@@ -80,6 +80,7 @@ module Combi {
   func applyf   (*args) -> Block { Combi::_bind_apply_block(args, true) }
 
   func binop (a, b) -> Block {
+    # say "a/b: '#{a}' '#{b}'"
     func _op (op) -> Object {
       given (op) {
         when (Block) { continue }

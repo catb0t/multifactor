@@ -85,7 +85,7 @@ class BuiltObj << Lockable, SeriallyAccessible {
 
   # these are not accessors, just methods that glue accessed values together
   # create boot_fullname etc
-  has Array init_steps_builtobj = [ {
+  has Array init_steps_10_builtobj = [ {
     ._blob_targets.each{
         |name|
       const name_format = name+:_format

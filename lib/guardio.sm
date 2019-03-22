@@ -134,26 +134,29 @@ module GuardIO {
   subset FsObj < File, Dir
   # import guardio::SLog
 
-  class GlobLocker (String UUID, Bool remove_old_lock = false, Str lock_ext = ".lock") {
+  class GlobLocker {
     has Set _locked_fods
-
-    has Bool _setup_done = false
-
     has SLog log
+    has Bool remove_old_lock
+    has String lock_ext
+    has String uuid
 
     -> locked_fods { self._locked_fods }
-    -> locked_fods (lf) {
-      die "immutable GlobLocker!" if (self._setup_done)
-      self._locked_fods = Set(lf...)
-      self
-    }
+    -> locked_fods (lf) { self._locked_fods = Set(lf...); self }
 
-    method setup ( /* iterable<Glob> */ locked_fods, Bool verbose = false) {
-      if (! self._setup_done)  {
-        self.log = SLog(is_verbose: verbose)
-        # need dclone here?
-        self.locked_fods( locked_fods.map{ .abs.realpath } ) \
-          ._setup_done = true
+    method setup (Hash g) { # /* iterable<Glob> */ locked_fods, Bool verbose = false) {
+      g.template_transform( :(
+        :uuid => String,
+        :remove_old_lock => Bool,
+        :lock_ext => :( :type => String, :default => '.lock_ext' ) ,
+        :locked_fods => Array,
+        :verbose => Bool,
+      ) ).rescope{
+        self.log = SLog(is_verbose: .{:verbose})
+        self.locked_fods( .{:locked_fods}.map{ .abs.realpath } )
+        self.remove_old_lock = .{:remove_old_lock}
+        self.lock_ext = .{:lock_ext}
+        self.uuid = .{:uuid}
 
         if (self.remove_old_lock) {
           self.log.wrn(__FILE__, __LINE__, __METHOD_NAME__, '!!!',
@@ -176,10 +179,11 @@ module GuardIO {
       const lock_file = self._glue_absolute(target)
 
       const Str contents = Atomic::aread(lock_file).chomp
+      say "#{contents}"
       die "[ERROR]\t#{MN}: empty lockfile for target '#{target}'; not safe to continue" \
         if (! contents)
 
-      if (contents == self.UUID) {
+      if (contents == self.uuid) {
         if (! cleanup) {
           die ("[BUG]\t #{MN}: lock file '#{lock_file}' for " +
             "target '#{target}' contains the current process' UUID" +
@@ -188,7 +192,7 @@ module GuardIO {
         lock_file.remove
         self.log.vbs(__FILE__, __LINE__, MN, "cleaned up #{ellipsify_absolute(lock_file)}")
       } else {
-        self.log.vbs(__FILE__, __LINE__, MN, "!! UUID mismatch: #{contents} ≠ #{self.UUID}")
+        self.log.vbs(__FILE__, __LINE__, MN, "!! UUID mismatch: #{contents} ≠ #{self.uuid}")
         die (
           "[ERROR]\t#{MN}: lock file '#{lock_file}' for target '#{target}' contains foreign UUID!" +
           "\n\t(only one MultiFactor process should be active in a directory)" +
@@ -220,13 +224,13 @@ module GuardIO {
       if (lock_file.exists) {
         self._lock_exists(target, cleanup)
       } else {
-        Atomic::awrite(lock_file, self.UUID)
+        Atomic::awrite(lock_file, self.uuid)
         self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, "created #{ellipsify_absolute(lock_file)}")
       }
     }
 
     method do_lock_files {
-      self._setup_done || die "#{__METHOD_NAME__}: setup not done!"
+      # self._setup_done || die "#{__METHOD_NAME__}: setup not done!"
       self._do_remove_old_lock
       self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, "locking FODs: #{self.locked_fods.map{ ellipsify_absolute(_) }.join(', ')}")
       self.locked_fods.each{
@@ -237,7 +241,7 @@ module GuardIO {
     }
 
     method cleanup {
-      self._setup_done || die "#{__METHOD_NAME__}: setup not done!"
+      # self._setup_done || die "#{__METHOD_NAME__}: setup not done!"
       self.log.trc(__FILE__, __LINE__, __METHOD_NAME__,
         "cleanup lock files for FODs: #{self.locked_fods.map{ ellipsify_absolute(_) }.join(', ')}")
       self.locked_fods.each{
