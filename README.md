@@ -1,4 +1,4 @@
-# multifactor v0.3
+# multifactor v0.3 ![Build status](https://api.travis-ci.org/catb0t/multifactor.svg?branch=master)
 
 To end the hassle of having to manage [Factor](https://github.com/factor/factor) images and executables for different branches / revisions.
 
