@@ -1,9 +1,11 @@
 language: perl
 sudo: true
+dist: xenial
 perl: "5.16"
 install:
   - git clone https://github.com/trizen/sidef sidef
   - yes | cpan i CPAN
+  - sudo apt update
   - yes | sudo apt install libmpfr-dev libmpc-dev libgmp10 libgmp3-dev
   - cpan Log::Log4perl Algorithm::Combinatorics Algorithm::Loops Math::GMPq Math::GMPz Math::MPC Math::MPFR Math::Prime::Util Math::Prime::Util::GMP Math::BigInt::GMP Math::BigInt::Calc Math::BigInt::FastCalc
 script:
