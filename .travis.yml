@@ -1,8 +1,8 @@
 language: perl
-perl: "5.016"
+perl: "5.16"
 install:
   - git clone https://github.com/trizen/sidef sidef
-  - cpan i CPAN
+  - yes | cpan i CPAN
   - cpan Log::Log4perl Algorithm::Combinatorics Algorithm::Loops Math::GMPq Math::GMPz Math::MPC Math::MPFR Math::Prime::Util Math::Prime::Util::GMP Math::BigInt::GMP
 script:
   - tests/test-sidef.sh sidef/bin/sidef lib/* providers/* tests/*
