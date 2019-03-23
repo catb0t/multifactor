@@ -19,11 +19,11 @@
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 include lib::command
+include Command
 
 # `build.sh` bash functions
 # THEIR utilities, re-implemented in Sidef
-module BuildSh {
-
+module BuildConst {
   define Regex VERSION_REGEX = /VERSION = ([0-9]+\.[0-9]+)/
   define Regex REPRODUCIBLE_REGEX = /REPRODUCIBLE/
 
@@ -31,14 +31,21 @@ module BuildSh {
   define File N_MAKEFILE = %f(Nmakefile)
 
   define String NOT_A_GIT_REPO = '^~not a git repository~^'
-  const Array NOT_GIT_SYMS = [ BuildSh::NOT_A_GIT_REPO[0..2] ]
+  const Array NOT_GIT_SYMS = [ BuildConst::NOT_A_GIT_REPO[0..2] ]
 
-  include Command
+  # branchname and file name
+  define BASE_REMOTE_IMAGE_URL = 'http://downloads.factorcode.org/images/%s/%s'
+  define CHECKSUM_FILENAME = 'checksums.txt'
+}
+
+class BuildSh {
+  -> init { die "#{__CLASS_NAME__}: don't instantiate me, only use my methods statically" }
   -> downloader {
-    'LWP::UserAgent'.require.new(show_progress => 1)
+    static const LWP_UA = 'LWP::UserAgent'.require
+    LWP_UA.new(show_progress => 1)
   }
   -> make_http_request (url) {
-    var resp = BuildSh::downloader().get(url)
+    var resp = BuildSh.downloader.get(url)
     resp.is_success ? resp.decoded_content : false
   }
   -> find_programs (String kind, Array ps) is cached -> String {
@@ -58,10 +65,10 @@ module BuildSh {
   #   ...
   # }
   -> cc () is cached -> String {
-    BuildSh::find_programs(:cc, %w(clang gcc cc))
+    BuildSh.find_programs(:cc, %w(clang gcc cc))
   }
   -> cxx () is cached -> String {
-    BuildSh::find_programs(:cxx, %w(clang++ g++ c++ cpp))
+    BuildSh.find_programs(:cxx, %w(clang++ g++ c++ cpp))
   }
   # NOTE: os_type is distinct to osname
   -> os_name (n = nil) is cached -> String {
@@ -75,15 +82,15 @@ module BuildSh {
     }
   }
   -> os_type (t = nil) is cached -> String {
-    given ( t || BuildSh::os_name() ) {
+    given ( t || BuildSh.os_name ) {
       when (/(?:linux|darwin|macos|bsd|mingw)/i) { :unix }
       when (/(?:windows|cygwin)/i) { :windows }
-      case ( %w(haiku).contains(_) ) { BuildSh::os_name() }
+      case ( %w(haiku).contains(_) ) { BuildSh.os_name }
       default { die "Can't convert osname to os_type: #{Sys.osname}" }
     }
   }
   -> arch_name () is cached -> String {
-    const uname = `uname -m`.chomp
+    static const uname = `uname -m`.chomp
     if ( [:ppc64, "Power Macintosh"].any{ uname.contains(_) } ) {
       :ppc
     } else {
@@ -93,7 +100,7 @@ module BuildSh {
   -> c_word_size () is cached -> String {
     define File ws_binary = %f(factor_word_size)
     `echo '#include <stdio.h>
-    int main(){printf(\"%ld\",(long)(8*sizeof(void*)));}' | #{BuildSh::cc()} -xc -o#{ws_binary} -`
+    int main(){printf(\"%ld\",(long)(8*sizeof(void*)));}' | #{BuildSh.cc} -xc -o#{ws_binary} -`
 
     die "couldn't call the C compiler: #{$!}" \
       if (Number($?) != 0)
@@ -109,24 +116,24 @@ module BuildSh {
     ws
   }
   -> intel_macosx_word_size () is cached -> String {
-    `#{BuildSh::find_programs(:sysctl, [:sysctl])} machdep.cpu.extfeatures | grep EM64T >/dev/null`
+    `#{BuildSh.find_programs(:sysctl, [:sysctl])} machdep.cpu.extfeatures | grep EM64T >/dev/null`
     (Number($?)==0 ? :64 : :32)
   }
   -> word_size () is cached -> String {
-    if (BuildSh::os_name()~~:macos && BuildSh::arch_name()~~:x86) {
-      BuildSh::intel_macosx_word_size()
+    if (BuildSh.os_name~~:macos && BuildSh.arch_name~~:x86) {
+      BuildSh.intel_macosx_word_size
     } else {
-      BuildSh::c_word_size()
+      BuildSh.c_word_size
     }
   }
 
   -> generate_make_targets () is cached -> Hash {
-    const (
-      ot = BuildSh::os_type(),
-      on = BuildSh::os_name(),
-      an = BuildSh::arch_name(),
-      ws = BuildSh::word_size()
-    )
+    # const (
+    static const ot = BuildSh.os_type,
+    static const on = BuildSh.os_name,
+    static const an = BuildSh.arch_name,
+    static const ws = BuildSh.word_size
+    # )
     Hash(
       :make_image => "#{on}-#{an}.#{ws}",                  # MAKE_IMAGE_TARGET
       :make_vm => "#{on}-#{an}-#{ws}",                     # MAKE_TARGET
@@ -139,50 +146,50 @@ module BuildSh {
   # see `man git check-ref-format` and https://stackoverflow.com/a/3651867/4532996
   # we're going to use just ~ and ^ internally to identify non-git strings
   -> is_git_ref_name (Str b) is cached {
-    b!=BuildSh::NOT_A_GIT_REPO && !( BuildSh::NOT_GIT_SYMS.any{ b.contains(_) } )
+    b!=BuildConst::NOT_A_GIT_REPO && !( BuildConst::NOT_GIT_SYMS.any{ b.contains(_) } )
   }
 
   # check the outputs of these with is_git_ref_name:
 
   # returning `nil` from these is not an option, because `nil` is an empty string
   -> git_branch () is cached {
-    const branch = `git rev-parse --abbrev-ref HEAD`
-    (Number($?)==0 ? branch.chomp : BuildSh::NOT_A_GIT_REPO)
+    static const branch = `git rev-parse --abbrev-ref HEAD`
+    (Number($?)==0 ? branch.chomp : BuildConst::NOT_A_GIT_REPO)
   }
 
   -> git_hash () is cached {
-    const hash = `git rev-parse HEAD`
-    (Number($?)==0 ? hash.chomp : BuildSh::NOT_A_GIT_REPO)
+    static const hash = `git rev-parse HEAD`
+    (Number($?)==0 ? hash.chomp : BuildConst::NOT_A_GIT_REPO)
   }
 
   -> try_git (Str operation, Str caller_name, Bool fatal = true) is cached {
-    const git_output = eval("BuildSh::git_#{operation}")()
-    if (! BuildSh::is_git_ref_name(git_output) ) {
-      die "[FATAL] #{__FUNC_NAME__}: git_#{operation}: #{caller_name} requires #{Dir.cwd} to be a git repository" if (fatal)
-      return false
+    static const git_output = BuildSh.method(:git_ + operation)(BuildSh)
+    if (! BuildSh.is_git_ref_name(git_output) ) {
+      die "[FATAL] #{__METHOD_NAME__}: git_#{operation}: #{caller_name} requires #{Dir.cwd} to be a git repository" if (fatal)
+      false
+    } else {
+      git_output
     }
-    git_output
   }
 
   -> is_git () is cached -> Bool {
-    [:branch, :hash].all{ BuildSh::try_git(_, __FUNC_NAME__, fatal: false) }
+    [:branch, :hash].all{ BuildSh.try_git(_, __METHOD_NAME__, fatal: false) }
   }
 
   -> platform_vm_ext (n = nil) is cached -> String {
-    given ( n || BuildSh::os_name() ) {
+    given ( n || BuildSh.os_name ) {
       when (:windows) { ".exe" }
       default { "" }
     }
   }
 
-  -> platform_lib_name (n = nil) is cached -> Array {
-    const N = (n || BuildSh::os_name())
-    Pair(
+  -> platform_lib_name (n = nil) is cached -> Pair {
+    static const N = (n || BuildSh.os_name)
+    (
       given (N) {
         when (:windows) { "" }
         default { "lib" }
-      },
-      given (N) {
+      } ¦ given (N) {
         when (:windows) { ".dll" }
         when (:macos) { ".dylib" }
         default { ".a" }
@@ -191,18 +198,18 @@ module BuildSh {
   }
 
   -> platform_makefile (n = nil) is cached -> File {
-    const N = (n || BuildSh::os_name())
-    ( N ~~ :windows ? BuildSh::N_MAKEFILE : BuildSh::GNU_MAKEFILE )
+    static const N = (n || BuildSh.os_name)
+    ( N ~~ :windows ? BuildConst::N_MAKEFILE : BuildConst::GNU_MAKEFILE )
   }
 
   -> factor_version () is cached {
-    const result = BuildSh::platform_makefile().open_r.lines.find{ _ ~~ BuildSh::VERSION_REGEX } \
-      || die "[FATAL] #{__FUNC_NAME__}: can't find a VERSION in GNUmakefile #{BuildSh::platform_makefile().abs}"
-    (BuildSh::VERSION_REGEX =~ result)[0]
+    const result = BuildSh.platform_makefile.open_r.lines.find{ _ ~~ BuildConst::VERSION_REGEX } \
+      || die "[FATAL] #{__METHOD_NAME__}: can't find a VERSION in GNUmakefile #{BuildSh.platform_makefile.abs}"
+    (BuildConst::VERSION_REGEX =~ result)[0]
   }
 
   -> feature_reproducible () is cached -> Bool {
-    Bool( BuildSh::platform_makefile().open_r.lines.find{ _ ~~ BuildSh::REPRODUCIBLE_REGEX } )
+    Bool( BuildSh.platform_makefile.open_r.lines.find{ _ ~~ BuildConst::REPRODUCIBLE_REGEX } )
   }
 
   # -> platform_make (*args) {
@@ -217,11 +224,11 @@ module BuildSh {
   # bo_target: BuiltObj
   -> make_factor ( bo_target, Bool output = false ) {
     # var (pre, suf) = BuildSh::platform_lib_name()...
-    (BuildSh::generate_make_targets(){:make_vm} -> cleave(
+    (BuildSh.generate_make_targets(){:make_vm} -> cleave(
       { say "Building '#{_}' with infinite cores" },
       { Command::make(
           _,
-          (BuildSh::feature_reproducible ? 'REPRODUCIBLE=1' : ' SITE_CFLAGS="-D__DATE__=\'\"[reproducible-workaround]\"\' -D__TIME__=\'\"\"\'" '),
+          (BuildSh.feature_reproducible ? 'REPRODUCIBLE=1' : ' SITE_CFLAGS="-D__DATE__=\'\"[reproducible-workaround]\"\' -D__TIME__=\'\"\"\'" '),
           output: output
         )
       }
@@ -241,22 +248,22 @@ module BuildSh {
   }
 
   -> make_clean_factor (/* BuiltObj */ bo_target, Bool output = false) {
-    BuildSh::make_clean(output: output) && BuildSh::make_factor(bo_target, output: output)
+    BuildSh.make_clean(output: output) && BuildSh.make_factor(bo_target, output: output)
   }
 
-  # branchname and file name
-  define BASE_REMOTE_IMAGE_URL = 'http://downloads.factorcode.org/images/%s/%s'
-  define CHECKSUM_FILENAME = 'checksums.txt'
   # aka set_boot_image_vars
   -> boot_image_urls () is cached {
     -> curbranch_file_url (String filename, Bool use_non_master = true) is cached {
-      BASE_REMOTE_IMAGE_URL.sprintf( (use_non_master ? BuildSh::try_git(:branch, __FUNC_NAME__) : :master), filename )
+      BuildConst::BASE_REMOTE_IMAGE_URL.sprintf(
+        (use_non_master ? BuildSh.try_git(:branch, __METHOD_NAME__) : :master),
+        filename
+      )
     }
 
-    const non_master_branch_ok = Bool( BuildSh::make_http_request( curbranch_file_url(CHECKSUM_FILENAME) ) )
+    const non_master_branch_ok = Bool( BuildSh.make_http_request( curbranch_file_url(BuildConst::CHECKSUM_FILENAME) ) )
     Hash(
-      :checksum => curbranch_file_url(CHECKSUM_FILENAME, use_non_master: non_master_branch_ok),
-      :boot_image_url => curbranch_file_url( BuildSh::generate_make_targets(){:boot_image}, use_non_master: non_master_branch_ok )
+      :checksum => curbranch_file_url(BuildConst::CHECKSUM_FILENAME, use_non_master: non_master_branch_ok),
+      :boot_image_url => curbranch_file_url( BuildSh.generate_make_targets(){:boot_image}, use_non_master: non_master_branch_ok )
     )
   }
 
@@ -266,23 +273,23 @@ module BuildSh {
   }
 
   -> get_boot_image {
-    const File boot_image_file = BuildSh::generate_make_targets(){:boot_image}
-    say "#{__FUNC_NAME__}: Downloading boot image file #{boot_image_file}"
+    const File boot_image_file = BuildSh.generate_make_targets(){:boot_image}
+    say "#{__METHOD_NAME__}: Downloading boot image file #{boot_image_file}"
 
-    const boot_image_urls = BuildSh::boot_image_urls()
+    const boot_image_urls = BuildSh.boot_image_urls
 
-    const boot_image_data = BuildSh::make_http_request( boot_image_urls{:boot_image_url} )
+    const boot_image_data = BuildSh.make_http_request( boot_image_urls{:boot_image_url} )
     const download_md5 = boot_image_data.md5
 
-    const remote_checksum_data = BuildSh::make_http_request( boot_image_urls{:checksum} )
+    const remote_checksum_data = BuildSh.make_http_request( boot_image_urls{:checksum} )
     if (! remote_checksum_data) {
-      say "#{__FUNC_NAME__}: Can't download, can't checksum"
+      say "#{__METHOD_NAME__}: Can't download, can't checksum"
       return false
     }
-    const remote_md5 = BuildSh::_process_checksums_file(remote_checksum_data, boot_image_file)
+    const remote_md5 = BuildSh._process_checksums_file(remote_checksum_data, boot_image_file)
 
-    say "#{__FUNC_NAME__}: boot image sums: #{remote_md5} / #{download_md5}"
-    if (remote_md5 != download_md5) { die "#{__FUNC_NAME__}: !!! downloaded checksum mismatch !!! (unrecoverable)" }
+    say "#{__METHOD_NAME__}: boot image sums: #{remote_md5} / #{download_md5}"
+    if (remote_md5 != download_md5) { die "#{__METHOD_NAME__}: !!! downloaded checksum mismatch !!! (unrecoverable)" }
 
     boot_image_file.touch.cleave(
       { .binmode },
@@ -291,38 +298,38 @@ module BuildSh {
   }
 
   -> update_boot_image {
-    const File boot_image_file = BuildSh::generate_make_targets(){:boot_image}
-    say "#{__FUNC_NAME__}: Removing old data..."
-    File(CHECKSUM_FILENAME).remove
+    const File boot_image_file = BuildSh.generate_make_targets(){:boot_image}
+    say "#{__METHOD_NAME__}: Removing old data..."
+    File(BuildConst::CHECKSUM_FILENAME).remove
     # remove all boot images with a name like BOOT_IMAGE.{?,??}
     # File(boot_image_name + '*').glob.grep{ _ ~~ Regex("#{boot_image_name}\.(?:.|..)") }.map{ File(_).remove }
     File("temp/staging.*.image").glob.each{ File(_).remove }
 
-    say "#{__FUNC_NAME__}: Processing #{boot_image_file}"
+    say "#{__METHOD_NAME__}: Processing #{boot_image_file}"
 
     if ( boot_image_file.exists ) {
-      say "#{__FUNC_NAME__}: have a local #{boot_image_file}, need to checksum"
-      const boot_image_urls = BuildSh::boot_image_urls()
-      const remote_checksum_data = BuildSh::make_http_request( boot_image_urls{:checksum} )
+      say "#{__METHOD_NAME__}: have a local #{boot_image_file}, need to checksum"
+      const boot_image_urls = BuildSh.boot_image_urls
+      const remote_checksum_data = BuildSh.make_http_request( boot_image_urls{:checksum} )
       if (! remote_checksum_data) {
-        say "#{__FUNC_NAME__}: Can't download, can't checksum"
+        say "#{__METHOD_NAME__}: Can't download, can't checksum"
         return false
       }
-      const remote_md5 = BuildSh::_process_checksums_file(remote_checksum_data, boot_image_file)
+      const remote_md5 = BuildSh._process_checksums_file(remote_checksum_data, boot_image_file)
 
       const local_md5 = boot_image_file.md5
-      say "#{__FUNC_NAME__}: boot image sums: #{remote_md5} / #{local_md5}"
+      say "#{__METHOD_NAME__}: boot image sums: #{remote_md5} / #{local_md5}"
 
       if (remote_md5 != local_md5) {
-        say "\t#{__FUNC_NAME__}: !!! local / remote checksum mismatch !!! "
+        say "\t#{__METHOD_NAME__}: !!! local / remote checksum mismatch !!! "
         boot_image_file.remove
-        return BuildSh::get_boot_image()
+        return BuildSh.get_boot_image
       }
-      say "#{__FUNC_NAME__}: Local boot image matched remote sum"
+      say "#{__METHOD_NAME__}: Local boot image matched remote sum"
       true
     } else {
-      say "#{__FUNC_NAME__}: no local #{boot_image_file}, need to get"
-      BuildSh::get_boot_image()
+      say "#{__METHOD_NAME__}: no local #{boot_image_file}, need to get"
+      BuildSh.get_boot_image
     }
   }
 

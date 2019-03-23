@@ -1,5 +1,6 @@
 include lib::ABCs
 include lib::shell_words
+import lib::shell_words::BuildSh
 # import ABCs2::TypeUtils
 include providers::builtobj
 import providers::builtobj::BuiltObj
@@ -18,6 +19,6 @@ var new_bo = BuiltObj().unserialize(h)
 assert_eq(bo, new_bo)
 assert_eq(new_bo.serialize, h)
 
-var bo2 = BuiltObj().id(:1234).vm_format([ '', :fvm_, BuildSh::platform_vm_ext() ])
-assert_eq("fvm_1234#{BuildSh::platform_vm_ext()}", bo2.vm_fullname)
+var bo2 = BuiltObj().id(:1234).vm_format([ '', :fvm_, BuildSh.platform_vm_ext ])
+assert_eq("fvm_1234#{BuildSh.platform_vm_ext}", bo2.vm_fullname)
 say "vm fullname: #{bo2.vm_fullname}"

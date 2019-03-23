@@ -17,38 +17,44 @@
 
 include lib::frext
 
-func process_serial_prop_rhs (callers < FRExt::ArrStr, String name, Object obj, Hash want_vals) -> Hash {
-  const FN = __FUNC_NAME__
+module SProcess {
+  define Hash WANT_ALL_VALS = :(:typename => true, :default_val => true, :custom_blocks => true)
+  define Hash WANT_EXCLUDE_BLOCKS = :(typename => true, :default_val => true)
+  define Block CUSTOM_BLOCKS_DEFAULT = { Hash() }
 
-  const is_fqa = obj.is_an_object(Array)
+  func process_serial_prop_rhs (callers < FRExt::NonEmptyArrStr, String name, Object obj, Hash want_vals) -> Hash {
+    const FN = __FUNC_NAME__
 
-  want_vals.rescope{
-    # maybe the following can be vectorised?
-    if ( !is_fqa ) {
-      obj.is_typename || die ("RHS in serial property declaration '#{name}' isn't a typename: '#{obj}' (ref #{obj.ref}) (perhaps you accidentally initialised the object?)\n\t#{__FUNC_NAME__}: called from: #{callers.reverse.join(' < ')}")
+    const is_fqa = obj.is_an_object(Array)
 
-      .clobber_existing_by( Hash(
-        :typename => { obj },
-        :default_val => { TypeUtils::maybe_call_custom_init( obj ) },
-        :custom_blocks => { Hash() }
-      ) )
-    } else {
-      die (
-        "#{__FILE__}:#{__LINE__}: #{FN}: malformed array in RHS when declaring field '#{name}': must have positive length (1, 2 or 3)"
-      ) if ( is_fqa && !obj )
-
-      if (obj.len == 1) {
-        __FUNC__([@|callers, :V_recursing] name, obj[0], _ )
-      } else {
-        defined(obj[2]) && ( obj[2].is_an_object(Hash) \
-          || die "#{__FILE__}:#{__LINE__}: #{FN}: malformed custom get/set blocks in RHS when declaring field '#{name}': RHS item \#3: want type 'Hash'; got '#{obj[2].ref}'"
-        )
+    want_vals.rescope{
+      # maybe the following can be vectorised?
+      if ( !is_fqa ) {
+        obj.is_typename || die ("RHS in serial property declaration '#{name}' isn't a typename: '#{obj}' (ref #{obj.ref}) (perhaps you accidentally initialised the object?)\n\t#{__FUNC_NAME__}: called from: #{callers.reverse.join(' < ')}")
 
         .clobber_existing_by( Hash(
-          :typename => { obj[0] },
-          :default_val => { obj[1] \\ TypeUtils::maybe_call_custom_init( obj[0] ) },
-          :custom_blocks => { obj[2] \\ Hash() }
+          :typename => { obj },
+          :default_val => { TypeUtils::maybe_call_custom_init( obj ) },
+          :custom_blocks => SProcess::CUSTOM_BLOCKS_DEFAULT
         ) )
+      } else {
+        die (
+          "#{__FILE__}:#{__LINE__}: #{FN}: malformed array in RHS when declaring field '#{name}': must have positive length (1, 2 or 3)"
+        ) if ( is_fqa && !obj )
+
+        if (obj.len == 1) {
+          __FUNC__([@|callers, :V_recursing] name, obj[0], _ )
+        } else {
+          defined(obj[2]) && ( obj[2].is_an_object(Hash) \
+            || die "#{__FILE__}:#{__LINE__}: #{FN}: malformed custom get/set blocks in RHS when declaring field '#{name}': RHS item \#3: want type 'Hash'; got '#{obj[2].ref}'"
+          )
+
+          .clobber_existing_by( Hash(
+            :typename => { obj[0] },
+            :default_val => { obj[1] \\ TypeUtils::maybe_call_custom_init( obj[0] ) },
+            :custom_blocks => { obj[2] \\ Hash() }
+          ) )
+        }
       }
     }
   }
@@ -57,22 +63,21 @@ func process_serial_prop_rhs (callers < FRExt::ArrStr, String name, Object obj, 
 class Serializable {
   has String _k_svalue = :_serial_value
 
-  -> _grep_serial_properties (Array excl) is cached -> Hash {
-    self.grep_methods{ |name, _| name ~~ /^serial_properties/ } \
-      .values \ # Array<LazyMethod>
-      # not a constructor; just a method call on self.serial_properties*
-      .map{
-        _().grep_kv{ |name, _| !excl.contains(name) }
-      } \
-      .merge_reduce \\ Hash()
+  -> _grep_serial_properties (Set incl, Set excl) is cached -> Hash {
+    self.grep_methods{ |n| n ~~ /^serial_properties/ } \
+      .values.map{ const props = _(); ( incl ? (props & incl) : props ) - excl }.merge_reduce \\ Hash()
   }
 
-  -> _do_serial (Array exclude, Block d) {
-    self._grep_serial_properties(exclude).map_kv(d)
+  -> _do_serial (Block d, incl = Set(), excl = Set()) {
+    self._grep_serial_properties(incl, excl).map_kv(d)
   }
 
-  -> _is_serialized_obj (Object obj) {
-    ( obj.is_an_object(Hash) && obj.keys==[self._k_svalue] && obj{self._k_svalue}.is_an_object(Hash) )
+  -> _is_serialized_obj (Object obj, optimized = false) {
+    if (__OPTIMIZED__ || optimized) {
+      ( obj.is_an_object(Hash) && (obj{self._k_svalue} \\ Regex).is_an_object(Hash) )
+    } else {
+      ( obj.is_an_object(Hash) && obj.keys==[self._k_svalue] && obj{self._k_svalue}.is_an_object(Hash) )
+    }
   }
 
   -> _find_getter (Array callers, String field_name, Hash props) {
@@ -94,27 +99,27 @@ class Serializable {
     } \\ props{:default_val})
   }
 
-  method serialize (Array exclude = [], Bool _recursing = false, Array callers = ["(main)"]) -> Hash {
+  method serialize (incl = Set(), excl = Set(), _recursing = false, Array callers = ["(main)"]) -> Hash {
     const MN = __METHOD_NAME__
     const RC = (_recursing ? :R_recursing : :R_not_recursing)
 
-    self._do_serial(exclude, {
+    self._do_serial(incl: incl, excl: excl, {
         |field_name, field_rhs|
 
       # say "serialize #{field_name}"
       self._find_getter(
         [@|callers, MN, RC, :V_step2],
         field_name,
-        process_serial_prop_rhs(
+        SProcess::process_serial_prop_rhs(
           [@|callers, MN, RC, :V_step1],
           field_name,
           field_rhs,
-          :(:typename => true, :default_val => true)
+          SProcess::WANT_EXCLUDE_BLOCKS
         )
       ).rescope{
         ( (field_name) => (
           TypeUtils::is_serializable(_)
-            ? Hash( (self._k_svalue) => .serialize( exclude: exclude, _recursing: true, callers: [@|callers, MN, RC] ) )
+            ? Hash( (self._k_svalue) => .serialize( incl: incl, excl: excl, _recursing: true, callers: [@|callers, MN, RC] ) )
             : _
         ) )
       }
@@ -149,28 +154,29 @@ class Serializable {
   }
 
   /* bi-recursive with _maybe_unserialize */ # /
-  method unserialize (Hash data, Array exclude = [], Bool _recursing = false, Array callers = ["(main)"] ) -> __CLASS__ {
+  method unserialize (Hash data, incl = Set(), excl = Set(), _recursing = false, Array callers = ["(main)"] ) -> __CLASS__ {
     const MN = __METHOD_NAME__
     const RC = (_recursing ? :R_recursing : :R_not_recursing)
 
-    self._do_serial(exclude, {
+    self._do_serial(incl: incl, excl: excl, {
         |field_name, field_rhs|
 
       # say "#{field_name}: #{data{field_name}.dump}"
       Combi::rescope( self._maybe_unserialize(
         [@|callers, MN, RC, :V_step2],
-        [exclude: exclude, _recursing: _recursing],
+        [incl: incl, excl: excl, _recursing: _recursing],
         data{field_name},
-        process_serial_prop_rhs(
+        SProcess::process_serial_prop_rhs(
           [@|callers, MN, RC, :V_step1],
           field_name,
           field_rhs,
-          :(:typename => true, :default_val => true)
+          SProcess::WANT_EXCLUDE_BLOCKS
         )
       ) )({
           |rs_callers, typename, derived|
         # say "\tdefined derived: #{defined(derived)}"
-        self._find_setter([@|rs_callers, MN, RC, :V_rescope], field_name, derived) || die ("#{__FILE__}:#{__LINE__}: #{__METHOD_NAME__}: #{field_name} (#{typename}) (value #{derived}) " + 'appears to be neither a property nor declared setter')
+        self._find_setter([@|rs_callers, MN, RC, :V_rescope], field_name, derived) \
+          || die ("#{__FILE__}:#{__LINE__}: #{__METHOD_NAME__}: #{field_name} (#{typename}) (value #{derived}) " + 'appears to be neither a property nor declared setter')
       })
     })
     self
@@ -180,21 +186,22 @@ class Serializable {
 # use the serializable functionality to equate two objects
 /* abstract interface */ # /
 class SeriallyEquatable < Serializable {
-  -> _serial_eq (other, exclude_props = []) -> Bool {
+  -> _serial_eq (other, incl = Set(), excl = Set()) -> Bool {
 
     if ( other.is_a(Serializable) ) {
-      other.serialize(exclude: exclude_props) == self.serialize(exclude: exclude_props)
+      other.serialize(incl: incl, excl: excl) == self.serialize(incl: incl, excl: excl)
 
     # somehow... maybe other is our superclass
     } elsif (other ~~ self) {
      [self, other].map{
-       |obj| self._do_serial(exclude_props, { obj.method(_)() } )
+       |obj| self._do_serial(incl: incl, excl: excl, { obj.method(_)() } )
      }«==»
 
      # TODO: use object_hash_ref here
-    } else { self._do_serial(exclude_props, { other{_} == self{_} } ).all }
+    } else { self._do_serial(incl: incl, excl: excl, { other{_} == self{_} } ).all }
   }
-  method == (other) { self._serial_eq(other) }
+  method == (o) { self._serial_eq(o) }
+  # method <=> (o, p) { self.cmp(o, p) }
 }
 
 
@@ -230,7 +237,7 @@ class ModularInit {
 #   duplicated or buggy, and will cause infinite recursion in subclasses
 define Array global_init_steps_sa_base = [
   { ._property_generator },
-  { ._do_serial([], ._bound_accessor_generator ) },
+  { ._do_serial( ._bound_accessor_generator ) },
 ]
 
 class SeriallyAccessible << ModularInit, SeriallyEquatable {
@@ -240,11 +247,11 @@ class SeriallyAccessible << ModularInit, SeriallyEquatable {
     {
         |field_name, field_rhs|
       # say "#{field_name} #{field_rhs.refaddr} #{field_rhs}"
-      process_serial_prop_rhs(
+      SProcess::process_serial_prop_rhs(
         [MN, :V_bound_block, :V_first_step],
         field_name,
         field_rhs,
-        :(:typename => true, :default_val => true, :custom_blocks => true)
+        SProcess::WANT_ALL_VALS
       ).rescope{
         const typename = .{:typename}
         const default_val = .{:default_val}
@@ -329,12 +336,14 @@ class SeriallyAccessible << ModularInit, SeriallyEquatable {
 
 }
 
-
 class Lockable {
   has Bool _impl_locked = false
   has String _impl_err_write_locked = 'attempt of write to locked '+__CLASS_NAME__+' object!'
 
-  -> lock { self._impl_locked = true }
-  -> lock (Bool b) { self._impl_locked = b }
-  -> unlock { self._impl_locked = false }
+  -> locked { self._impl_locked }
+  -> unlocked { !self._impl_locked }
+  -> state (String s) { s ~~ /^unl/ ? !self._impl_locked : self._impl_locked }
+  -> lock { self._impl_locked = true; self }
+  -> lock (Bool b) { self._impl_locked = b; self }
+  -> unlock { self._impl_locked = false; self }
 }

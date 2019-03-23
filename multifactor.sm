@@ -22,6 +22,8 @@ include lib::ABCs
 include lib::shell_words
 include lib::withdirectory
 
+include lib::msg_classes
+
 include providers::argparse
 include providers::builtobj
 include providers::cachedb
@@ -69,6 +71,8 @@ module Factor {
 
 module MultiFactor {
 
+  import lib::shell_words::BuildSh
+
   import providers::builtobj::DirSum
   import providers::builtobj::SrcSums
   import providers::builtobj::BlobSums
@@ -78,19 +82,20 @@ module MultiFactor {
   include FactorBashStateless
   include GuardIO
 
-  func compare_properties (Array properties, BuiltObj b, Object o, Bool debug = false) {
-    if (debug) {
-      properties.map{
-          |property|
-        const db_property = b.method(property)()
-        const status_property = o{property}
-        say "Property '#{property}': #{db_property == status_property}: #{db_property.dump} == #{status_property.dump}"
-        db_property == status_property
-      }.all
-    } else {
-      properties.map{ |prop| b.method(prop)() } ~Z== o{properties...} -> all
-    }
-  }
+  # historical interest
+  # func compare_properties (Array properties, BuiltObj b, Object o, Bool debug = false) {
+  #   if (debug) {
+  #     properties.map{
+  #         |property|
+  #       const db_property = b.method(property)()
+  #       const status_property = o{property}
+  #       say "Property '#{property}': #{db_property == status_property}: #{db_property.dump} == #{status_property.dump}"
+  #       db_property == status_property
+  #     }.all
+  #   } else {
+  #     properties.map{ |prop| b.method(prop)() } ~Z== o{properties...} -> all
+  #   }
+  # }
 
   class MFRuntime (Hash options, Array factor_arguments) << lib::ABCs::SeriallyAccessible, lib::withdirectory::CapturedWriter {
     has Array known_actions = ['env-info', 'src-sums', 'run-factor']
@@ -183,6 +188,8 @@ module MultiFactor {
       )
       self.fbash = providers::factorbash::FactorBash(
         Dir( self.options(){'factor-dir'} || Factor::FACTOR_DIR ),
+        self.sum_src_algo,
+        self.basis_dev,
         subcommand_output: !( self.options(){'quiet-subcom'} || Factor::QUIET_PIPE )
       )
 
@@ -213,9 +220,12 @@ module MultiFactor {
     } ]
 
     method destroy (msg, *rest) {
-      say "#{__CLASS_NAME__}: destructor called: #{msg.dump}; #{rest}"
-      [self.db_man, self.locker].map{ .destroy }
-      :dead
+      Combi::rescope( lib::msg_classes::classify( msg ) )({
+          |type, fields|
+        say "#{__CLASS_NAME__}: destructor called!\n\t\t#{type} :: #{fields.grep_kv{ .!= :block_tried_invoke }}\n"
+        [self.db_man, self.locker].map{ .destroy }
+        (type)
+      })
     }
 
      method show_info {}
@@ -230,23 +240,23 @@ module MultiFactor {
       # self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, "checksumming #{f} with algorithm '#{algo}'")
       # give checksum of empty file, or die?
       self.fbash.with_directory{
-        (f.exists && BuildSh::blob_file_contents_sum(f, algo || self.sum_blob_algo)) \
+        (f.exists && BuildSh.blob_file_contents_sum(f, algo || self.sum_blob_algo)) \
           || die "[FATAL] #{__METHOD_NAME__}: empty algo: file: #{f}"
       }
     }
 
-    -> current_status_to_builtobj (Hash status) -> BuiltObj {
-      self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, 'creating BuiltObj from scratch')
-      var bo = BuiltObj().id(self.uuid)
-      status.each_kv{
-          |prop, val|
-        # self.vbs(__FILE__, __LINE__, __METHOD_NAME__, "invoke method / property '#{prop}'")
-        say "got here: #{prop} '#{status{prop}}'"
-        bo.method(prop)( val )
-      }
-      self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, 'setting creation time')
-      bo.time_created(Time.now)
-    }
+    # -> current_status_to_builtobj (Hash status) -> BuiltObj {
+    #   self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, 'creating BuiltObj from scratch')
+    #   var bo = BuiltObj().id(self.uuid)
+    #   status.each_kv{
+    #       |prop, val|
+    #     # self.vbs(__FILE__, __LINE__, __METHOD_NAME__, "invoke method / property '#{prop}'")
+    #     say "got here: #{prop} '#{status{prop}}'"
+    #     bo.method(prop)( val )
+    #   }
+    #   self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, 'setting creation time')
+    #   bo.time_created(Time.now)
+    # }
 
     -> _compile_vm_lib (BuiltObj bo) {
       if ( ! self.fbash.build_factor(bo) ) {
@@ -312,25 +322,25 @@ module MultiFactor {
     }
 
     # complex check for vm and lib
-    -> maybe_recompile_target (BuiltObj match_bo, /* BlobSums */ cur_blob_sums, String target, /* Hash */ previous_recompiled) {
+    -> maybe_recompile_target (BuiltObj match_bo, BlobSums cur_blob_sums, String target, Hash previous_recompiled) {
       const MN = __METHOD_NAME__
-      ((target) => match_bo.method(target + :_fullname)().cleave({
+      ((target) => match_bo.method(target + :_fullname)().rescope{
           |target_fullname|
         (false == previous_recompiled{target})
         ? false
         : if (
-          match_bo.cleave({ # cleave as "let"
-              |b|
+          match_bo.rescope{
+              # |b|
             self.fbash.with_directory{
               const exists = target_fullname.exists
-              const disk_sum = self._blob_file_contents_sum( target_fullname, b.blob_algorithm )
-              const matched_sum = b.blob_sums.method(target)()
+              const disk_sum = self._blob_file_contents_sum( target_fullname, .blob_algorithm )
+              const matched_sum = .blob_sums.method(target)()
               const sum_indirect = (defined(cur_blob_sums)
-                ? ( b.blob_sums.method(target)() =~ cur_blob_sums.method(target)() )
+                ? ( .blob_sums.method(target)() =~ cur_blob_sums.method(target)() )
                 : nil)
               (! exists) || ((disk_sum != matched_sum) && (sum_indirect == false))
             }
-          }).last
+          }
         ) {
           self.log.trc(__FILE__, __LINE__, MN, "NOT EXIST/MATCH #{target} named '#{target_fullname}' rebuilding")
           self.method(:compile_ + target)(match_bo, __METHOD_NAME__)
@@ -339,7 +349,7 @@ module MultiFactor {
           self.log.vbs(__FILE__, __LINE__, MN, "EXIST+MATCH #{target} named '#{target_fullname}' not rebuilding")
           false
         }
-      }).last)
+      })
     }
 
     -> _make_disk_blob_sums (BuiltObj bo, Array targets) {
@@ -354,13 +364,13 @@ module MultiFactor {
       }
     }
 
-    -> build_new_factor (Hash current_status) {
+    -> build_new_factor (BuiltObj current_status) {
       const MN = __METHOD_NAME__
 
       self.log.trc(__FILE__, __LINE__, MN, 'no match in db!')
       # interpret the current_status keys as property (setter) names in BuiltObj
       # this call does not set all properties, only those listed in status_properties
-      return self.current_status_to_builtobj(current_status).cleave(
+      current_status.dclone.unlock.id(self.uuid).time_created(Time.now).cleave(
         { |n| self.compile_vm_lib(n) },
         { |n| self.compile_image(n)  },
         { |n| n.blob_sums( self._make_disk_blob_sums(n, [:vm, :lib, :boot]) ) },
@@ -416,51 +426,31 @@ module MultiFactor {
 
       # property names in BuiltObj, used to create current_status
       # BuildSh and FactorBash implement these through FactorBash.delegate
-      const status_properties = [
+      define Set status_properties = Set(
         :factor_version, :is_git, :git_branch, :git_hash,
         :os_type, :os_name, :arch_name, :word_size,
-        # these defaults are kinda pointless
-        :vm_format,     # [ :vm_format,    default: { [ '', :fvm_, BuildSh::platform_vm_ext() ] } ],
-        :image_format,  # [ :image_format, default: { [ '', :fvm_, '.image' ] } ],
-        :lib_format,    # [ :lib_format,   default: { [ BuildSh::platform_lib_name()..., :fvm_].swap(-2, -1) } ],
-        :boot_format,   # [ :boot_format,  default: { [ 'boot.', :fvm_, '.image' ] } ]
-        # the block is called for its default value but without arguments,
-        #   because a "normal" version of the :sum_algorithm method in FactorBash
-        #   requires knowledge of its containing class
-        # this allows setting the blob checksum algorithm from the command line arguments
-        :blob_algorithm, # [ :blob_algorithm, default: { self.sum_blob_algo } ],
-        # this allows setting the SrcSums checksum algorithm for the VM on the command line
-        [ :src_sums, args: [self.sum_src_algo, self.basis_dev] ],
-      ]
-      subset ArrStr < String, Array
-      # makes Array<String, default?, args?> into String
-      -> undefault_single (prop < ArrStr) -> String { [@|prop] -> first }
-      # makes Array<Array<String, default?, args?>> into Array<String>
-      -> undefault (Array props) -> Array { props.map{ undefault_single(_) } }
-
-      # current_status is a Hash representing current disk / system config
-      # it maps string property names in status_properties to the result of
-      #   determining their values through FactorBash.delegate
-      # '@|' is like '...' but only calls '...' when the object can recieve it
-      const current_status = status_properties.map{ |n| ((undefault_single(n)) => self.fbash.delegate(@|n)) }.to_h
-      const db_data = self.db_man.data
+        :vm_format, :image_format, :lib_format, :boot_format,
+        :blob_algorithm, :src_sums
+      )
+      var BuiltObj current_status = BuiltObj().blob_algorithm( self.sum_blob_algo )
+      status_properties.each{
+        with ( self.fbash.delegate( _ ) ) { |v| current_status.method( _ )( v ) }
+      }
+      const BuiltObj db_data = self.db_man.data
       if (self.debug) {
-        say current_status
-        say db_data
+        say current_status.dump
+        say db_data.dump
       }
 
-      # compare_properties just wants the Array<String> as its basis for
-      #   comparing properties
-      # we're done with the status_properties Array<String, default?, args?>
-      #  now but it may come in handy
       const match_bo = db_data.values.find{
-        |b|
+          |b|
         # remember, we're not testing *all* properties like .lock or tombstoned
-        MultiFactor::compare_properties(undefault(status_properties), b, current_status, debug: self.debug)
+        current_status._serial_eq(b, incl: status_properties)
+
       }
       # need to generate new ID and compile
       if (! match_bo) { return self.build_new_factor(current_status) }
-
+      ...
       # now this is definitely defined
       match_bo.lock
       define tracked_targets = [:vm, :lib]
@@ -473,7 +463,6 @@ module MultiFactor {
       }
 
       self.log.vbs(__FILE__, __LINE__, MN, 'matching object in db')
-
 
       -> do_recompile_needed (BlobSums cur_blob_sums = nil, Hash previous_recompiled = nil) -> Hash {
         [

@@ -35,9 +35,12 @@ module CacheDBIO {
       JSON \
         .new \
         .decode(contents) \
+        # fixup this use of unserialize on Hash<Serializable>
         .map_kv{
-            |k, v|
-          TypeUtils::maybe_call_custom_init( element_type() ).unserialize(v)
+            |_, v|
+          ((_) =>
+            TypeUtils::maybe_call_custom_init( element_type() ).unserialize(v)
+          )
         }
     } else {
       # if it's empty, get a new one
@@ -50,7 +53,8 @@ module CacheDBIO {
     # look for the database file
     # if it doesn't exist, stop
     # otherwise, open it
-    Atomic::awrite( name, JSON.new.pretty.encode( new_data.map_kv{ .serialize } ) )
+    # fixup this use of .serialize on a Hash<Serializable>
+    Atomic::awrite( name, JSON.new.pretty.encode( new_data.map_kv{ |_, v| ((_) => v.serialize) } ) )
   }
 }
 
@@ -79,6 +83,17 @@ module DBTransform {
   }
 }
 
+define Hash TEMPLATE_SETUP_CACHEDB = :(
+  :dir => Dir,
+  :filename_base => File,
+  :dry_run => Bool,
+  :verbose => Bool,
+  :replace_existing => Bool,
+  :debug => :( :type => Bool, :default => true ),
+  :logger => :( :type => GuardIO::SLog, :deferred => { GuardIO::SLog( is_verbose: .{:verbose} ) } ),
+  :element_type => :( :type => lib::ABCs::Serializable, :val_is_typename => true )
+)
+
 class CacheDB < lib::withdirectory::CapturedWriter {
 
   has Set change_sequence = Set()
@@ -97,16 +112,7 @@ class CacheDB < lib::withdirectory::CapturedWriter {
   -> data { self.orig_data }
 
   method setup (Hash cdb_opts) -> __CLASS__ {
-    cdb_opts.template_transform( :(
-      :debug => :( :type => Bool, :default => true ),
-      :dir => Dir,
-      :filename_base => File,
-      :dry_run => Bool,
-      :verbose => Bool,
-      :replace_existing => Bool,
-      :logger => :( :type => GuardIO::SLog, :deferred => { GuardIO::SLog( is_verbose: .{:verbose} ) } ),
-      :element_type => :( :type => lib::ABCs::Serializable, :val_is_typename => true )
-    ) ).rescope{
+    cdb_opts.template_transform( TEMPLATE_SETUP_CACHEDB ).rescope{
       self.log = .{:logger}(_)
       self.dry_run = .{:dry_run}
 

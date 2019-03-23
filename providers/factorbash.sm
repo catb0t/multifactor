@@ -1,12 +1,13 @@
 include lib::guardio
 include lib::shell_words
 include lib::withdirectory
+import lib::shell_words::BuildSh
 
 include providers::builtobj
 
 module FactorBashStateless {
   -> _test_candidate_boot_image (providers::builtobj::BuiltObj bo, File c) {
-    c.exists && (bo.blob_sums.boot == BuildSh::blob_file_contents_sum(c, bo.blob_sums.algo) )
+    c.exists && (bo.blob_sums.boot == lib::shell_words::BuildSh.blob_file_contents_sum(c, bo.blob_sums.algo) )
   }
 
   -> _choose_boot_image (providers::builtobj::BuiltObj bo_target, File boot_image_file) {
@@ -17,9 +18,7 @@ module FactorBashStateless {
           ¦ { bo_target.boot_fullname }
       ),
       (
-        FactorBashStateless::_test_candidate_boot_image(bo_target, boot_image_file) \
-          || BuildSh::update_boot_image() \
-            ¦ { boot_image_file }
+        (FactorBashStateless::_test_candidate_boot_image(bo_target, boot_image_file) || lib::shell_words::BuildSh.update_boot_image) ¦ { boot_image_file }
       ),
       (
         bo_target.stored_boot_image.cleave(
@@ -30,12 +29,10 @@ module FactorBashStateless {
         ).cleave(
           { .first && .last },
           { [ .[1, 2] ]«==» },
-        ).all \
-          ¦ { bo_target.boot_fullname }
+        ).all ¦ { bo_target.boot_fullname }
       ),
       (
-        "give up" \
-          ¦ { die "[FATAL] #{__FUNC_NAME__}: can't find or download boot image\n\tno boot image, can't compile (sorry!)" }
+        "give up" ¦ { die "[FATAL] #{__FUNC_NAME__}: can't find or download boot image\n\tno boot image, can't compile (sorry!)" }
       )
     ].find{ .first }.cleave{ .second.run }.last.cleave(
       { say "#{__FUNC_NAME__}: !!! Chose #{_}" },
@@ -44,7 +41,7 @@ module FactorBashStateless {
   }
 }
 
-class FactorBash (Dir wd, Bool subcommand_output = false) < lib::withdirectory::WithDirectory { # < CapturedWriter??
+class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_output = false, ) < lib::withdirectory::WithDirectory { # < CapturedWriter??
 
   const DIR_REGEXES = Hash(
     :core => /^core\//,
@@ -53,9 +50,9 @@ class FactorBash (Dir wd, Bool subcommand_output = false) < lib::withdirectory::
   )
 
   # TODO: compare egrep with PCRE to figure out which files are being matched differently
-  -> git_files_matching (Dir d) -> Array {
+  -> git_files_matching (Dir d) is cached -> Array {
     const Array files = `git ls-files`.lines.grep{ _ ~~ DIR_REGEXES{d} }
-    die "[FATAL] #{__METHOD_NAME__}: no files matched #{DIR_REGEXES{d}} in #{Dir.cwd}" if (! files)
+    files || die "[FATAL] #{__METHOD_NAME__}: no files matched #{DIR_REGEXES{d}} in #{Dir.cwd}"
     # say "git listing #{files.len} files: #{r}"
     files
   }
@@ -76,46 +73,51 @@ class FactorBash (Dir wd, Bool subcommand_output = false) < lib::withdirectory::
     }.join("\n") |> algo
   }
 
-  -> src_sums (String algo, Bool basis_ignored) is cached -> providers::builtobj::SrcSums {
-    die "#{__METHOD_NAME__}: empty 'algo'!" if (algo.is_empty)
+  -> src_sums () is cached -> providers::builtobj::SrcSums {
+    -> single_dirsum (dir, Bool skip = false) is cached -> NamedParam {
+      dir ⫶ providers::builtobj::DirSum(
+        algo: self.sum_src_algo,
+        names: skip ? '' : self.sum_git_names_matching(Dir(dir), self.sum_src_algo),
+        contents: skip ? '' : self.sum_git_contents_matching(Dir(dir), self.sum_src_algo)
+      )
+    }
+
     self.with_directory{
-      providers::builtobj::SrcSums([:vm, :core, :basis].map{
-          |dir|
-        dir ⫶ providers::builtobj::DirSum(
-          algo: algo,
-          names: self.sum_git_names_matching(Dir(dir), algo),
-          contents: self.sum_git_contents_matching(Dir(dir), algo)
-        )
-      }..., basis_ignored: basis_ignored)
+      providers::builtobj::SrcSums(
+        # .push( single_dirsum(:basis, self.basis_dev) )...,
+        Set(:vm, :core, :basis).map{
+          single_dirsum(_, _ == :basis && self.basis_dev)
+        }...,
+        basis_ignored: self.basis_dev
+      )
     }
   }
 
-  -> delegate (String name, Block default = {}, args = ()) {
+  -> delegate (String name) is cached {
+    const MN = __METHOD_NAME__
     # say "#{name} #{[@|args]}"
-    var fn
-    try { fn = eval("BuildSh::#{name}") } catch {}
-    if ( self |> :methods |> :keys |> (:contains, name) ) {
-      self.method(name)(@|args)
-    } elsif (fn) {
-      self.with_directory{ fn() }
+    if ( self.has_public_concrete_method([MN, :V_self_method, :V_ + name], name) ) {
+      self.method(name)()
+    } elsif ( lib::shell_words::BuildSh.has_public_concrete_method([MN, :V_buildsh_method, :V_ + name], name) ) {
+      self.with_directory{ lib::shell_words::BuildSh.method(name)(BuildSh) }
     } else {
-      default.run(@|args)
+      nil
     }
   }
 
   -> say_src_sums {
-    say "#{self.src_sums(:sha256, false).vm.names}  vm names"
-    say "#{self.src_sums(:sha256, false).vm.contents}  vm contents"
-    say "#{self.src_sums(:sha256, false).core.names}  core names"
-    say "#{self.src_sums(:sha256, false).core.contents}  core contents"
-    say "#{self.src_sums(:sha256, false).basis.names}  basis names"
-    say "#{self.src_sums(:sha256, false).basis.contents}  basis contents"
+    say "#{self.src_sums.vm.names}  vm names"
+    say "#{self.src_sums.vm.contents}  vm contents"
+    say "#{self.src_sums.core.names}  core names"
+    say "#{self.src_sums.core.contents}  core contents"
+    say "#{self.src_sums.basis.names}  basis names"
+    say "#{self.src_sums.basis.contents}  basis contents"
   }
 
   -> say_env_info {
-    const l = BuildSh::platform_lib_name()
-    var cc = BuildSh::cc()
-    var cxx = BuildSh::cxx()
+    const l = lib::shell_words::BuildSh.platform_lib_name
+    var cc = lib::shell_words::BuildSh.cc
+    var cxx = lib::shell_words::BuildSh.cxx
     say "cc=#{cc}"
     say "cxx=#{cxx}"
     say "os_name=#{self.delegate(:os_name)}"
@@ -125,7 +127,7 @@ class FactorBash (Dir wd, Bool subcommand_output = false) < lib::withdirectory::
     say "is_git=#{self.delegate(:is_git)}"
     say "git_branch=#{self.delegate(:git_branch)}"
     say "git_hash=#{self.delegate(:git_hash)}"
-    say "platform_vm_ext=factor#{BuildSh::platform_vm_ext()}"
+    say "platform_vm_ext=factor#{lib::shell_words::BuildSh.platform_vm_ext}"
     say "platform_lib_name=#{l.first}factor#{l.second}"
     say "factor_version=#{self.delegate(:factor_version)}"
   }
@@ -133,7 +135,7 @@ class FactorBash (Dir wd, Bool subcommand_output = false) < lib::withdirectory::
   -> build_factor (providers::builtobj::BuiltObj bo_target) {
     self.with_directory{
       bo_target.cleave(
-        { .lock }, { BuildSh::make_clean_factor(_, output: self.subcommand_output) },
+        { .lock }, { lib::shell_words::BuildSh.make_clean_factor(_, output: self.subcommand_output) },
         { .vm_fullname.exists }, { .lib_fullname.exists }, { .unlock }
       ).all
     }
@@ -154,7 +156,7 @@ class FactorBash (Dir wd, Bool subcommand_output = false) < lib::withdirectory::
         './' + bo_target.vm_fullname, '-no-user-init', "-i='#{bo_target.image_fullname}'",
         "-e='USING: system bootstrap.image memory ; \"#{target}\" make-image image-path save-image 0 exit'",
         output: self.subcommand_output
-      ) && BuildSh::generate_make_targets(){:boot_image}.move(want_name)
+      ) && lib::shell_words::BuildSh.generate_make_targets(){:boot_image}.move(want_name)
     }
   }
 
@@ -163,7 +165,7 @@ class FactorBash (Dir wd, Bool subcommand_output = false) < lib::withdirectory::
       define String lead = "==== "
       bo_target.lock
 
-      const make_targets = BuildSh::generate_make_targets()
+      const make_targets = lib::shell_words::BuildSh.generate_make_targets
       const File default_boot_image_file = make_targets{:boot_image}
 
       # try the local one with our id
@@ -180,7 +182,7 @@ class FactorBash (Dir wd, Bool subcommand_output = false) < lib::withdirectory::
       if (! run_boot_image() ) {
         say "[WARN]\t#{__METHOD_NAME__}: First pass not OK, trying again"
 
-        const updated = BuildSh::update_boot_image()
+        const updated = lib::shell_words::BuildSh.update_boot_image
 
         die "[FATAL] #{__METHOD_NAME__}: Failed to update, can't recover" \
           if (!updated)

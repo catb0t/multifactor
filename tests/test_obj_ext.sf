@@ -57,4 +57,9 @@ include lib::frext
     Hash( :old_key => :1 ).template_transform( Hash( :old_key => Number, :new_key => Array ) ),
     Hash( :old_key => 1, :new_key => [] )
   )
+
+  assert_eq(
+    Hash( 1 => 2, 3 => 4 ) & Set(:3),
+    Hash( 3 => 4 )
+  )
 }

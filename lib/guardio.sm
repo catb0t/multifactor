@@ -127,12 +127,19 @@ module GuardIO {
       die "Couldn't write #{contents.len} bytes to #{tmp}: #{$!}" if (! res)
       tmp_fh.close
       Atomic::_finalise_temp_w(name, tmp)
-      return nil
+      nil
     }
   }
 
   subset FsObj < File, Dir
-  # import guardio::SLog
+
+  define Hash TEMPLATE_SETUP_GLOBLOCKER = :(
+    :uuid => String,
+    :remove_old_lock => Bool,
+    :lock_ext => :( :type => String, :default => '.lock_ext' ), # '
+    :locked_fods => :( :type => Array, :subtype => :( :element_subset => FsObj ) ),
+    :verbose => Bool,
+  )
 
   class GlobLocker {
     has Set _locked_fods
@@ -144,14 +151,8 @@ module GuardIO {
     -> locked_fods { self._locked_fods }
     -> locked_fods (lf) { self._locked_fods = Set(lf...); self }
 
-    method setup (Hash g) { # /* iterable<Glob> */ locked_fods, Bool verbose = false) {
-      g.template_transform( :(
-        :uuid => String,
-        :remove_old_lock => Bool,
-        :lock_ext => :( :type => String, :default => '.lock_ext' ) ,
-        :locked_fods => Array,
-        :verbose => Bool,
-      ) ).rescope{
+    method setup (Hash g) {
+      g.template_transform( GuardIO::TEMPLATE_SETUP_GLOBLOCKER ).rescope{
         self.log = SLog(is_verbose: .{:verbose})
         self.locked_fods( .{:locked_fods}.map{ .abs.realpath } )
         self.remove_old_lock = .{:remove_old_lock}
@@ -183,7 +184,7 @@ module GuardIO {
       const lock_file = self._glue_absolute(target)
 
       const Str contents = Atomic::aread(lock_file).chomp
-      say "#{contents}"
+      # say "#{contents}"
       die "[ERROR]\t#{MN}: empty lockfile for target '#{target}'; not safe to continue" \
         if (! contents)
 

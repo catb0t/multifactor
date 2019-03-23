@@ -20,7 +20,20 @@ include lib::combi
 
 module FRExt {
 
-  subset ArrStr < Array, String { .len }
+  subset NonEmptyStr < String { .len }
+  subset NonEmptyArr < Array { .len }
+  subset NonEmptyArrStr < NonEmptyArr, NonEmptyStr
+
+  define Hash TEMPLATE_SPEC_HAS_OVERLOAD = :(
+    :args => Array,
+    :callers => :( :type => Array, :subtype => Hash( :element_subset => NonEmptyStr ), :required => true ),
+    :name => :( :type => String, :subtype => Hash( :subset => NonEmptyStr ) :required => true ),
+
+    :give_return => Bool,
+    :clone_call => Bool,
+    :give_err_info => :( :type => Bool, :default => !__OPTIMIZED__ ),
+    :debug => Bool,
+  )
 
   module TypeUtils {
     func is_serializable (Object obj) {
@@ -44,7 +57,7 @@ module FRExt {
       }
     }
 
-    func object_hash_ref (callers < FRExt::ArrStr, Object obj, String field_name) {
+    func object_hash_ref (callers < FRExt::NonEmptyArrStr, Object obj, String field_name) {
       try {
         # say "#{callers.last}: \t\tREF PROPERTY #{obj.class} #{field_name}"
         \(obj{field_name})
@@ -77,14 +90,7 @@ module FRExt {
 
     # test if it can be called with the specific number and type of arguments
     method has_overload (Hash overload_spec) -> Hash {
-      overload_spec.template_transform( :(
-        :args => Array,
-        :callers => Array, # :required => true
-        :name => String,
-        :give_return => Bool,
-        :clone_call => Bool,
-        :debug => Bool,
-      ) ).rescope{
+      overload_spec.template_transform( TEMPLATE_SPEC_HAS_OVERLOAD ).rescope{
           |spec|
         # say "#{spec}"
         die 'invalid has_overload spec: \'callers\' must be a non-empty array of non-empty strings' \
@@ -110,26 +116,24 @@ module FRExt {
 
         } catch {
             |_e, msg|
-          Combi::rescope( lib::msg_classes::classify( msg) )({
-              |type, fields|
-            if (spec{:debug}) {
-              say("\t\t\t"+'invocation failed! reason: ' + type + ' => ' +
-                fields.grep_kv{ .!= :block_tried_invoke }
-              )
-            }
+          (!spec{:give_err_info} ? :(state => false)
+            : Combi::rescope( lib::msg_classes::classify( msg) )({
+                |type, fields|
+              if (spec{:debug}) {
+                say("\t\t\t"+'invocation failed! reason: ' + type + ' => ' +
+                  fields.grep_kv{ .!= :block_tried_invoke }
+                )
+              }
 
-            :(
-              :state => false,
-              :why => type,
-              :details => fields
-            )
-          })
+              :( :state => false, :why => type, :details => fields )
+            })
+          )
         }
       }
     }
 
     # declared, exists, can be called
-    method has_public_concrete_method (callers < ArrStr, String name) {
+    method has_public_concrete_method (callers < NonEmptyArrStr, String name) {
       self.cleave(
         { .respond_to(name) },
         { .declares_method(name) },
@@ -137,7 +141,7 @@ module FRExt {
             :callers => [@|callers, __METHOD_NAME__],
             :name => name,
             :clone_call => true,
-            # :catch_msg_ref => \var String msg
+            :give_err_info => true
           ) ).rescope{
             .{:state} || (MsgTypes::METHOD_EXISTS.contains( .{:why} ))
           }
@@ -145,15 +149,16 @@ module FRExt {
       ).all
     }
 
-    method has_public_concrete_overload (callers < ArrStr, Str name, *args) {
+    method has_public_concrete_overload (callers < NonEmptyArrStr, Str name, *args) {
       self.cleave(
         { .respond_to(name) },
         { .declares_method(name) },
         { .has_overload( Hash(
             :callers => [@|callers, __METHOD_NAME__],
             :name => name,
+            :args => args,
             :clone_call => true,
-            :args => args
+            :give_err_info => true
           ) ).rescope{
             .{:state} || (MsgTypes::OVERLOAD_EXISTS.contains( .{:why} ) )
           }
@@ -162,15 +167,15 @@ module FRExt {
     }
 
     # TODO: use hash as arg / return val, and allow getting the value etc (prevent replaying as much as possible)
-    method is_property (callers < ArrStr, Str name, Object type_example_arg) -> Bool {
+    method is_property (callers < NonEmptyArrStr, Str name, Object type_example_arg) -> Bool {
       # self-respecting explicitly declared accessors are typed, and not varargs
       # field accessors generated with "has X" are untyped varargs
       self.has_overload( Hash(
           :callers => [@|callers, __METHOD_NAME__],
           :name => name,
-          :clone_call => true,
           :args => [type_example_arg, :extra_garbage_arg],
-          # :debug => true
+          :clone_call => true,
+          :give_err_info => true
       ) ).rescope{
         # say "is_property: #{self.class}::#{name} :: #{.{:state}}"
         .{:state} || ( ! MsgTypes::NOT_PROPERTY.exists( .{:why} ) )
@@ -188,6 +193,7 @@ module FRExt {
     method grep_map_methods (Block g, Block m) {
       self.grep_methods(g).map_kv(m)
     }
+    # propbably possible to develop a more efficient algorithm for this
     method grep_sorted_map_methods (Block g, Block s, Block m) {
       self.grep_sorted_methods(g, s).map{ m.run( .key, .value ) }
     }
@@ -230,7 +236,15 @@ module FRExt {
     }
   }
 
+  class Set { -> - (Hash other) { other.select{ .~~ (other.keys - self) } } }
+
   class Hash {
+    -> & (Set other) { self.select{ .~~ (self.keys & other) } }
+    -> | (Set other) { self.select{ .~~ (self.keys | other) } }
+    -> + (Set other) { self.select{ .~~ (self.keys + other) } }
+    -> - (Set other) { self.select{ .~~ (self.keys - other) } }
+    -> ^ (Set other) { self.select{ .~~ (self.keys ^ other) } }
+
     # inverse of + / merge: only update keys that are already truthy in the LHS
     method clobber_existing_by (other) -> Hash {
       self.map_kv{
