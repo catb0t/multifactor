@@ -76,6 +76,7 @@ module MultiFactor {
   import providers::builtobj::DirSum
   import providers::builtobj::SrcSums
   import providers::builtobj::BlobSums
+  import providers::builtobj::TimeSpec
   import providers::builtobj::BuiltObj
 
   include Factor
@@ -370,7 +371,7 @@ module MultiFactor {
       self.log.trc(__FILE__, __LINE__, MN, 'no match in db!')
       # interpret the current_status keys as property (setter) names in BuiltObj
       # this call does not set all properties, only those listed in status_properties
-      current_status.dclone.unlock.id(self.uuid).time_created(Time.now).cleave(
+      current_status.dclone.unlock.id(self.uuid).timespec( TimeSpec().created(Time.now) ).cleave(
         { |n| self.compile_vm_lib(n) },
         { |n| self.compile_image(n)  },
         { |n| n.blob_sums( self._make_disk_blob_sums(n, [:vm, :lib, :boot]) ) },
