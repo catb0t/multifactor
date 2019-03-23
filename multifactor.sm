@@ -181,6 +181,10 @@ module MultiFactor {
       self.known_actions.contains(self.action) \
         || die "[FATAL] #{__FILE__, __LINE__}: init_steps_mfruntime: don\'t know action '#{self.action}' [--action | -a]"
 
+      const cs = (Factor::CHECKSUM_WITH \\ :sha256)
+      self.sum_src_algo(cs)
+      self.sum_blob_algo(cs)
+
       # initialise helper objects
       self.log = GuardIO::SLog(
         is_trace: ( [:trace, :verbose, 'dry-run'].any{ self.options(){_} } ),
@@ -213,10 +217,6 @@ module MultiFactor {
         :locked_fods => [ self.db_man.db_name, self.fbash.wd ],
         :verbose => self.options(){:verbose}
       ) )
-
-      const cs = (Factor::CHECKSUM_WITH \\ :sha256)
-      self.sum_src_algo(cs)
-      self.sum_blob_algo(cs)
 
       self.log.trc(__FILE__, __LINE__, :init_steps_10_mfruntime, "finished configuration") #, wd now: '#{self.db_dir}'")
     } ]

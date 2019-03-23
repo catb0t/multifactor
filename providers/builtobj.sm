@@ -47,17 +47,26 @@ class TimeSpec < SeriallyAccessible {
   has Hash serial_properties = [:created, :modified, :accessed, :tombstoned].map { ( (_) => Num ) }.to_h
 }
 
-class BuiltObj << Lockable, SeriallyAccessible {
-  has Array _blob_targets = [:vm, :lib, :image, :boot]
 
-  has Hash _format_defaults = Hash(
-    :vm => Hash( :pfx_platform => '', :pfx_custom => :fvm_, :ext => BuildSh.platform_vm_ext ),
-    :image => Hash( :pfx_platform => '', :pfx_custom => :fvm_, :ext => '.image' ),
-    :lib => Hash( :pfx_platform => BuildSh.platform_lib_name[0], :pfx_custom => :fvm_, :ext => BuildSh.platform_lib_name[1] ),
-    :boot => Hash( :pfx_platform => 'boot.', :pfx_custom => :fvm_, :ext => '.image' )
+module _BuiltObjConst {
+  import lib::shell_words::BuildSh
+
+  import providers::builtobj::DirSum
+  import providers::builtobj::SrcSums
+  import providers::builtobj::BlobSums
+  import providers::builtobj::TimeSpec
+  import providers::builtobj::VirtualBase64Blob
+
+  define Array BLOB_TARGETS = [:vm, :lib, :image, :boot]
+
+  define Hash FORMAT_DEFAULTS = Hash(
+    :vm => Hash( :pfx_platform => { '' }, :pfx_custom => { :fvm_ }, :ext => { BuildSh.platform_vm_ext } ),
+    :image => Hash( :pfx_platform => { '' }, :pfx_custom => { :fvm_ }, :ext => { '.image' } ),
+    :lib => Hash( :pfx_platform => { BuildSh.platform_lib_name[0] }, :pfx_custom => { :fvm_ }, :ext => { BuildSh.platform_lib_name[1] } ),
+    :boot => Hash( :pfx_platform => { 'boot.' }, :pfx_custom => { :fvm_ }, :ext => { '.image' } ) # '
   )
 
-  has Hash serial_properties = Hash(
+  define Hash SPROPS = Hash(
     :id => Str,
     :factor_version => Str,
     :is_git => Bool,
@@ -81,44 +90,37 @@ class BuiltObj << Lockable, SeriallyAccessible {
     :timespec => TimeSpec,
   )
 
-  # going to generate accessors instead of naming them
-  # note the lack of def_method in the block; this simply arbitrarily
-  #   extends the serial_properties hash to make new accessors
-  #
-  # all same length and support platform-prefixes
-  # vm_format, etc
-  has Array serial_property_generator_builtobj = [ {
-    ._blob_targets.map{
+  define Array SPROP_GEN = [ {
+    _BuiltObjConst::BLOB_TARGETS.map{
         |target|
       const tf = (target + :_format)
-      ( (tf) => [Hash, ._format_defaults(){target}, Hash(
+      ( (tf) => [Hash, _BuiltObjConst::FORMAT_DEFAULTS{target}, Hash(
         :get => {
           # this underscore is important
-          (*TypeUtils::object_hash_ref([:custom_getter], _, :_ + tf ) \\ ._format_defaults(){target})
+          # note the associativity of * dereference here
+          (*TypeUtils::object_hash_ref([:custom_getter], _, :_ + tf )) \\ _BuiltObjConst::FORMAT_DEFAULTS{target}
         }
       ) ] )
     }.to_h
   } ] # { Hash(:junk => Number) }
+}
 
+class BuiltObj << Lockable, SeriallyAccessible {
+  has Hash serial_properties = _BuiltObjConst::SPROPS
+  has Array serial_property_generator_builtobj = _BuiltObjConst::SPROP_GEN
   # these are not accessors, just methods that glue accessed values together
   # create boot_fullname etc
   has Array init_steps_10_builtobj = [ {
-    ._blob_targets.each{
+    _BuiltObjConst::BLOB_TARGETS.each{
         |name|
       func gen (self) -> File {
         const fmt = self.method(name + :_format)()
-        File( String( fmt{:pfx_platform, :pfx_custom} ) + self.id + fmt{:ext} )
+        # there is a cleaner way to write this but it would be much slower i imagine
+        # using Combi::binop('+') and combinate or apply
+        File( String( [fmt{:pfx_platform, :pfx_custom}].map{ .run.to_s }... ) + self.id + fmt{:ext}.run )
       }
       # NOTE: create NAME_fullname that calls .format
       __CLASS__.def_method(name + :_fullname, gen)
     }
   } ]
-
-  # next step: code generation for these methods too, by a special _extra_init_blocks
-  #   property that get invoked at the end of init() to generate these methods
-  # want a version of insert that doesn't change its object unless ! is used
-  # -> vm_fullname ()    -> File { File( "#{self.vm_format[0, 1]}#{self.id}#{self.vm_format[2]}" ) }
-  # -> image_fullname () -> File { File( "#{self.image_format[0, 1]}#{self.id}#{self.image_format[2]}" ) }
-  # -> lib_fullname ()   -> File { File( "#{self.lib_format[0, 1]}#{self.id}#{self.lib_format[2]}" ) }
-  # -> boot_fullname ()  -> File { File( "#{self.boot_format[0, 1]}#{self.id}#{self.boot_format[2]}" ) }
 }

@@ -245,6 +245,17 @@ module FRExt {
     -> - (Set other) { self.select{ .~~ (self.keys - other) } }
     -> ^ (Set other) { self.select{ .~~ (self.keys ^ other) } }
 
+    method run_keys (*ks) {
+      self & ks.to_set -> map_kv{ |k, _| ((k) => .run(k)) }
+    }
+
+    method ordered_run_keys (*ks) {
+      self & ks.to_set -> pairs.sort{
+          |l, r|
+        ks.index(l[0]) <=> ks.index(r[0]) # sort based on their indices in ks
+      }.map{ .[1].run(.[0]) }
+    }
+
     # inverse of + / merge: only update keys that are already truthy in the LHS
     method clobber_existing_by (other) -> Hash {
       self.map_kv{

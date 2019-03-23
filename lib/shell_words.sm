@@ -234,19 +234,22 @@ class BuildSh {
       }
     ).last \
       && :factor.cleave(
-        [:vm, :lib].map{
+        Set(:vm, :lib).map{
             |name|
           { |fc|
             # const f = File( factor.join( bo_target.method(name+:_format)()[0, 2] ) )
             # say "file #{f} #{bo_target.method(name+:_fullname)()}"
-            say "vfmt: #{bo_target.vm_format}"
-            const from = fc.join( bo_target.method(name+:_format)()[0, 2] )
-            say "vfn: #{bo_target.vm_fullname}"
-            const to = bo_target.method(name+:_fullname)()
-            say "from: #{from}; to: #{to}"
-            const r = (File( from ).move( to ))
-            say "st: #{r}"
-            r
+            # const format =
+            # say "#{name} format: #{format}"
+            # const full =
+            # say "#{name} full: #{full}"
+            # ...
+            const from = bo_target.method(name + :_format)().ordered_run_keys(:pfx_platform, :ext).join(fc)
+            const to = bo_target.method(name + :_fullname)()
+            # say "from: #{from}; to: #{to}"
+            File( from ).move( to )
+            # say "st: #{r}"
+            # r
           }
         }...
       ).all

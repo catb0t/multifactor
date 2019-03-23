@@ -22,3 +22,5 @@ assert_eq(new_bo.serialize, h)
 var bo2 = BuiltObj().id(:1234) # .vm_format([ '', :fvm_, BuildSh.platform_vm_ext ])
 assert_eq("fvm_1234#{BuildSh.platform_vm_ext}", bo2.vm_fullname)
 say "vm fullname: #{bo2.vm_fullname}"
+
+assert_eq(:factor, bo2.vm_format.ordered_run_keys(:pfx_platform, :ext).join( :factor ) )
