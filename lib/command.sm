@@ -1,3 +1,5 @@
+include lib::frext
+
 module Command {
   define Regex RETVAL_REGEX = /__RETURNED=(\d+)/
 

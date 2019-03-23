@@ -1,0 +1,4 @@
+include lib::command
+# import lib::Command
+
+Command::make( :asdf, output: true )

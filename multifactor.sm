@@ -187,13 +187,14 @@ module MultiFactor {
         is_verbose: ( [:verbose, 'dry-run'].any{ self.options(){_} } ),
         logger: { |*a| Factor::say_stderr( a... ) }
       )
+
       self.fbash = providers::factorbash::FactorBash(
         Dir( self.options(){'factor-dir'} || Factor::FACTOR_DIR ),
         self.sum_src_algo,
         self.basis_dev,
-        subcommand_output: !( self.options(){'quiet-subcom'} || Factor::QUIET_PIPE )
+        subcommand_output: ((!self.options(){'quiet-subcom'} \\ Factor::QUIET_PIPE) || (self.options(){'no-quiet-subcom'} \\ (!Factor::QUIET_PIPE)))
       )
-
+      # ...
       self.db_man = providers::cachedb::CacheDB().setup( :(
           :dir =>              self.options(){'db-dir'},
           :filename_base =>    self.options(){'db-name'},
@@ -225,7 +226,7 @@ module MultiFactor {
           |type, fields|
         say "#{__CLASS_NAME__}: destructor called!\n\t\t#{type} :: #{fields.grep_kv{ .!= :block_tried_invoke }}\n"
         [self.db_man, self.locker].map{ .destroy }
-        (type)
+        type
       })
     }
 
@@ -261,7 +262,7 @@ module MultiFactor {
 
     -> _compile_vm_lib (BuiltObj bo) {
       if ( ! self.fbash.build_factor(bo) ) {
-        self.locker.cleanup
+        # self.locker.cleanup
         die "vm compilation failed!"
       }
       self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, "vm/lib compiled")
@@ -287,7 +288,7 @@ module MultiFactor {
 
     -> compile_image (BuiltObj bo) -> Bool {
       if (! self.fbash.build_image(bo) ) {
-        self.locker.cleanup
+        # self.locker.cleanup
         die "image compilation failed!"
       }
       self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, "image compiled")
@@ -380,7 +381,7 @@ module MultiFactor {
         { self.log.trc(__FILE__, __LINE__, MN, 'writing the new BuiltObj to disk db because it changed') },
         { self.db_man.insert(_) },
         { self.log.trc(__FILE__, __LINE__, MN, "ok, running factor!") },
-        { self.locker.cleanup },
+        { self.destroy },
         { self._detach_factor_thread(_.vm_fullname) }
       )
     }
@@ -417,11 +418,11 @@ module MultiFactor {
       given (self.action) {
         when ('src-sums') {
           self.fbash.say_src_sums
-          return self.locker.cleanup
+          return self.destroy
         }
         when ('env-info') {
           self.fbash.say_env_info
-          return self.locker.cleanup
+          return self.destroy
         }
       }
 
@@ -497,7 +498,7 @@ module MultiFactor {
         self.log.trc(__FILE__, __LINE__, MN, 'blob sums still mismatched!')
         if (is_restart) {
           self.log.trc(__FILE__, __LINE__, MN, "i give up (already in a restart)")
-          return self.locker.cleanup
+          return self.destroy
         }
         self.log.trc(__FILE__, __LINE__, MN, "starting over...")
         self._tombstone_entry(match_bo, tracked_targets)
@@ -575,16 +576,16 @@ func main {
     .option("info", :i, doc: "Just show configuration information") \
     .option("dry-run", :n, doc: "Change no disk files") \
     .option("from-scratch", :g, doc: "ignore existing DB (debug)") \
-    .option("sums", :s,  negate: "Always":"Never", doc: "use checksums") \
+    .option("sums", :s,  negate: (:Always ¦ :Never), doc: "use checksums") \
 
-    .option("db-name", :D, param: "name":".multifactor.db", doc: "Custom database filename") \
-    .option("db-dir", :d, param: "dir":".", doc: "Directory containing database") \
-    .option("factor-dir", :w, param: "dir":".", doc: "Path to Factor working directory") \
+    .option("db-name", :D, param: (:name ¦ ".multifactor.db"), doc: "Custom database filename") \
+    .option("db-dir", :d, param: (:dir ¦ "."), doc: "Directory containing database") \
+    .option("factor-dir", :w, param: (:dir ¦ "."), doc: "Path to Factor working directory") \
     .option("remove-old-lock", :R, doc: "Blindly remove any lock files (unsafe!)") \
-    .option("quiet-subcom", :q, negate: "Never":"Always", doc: "show subcommand outputs") \
+    .option("quiet-subcom", :q, negate: (:Never ¦ :Always), doc: "show subcommand outputs") \
     # TODO: argparse can accept a list of allowed values
     .option(
-      "action", "a", param: "name":"run-factor",
+      "action", "a", param: (:name ¦ "run-factor"),
       doc: "Perform this action\nactions: run-factor, src-sums, env-info"
     ) \
     .option("basis-dev", :b, doc: "Ignore changes in basis/\n(basis development mode)") \

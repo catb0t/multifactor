@@ -20,6 +20,9 @@ import lib::ABCs::SeriallyEquatable
 import lib::ABCs::SeriallyAccessible
 import lib::ABCs::Lockable
 
+include lib::shell_words
+import lib::shell_words::BuildSh
+
 class DirSum (Str algo = '', Str names = '', Str contents = '') < SeriallyEquatable {
   has Hash serial_properties = [:algo, :names, :contents].map{ ( (_) => Str ) }.to_h
 }
@@ -45,8 +48,15 @@ class TimeSpec < SeriallyAccessible {
 }
 
 class BuiltObj << Lockable, SeriallyAccessible {
-  # has Array init_steps_serial_propgen = [...]
   has Array _blob_targets = [:vm, :lib, :image, :boot]
+
+  has Hash _format_defaults = Hash(
+    :vm => Hash( :pfx_platform => '', :pfx_custom => :fvm_, :ext => BuildSh.platform_vm_ext ),
+    :image => Hash( :pfx_platform => '', :pfx_custom => :fvm_, :ext => '.image' ),
+    :lib => Hash( :pfx_platform => BuildSh.platform_lib_name[0], :pfx_custom => :fvm_, :ext => BuildSh.platform_lib_name[1] ),
+    :boot => Hash( :pfx_platform => 'boot.', :pfx_custom => :fvm_, :ext => '.image' )
+  )
+
   has Hash serial_properties = Hash(
     :id => Str,
     :factor_version => Str,
@@ -79,19 +89,27 @@ class BuiltObj << Lockable, SeriallyAccessible {
   # vm_format, etc
   has Array serial_property_generator_builtobj = [ {
     ._blob_targets.map{
-      ( (_ + :_format) => Array)
+        |target|
+      const tf = (target + :_format)
+      ( (tf) => [Hash, ._format_defaults(){target}, Hash(
+        :get => {
+          # this underscore is important
+          (*TypeUtils::object_hash_ref([:custom_getter], _, :_ + tf ) \\ ._format_defaults(){target})
+        }
+      ) ] )
     }.to_h
-  }, { Hash(:junk => Number) } ]
+  } ] # { Hash(:junk => Number) }
 
   # these are not accessors, just methods that glue accessed values together
   # create boot_fullname etc
   has Array init_steps_10_builtobj = [ {
     ._blob_targets.each{
         |name|
-      const name_format = name+:_format
       func gen (self) -> File {
-        File( String( self.method(name_format)()[0, 1] ) + self.id + self.method(name_format)()[2] )
+        const fmt = self.method(name + :_format)()
+        File( String( fmt{:pfx_platform, :pfx_custom} ) + self.id + fmt{:ext} )
       }
+      # NOTE: create NAME_fullname that calls .format
       __CLASS__.def_method(name + :_fullname, gen)
     }
   } ]

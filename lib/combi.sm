@@ -127,7 +127,7 @@ module Combi {
   # how to deal with multiple return values, without assigning a local?
   # use rescope_n! or apply, maybe
   func with_finalizer (obj, name, *final_args) {
-    say "got here"
+    # say "got here"
     func _finalizer (block, *bargs) -> (Bool, Object) {
       try {
         (true, block.run(obj, @|bargs))
