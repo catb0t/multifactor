@@ -15,46 +15,59 @@
 ##    You should have received a copy of the GNU General Public License
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+include sidefext::object
+include sidefext::iterable
+include sidefext::checked
+include sidefext::construct
+
 include lib::frext
 
 module SProcess {
+  include sidefext::metatype
+  include sidefext::construct
+  import sidefext::construct::maybe_init
+
   define Hash WANT_ALL_VALS = :(:typename => true, :default_val => true, :custom_blocks => true)
-  define Hash WANT_EXCLUDE_BLOCKS = :(typename => true, :default_val => true)
+  define Hash WANT_EXCLUDE_BLOCKS = :(:typename => true, :default_val => true)
   define Block CUSTOM_BLOCKS_DEFAULT = { Hash() }
 
-  func process_serial_prop_rhs (callers < FRExt::NonEmptyArrStr, String name, Object obj, Hash want_vals) -> Hash {
+  # SIDEF BUG: ExtantArrStr is not in scope when optimizing
+  func process_serial_prop_rhs (callers < sidefext::metatype::ExtantArrStr, String name, Object obj, Hash want_vals) -> Hash {
     const FN = __FUNC_NAME__
-
+    -> call_blocks_kv (_) { .map_kv{ |k, _| ((k) => .run) } }
     const is_fqa = obj.is_an_object(Array)
 
-    want_vals.rescope{
-      # maybe the following can be vectorised?
-      if ( !is_fqa ) {
-        obj.is_typename || die ("RHS in serial property declaration '#{name}' isn't a typename: '#{obj}' (ref #{obj.ref}) (perhaps you accidentally initialised the object?)\n\t#{__FUNC_NAME__}: called from: #{callers.reverse.join(' < ')}")
+    # maybe the following can be vectorised?
+    if ( !is_fqa ) {
+      obj.is_typename || die ("RHS in serial property declaration '#{name}' isn't a typename: '#{obj}' (ref #{obj.ref}) (perhaps you accidentally initialised the object?)\n\t#{__FUNC_NAME__}: called from: #{callers.reverse.join(' < ')}")
+      Hash(
+        :typename => { obj },
+        :default_val => { maybe_init( obj ) },
+        :custom_blocks => SProcess::CUSTOM_BLOCKS_DEFAULT
+      )
+    } else {
+      die (
+        "#{__FILE__}:#{__LINE__}: #{FN}: malformed array in RHS when declaring field '#{name}': must have positive length (1, 2 or 3)"
+      ) if ( is_fqa && !obj )
 
-        .clobber_existing_by( Hash(
-          :typename => { obj },
-          :default_val => { TypeUtils::maybe_call_custom_init( obj ) },
-          :custom_blocks => SProcess::CUSTOM_BLOCKS_DEFAULT
-        ) )
+      if (obj.len == 1) {
+        __FUNC__([@|callers, :V_recursing] name, obj[0], want_vals )
       } else {
-        die (
-          "#{__FILE__}:#{__LINE__}: #{FN}: malformed array in RHS when declaring field '#{name}': must have positive length (1, 2 or 3)"
-        ) if ( is_fqa && !obj )
-
-        if (obj.len == 1) {
-          __FUNC__([@|callers, :V_recursing] name, obj[0], _ )
-        } else {
-          defined(obj[2]) && ( obj[2].is_an_object(Hash) \
-            || die "#{__FILE__}:#{__LINE__}: #{FN}: malformed custom get/set blocks in RHS when declaring field '#{name}': RHS item \#3: want type 'Hash'; got '#{obj[2].ref}'"
-          )
-
-          .clobber_existing_by( Hash(
-            :typename => { obj[0] },
-            :default_val => { obj[1] \\ TypeUtils::maybe_call_custom_init( obj[0] ) },
-            :custom_blocks => { obj[2] \\ Hash() }
-          ) )
-        }
+        defined(obj[2]) && ( obj[2].is_an_object(Hash) \
+          || die "#{__FILE__}:#{__LINE__}: #{FN}: malformed custom get/set blocks in RHS when declaring field '#{name}': RHS item \#3: want type 'Hash'; got '#{obj[2].ref}'"
+        )
+        Hash(
+          :typename => { obj[0] },
+          :default_val => { obj[1] \\ maybe_init( obj[0] ) },
+          :custom_blocks => { obj[2] \\ Hash() }
+        )
+      }
+    }.rescope{
+      if ( want_vals.refaddr ~~ [WANT_ALL_VALS.refaddr, WANT_EXCLUDE_BLOCKS.refaddr] ) {
+        .remove(:custom_blocks) if (WANT_EXCLUDE_BLOCKS.refaddr == want_vals.refaddr)
+        call_blocks_kv( _ )
+      } else {
+        want_vals.clobber_existing_by( _ )
       }
     }
   }
@@ -63,9 +76,33 @@ module SProcess {
 class Serializable {
   has String _k_svalue = :_serial_value
 
+  -> is_serializable (*_) { true }
+
   -> _grep_serial_properties (Set incl, Set excl) is cached -> Hash {
+    const Bool uincl = Bool(incl)
+    const Bool uexcl = Bool(excl)
     self.grep_methods{ |n| n ~~ /^serial_properties/ } \
-      .values.map{ const props = _(); ( incl ? (props & incl) : props ) - excl }.merge_reduce \\ Hash()
+      .values \
+      .map(
+        # we could compute this before calling map, but maybe
+        #   incl and excl will have better cache efficiency / latency this way
+        #   the difference will be infintesimal probably
+
+        # don't branch on every map iteration, branch once at the start
+        if (! (uexcl || uincl)) {
+          { _() }
+        } elsif (uexcl && !uincl) {
+          { hashset::hash_diff_set( _(), excl ) }
+        } elsif (!uexcl && uincl) {
+          { hashset::hash_intersect_set( _(), incl) }
+        } else  { # (uincl && uexcl)
+          if (incl.len > excl.len) {
+            { hashset::hash_diff_set( hashset::hash_intersect_set( _(), incl ), excl ) }
+          } else {
+            { hashset::hash_intersect_set( hashset::hash_diff_set( _(), excl), incl) }
+          }
+        }
+      ).merge_reduce \\ Hash()
   }
 
   -> _do_serial (Block d, incl = Set(), excl = Set()) {
@@ -74,7 +111,7 @@ class Serializable {
 
   -> _is_serialized_obj (Object obj, optimized = false) {
     if (__OPTIMIZED__ || optimized) {
-      ( obj.is_an_object(Hash) && (obj{self._k_svalue} \\ Regex).is_an_object(Hash) )
+      ( (obj ~~ Hash) && obj.is_object && (obj{self._k_svalue} ~~ Hash) && obj{self._k_svalue}.is_object)
     } else {
       ( obj.is_an_object(Hash) && obj.keys==[self._k_svalue] && obj{self._k_svalue}.is_an_object(Hash) )
     }
@@ -85,7 +122,7 @@ class Serializable {
 
     (if ( self.is_property([@|callers, MN, :V_is_prop_test], field_name, props{:default_val}) ) {
       # say "\t#{field_name} is a property"
-      *TypeUtils::object_hash_ref([@|callers, MN, :V_is_prop], self, field_name)
+      *(sidefext::checked::checkedref([@|callers, MN, :V_is_prop], self, field_name, { die callers } ).ref)
     } else {
       self.has_overload( Hash(
         :callers => [@|callers, MN, :V_else_branch],
@@ -118,7 +155,7 @@ class Serializable {
         )
       ).rescope{
         ( (field_name) => (
-          TypeUtils::is_serializable(_)
+          .is_an_object(Serializable)
             ? Hash( (self._k_svalue) => .serialize( incl: incl, excl: excl, _recursing: true, callers: [@|callers, MN, RC] ) )
             : _
         ) )
@@ -134,7 +171,7 @@ class Serializable {
     (callers, props{:typename}, if (!self._is_serialized_obj(entry)) {
       entry
     } else {
-      TypeUtils::maybe_call_custom_init( props{:default_val} ) \
+      sidefext::construct::maybe_init( props{:default_val} ) \
         .unserialize( entry{self._k_svalue}, @|recur_kwargs, callers: [@|callers, __METHOD_NAME__, :V_else_branch] )
     } \\ props{:default_val}) # this defined-or technically isn't necessary but why isn't it?
   }
@@ -142,7 +179,7 @@ class Serializable {
   -> _find_setter (Array callers, String field_name, Object new_val) -> Bool {
     const MN = __METHOD_NAME__
     if ( self.is_property([@|callers, MN, :V_is_prop_test], field_name, new_val) ) {
-      *TypeUtils::object_hash_ref([@|callers, MN, :V_is_prop], self, field_name) = new_val
+      *(sidefext::checked::checkedref([@|callers, MN, :V_is_prop], self, field_name, { die callers }).ref) = new_val
       true
     } else {
       self.has_overload( Hash(
@@ -197,7 +234,7 @@ class SeriallyEquatable < Serializable {
        |obj| self._do_serial(incl: incl, excl: excl, { obj.method(_)() } )
      }«==»
 
-     # TODO: use object_hash_ref here
+     # TODO: use object_checkedref here
     } else { self._do_serial(incl: incl, excl: excl, { other{_} == self{_} } ).all }
   }
   method == (o) { self._serial_eq(o) }
@@ -213,8 +250,8 @@ func _call_methods_blocks_by (Object obj, Regex name_match) {
         |l, r|
       # if (!defined(l) || !defined(r)) { return 0 }
       define Regex NUMERIC = /^(\d+)/
-      Combi::binop(
-        [l, r].map{ ( .key =~ ( name_match + /(?<unique_part>\d+.*)/ ) ).named_captures(){:unique_part} } \
+      Combi::binop( # use regex.union here
+        [l, r].map{ ( .key =~ ( name_match | /(?<unique_part>\d+.*)/ ) ).named_captures(){:unique_part} } \
         .rescope{
           .all{ _ ~~ NUMERIC }
             ? .map{ (_ =~ NUMERIC )[0].to_n }
@@ -271,7 +308,7 @@ class SeriallyAccessible << ModularInit, SeriallyEquatable {
         # self{:_ + field_name} = default_val
 
         # need an underscore here
-        *TypeUtils::object_hash_ref([MN, :V_bound_block], self, :_ + field_name) = default_val
+        *(sidefext::checked::checkedref([MN, :V_bound_block], self, :_ + field_name, { die MN }).ref) = default_val
         # say "#{__METHOD_NAME__}: set _#{field_name} to #{self{:_ + field_name}.dump}"
 
         const Block setter_prelude = {
@@ -291,7 +328,7 @@ class SeriallyAccessible << ModularInit, SeriallyEquatable {
           if (custom_getter) {
             custom_getter.run(self)
           } else {
-            *TypeUtils::object_hash_ref([MN, :V_gen_accessor, :V_gen_getter, :V_builtin_getter], self, :_ + field_name)
+            *(sidefext::checked::checkedref([MN, :V_gen_accessor, :V_gen_getter, :V_builtin_getter], self, :_ + field_name, { die "getter #{field_name}" } ).ref)
           }
         }
 
@@ -303,12 +340,13 @@ class SeriallyAccessible << ModularInit, SeriallyEquatable {
             custom_setter.run(self, new_val) \\ self
           } else {
             # say "\tnew value for #{field_name}: #{new_val}"
-            *TypeUtils::object_hash_ref(
+            *(sidefext::checked::checkedref(
               [MN, :V_gen_accessor, :V_gen_setter, :V_builtin_setter],
               self,
               # note the underscore
-              :_ + field_name
-            ) = new_val
+              :_ + field_name,
+              { die "setter #{field_name}" }
+            ).ref) = new_val
             self
             # self{:_ + field_name} = new_val; self
           }

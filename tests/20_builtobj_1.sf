@@ -13,8 +13,10 @@
 #say TimeSpec().unserialize(x).dump==ts.dump
 
 include providers::builtobj
-import providers::builtobj::BuiltObj
+import builtobj::BuiltObj
 var bo = BuiltObj()
+# say bo.dump
+# say bo._grep_serial_properties(Set(), Set())
 assert_eq(bo.blob_algorithm, :sha256)
 say bo.blob_algorithm
 # var v = bo.serialize

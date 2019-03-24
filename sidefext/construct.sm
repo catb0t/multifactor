@@ -1,0 +1,10 @@
+func maybe_init (Object obj) {
+  if ( obj.respond_to(:INIT_METHOD_NAME) ) {
+    obj.method( obj.INIT_METHOD_NAME )()
+  } elsif ( obj.is_typename ) {
+    # invoke raw typenames
+    obj()
+  } else {
+    obj
+  }
+}

@@ -1,0 +1,63 @@
+#! ruby
+
+include sidefext::metatype
+import sidefext::metatype::ExtantArrStr
+
+struct CheckedRef {
+  Bool success,
+  ref,
+
+  String err_type,
+  String err_msg,
+  Array callers
+}
+
+func _hash_ref (callers < ExtantArrStr, Object obj, String field_name) -> CheckedRef {
+  try {
+    CheckedRef( success: true, ref: \(obj{field_name}), err_type: '', err_msg: '', callers: [] )
+  } catch {
+      |type, msg|
+    CheckedRef( success: false, ref: \null, err_type: type, err_msg: msg, callers: callers )
+  }
+}
+
+func checkedref (callers < ExtantArrStr, /* Hash */ h, String name, Block exc_handler) {
+  with ( _hash_ref([@|callers, __FUNC_NAME__], h, name) ) {
+    .success ? _ : exc_handler.run(h, name, _)
+  }
+}
+
+if (__FILE__ == __MAIN__) {
+  const Hash h = Hash( 5 => 6 )
+  const Ref r = _hash_ref([:main], h, :5).ref
+  assert_eq(*r, 6)
+  *r = 10
+  assert_eq(h, Hash(5 => 10))
+
+  assert( *(_hash_ref([:main1], h, :5).ref) = 11 )
+  assert_eq(h, Hash(5 => 11))
+
+  class X {
+    # has not_exists
+    has exists
+  }
+
+  const x = X()
+  const xr = _hash_ref([:main2], x, :exists).ref
+  *xr = :value4
+  assert_eq(x.exists, :value4)
+
+  const CheckedRef xr2 = _hash_ref([:main2], x, :not_exists).ref
+  *xr2 = :new_val
+  assert_eq(x{:not_exists}, :new_val)
+
+  const xr3 = checkedref([:main3], x, :exists, { die "don't call this" }).ref
+  *xr3 = :value5
+  assert_eq(x.exists, :value5)
+
+  const xr5 = checkedref([:main3], x, :not_exists1, { die "don't call this" }).ref
+  *xr5 = :value6
+  assert_eq(x{:not_exists1}, :value6)
+
+  say "*** CheckedRef tests passed!"
+}

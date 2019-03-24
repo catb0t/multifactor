@@ -1,0 +1,37 @@
+class Object {
+  # method form of "with"
+  method rescope (b) { b.run(self) }
+  method cleave (*b) { b.map{ .run(self) } }
+
+  method n_all (*_bx) -> Bool {
+    func _nall (b) {
+      !b
+        ? true
+        : (b.first.run(self) ? __FUNC__(b.last(b.len-1)) : false)
+    }(_bx)
+  }
+
+  method n_any (*_bx) -> Bool {
+    func _nany (b) {
+      !b
+        ? false
+        : (b.first.run(self) ? true : __FUNC__(b.last(b.len-1)) )
+    }(_bx)
+  }
+
+  # ??? method n_find (*bx) -> Block { }
+
+  # internal; doesn't care about overloads
+  /* -> respond_to (String name, *_) -> Bool { self.can(name, _...) } */
+  /* -> can        (String name, *_) -> CODE { UNIVERSAL::can(self, name, _...) } */
+
+  method declares_method (String name) -> Hash {
+    self.grep_methods{ |n, _| n ~~ name }
+  }
+
+  method is_an_object (typename) {
+    self.is_a(typename) && self.is_object
+  }
+
+  -> is_serializable (*_) { false }
+}

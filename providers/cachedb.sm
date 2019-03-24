@@ -15,10 +15,11 @@
 ##    You should have received a copy of the GNU General Public License
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+include sidefext::construct
+
 include lib::guardio
 include lib::withdirectory
 include lib::ABCs
-
 
 module CacheDBIO {
   include Atomic
@@ -39,7 +40,7 @@ module CacheDBIO {
         .map_kv{
             |_, v|
           ((_) =>
-            TypeUtils::maybe_call_custom_init( element_type() ).unserialize(v)
+            *(sidefext::construct::maybe_init( element_type() ).ref) -> unserialize(v)
           )
         }
     } else {

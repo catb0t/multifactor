@@ -1,0 +1,151 @@
+include sidefext::construct
+
+class Array {
+  method all { self.all{ _ } }
+  method merge_reduce { self.reduce{ |l, r| l.merge(r) } }
+}
+
+module hashset {
+
+  func hash_intersect_set (Hash h1, Set s1) -> Hash {
+    h1.linear_selection(s1 & h1.keys)
+  }
+
+  func hash_intersect_hash (Hash h1, Hash h2) -> Hash {
+    h1.linear_selection( h1.keys.to_set & h2.keys )
+  }
+
+  func hash_concat_set (Hash h1, Set s1) -> Hash {
+    h1{s1...} = nil
+    h1
+  }
+
+  func hash_diff_set (Hash h1, Set s1) {
+    h1.linear_selection( h1.keys.to_set - s1 )
+  }
+
+  func hash_diff_hash (Hash h1, Hash h2) {
+    h1.linear_selection( h1.keys.to_set - h2.keys )
+  }
+
+  func hash_union_set (Hash h1, Set s1) {
+    h1.linear_selection( s1 | h1.keys )
+  }
+
+  func hash_union_hash (Hash h1, Hash h2) {
+    h1{h2.keys...} = h2.values
+  }
+
+  func hash_symdiff_set (Hash h1, Set s1) {
+    h1.linear_selection( s1 ^ h1.keys )
+  }
+
+  func hash_symdiff_hash (Hash h1, Hash h2) {
+    h1.linear_selection( h1.keys.to_set ^ h2.keys )
+  }
+
+  func set_diff_hash (Set s1, Hash h1) -> Set {
+    # other.select{ .~~ (other.keys.to_set - self) } ????
+    s1 - h1.keys
+  }
+}
+
+class Hash {
+  # should have better time complexity than grep/select
+  # we don't have to use grep/select since we know exactly which
+  #   keys we want
+  # TODO: allow zip to zip sets
+  # are there faster transformations to zip directly to a hash?
+  -> linear_selection (keys) -> Hash {
+    # [keys.to_a, [ self{keys...} ] ].zip_by{ |_, r| (_, r) }.to_h
+    const h = Hash(); h{keys...} = self{keys...}; h
+    # Hash().rescope{
+    #   .{keys...} = self{keys...}
+    #   _
+    # }
+  }
+
+  method run_keys (*ks) {
+    hashset::hash_intersect_set(self, ks.to_set).map_kv{ |k, _| ((k) => .run(k)) }
+  }
+
+  method ordered_run_keys (*ks) {
+    hashset::hash_intersect_set(self, ks.to_set).pairs.sort{
+        |l, r|
+      ks.index(l[0]) <=> ks.index(r[0]) # sort based on their indices in ks
+    }.map{ .[1].run(.[0]) }
+  }
+
+  method change_extant_keys (Hash spec) {
+    const Hash shared_keys = hashset::hash_intersect_hash(self, spec).keys
+    self{ shared_keys... } = shared_keys.map{
+        |k|
+      # this is v, k because it's more likely you only care about the v
+      spec{k}.run( self{k}, k )
+    }...
+    self
+  }
+
+  # inverse of + / merge: only update keys that are already truthy in the LHS
+  method clobber_existing_by (other) -> Hash {
+    self.map_kv{
+        |k, v|
+      ((k) => if ( v && other.has_key(k) ) {
+        other{k}.run(k, v)
+      } else {
+        v
+      })
+    }
+  }
+
+  method template_transform (Hash spec) -> Hash {
+    # 'String _' is the key; we're not using it for anything yet
+    # should probably call the block with it
+    func _templ_tform_single (Hash one_spec, String _, _v) -> Object {
+      if ( one_spec{:deferred} ) {
+        return one_spec{:deferred}
+      }
+      one_spec.rescope{
+        const Bool type_is_name = .{:type}.is_typename
+        const one_type          = ( type_is_name # the typename, or the first one in an iterable
+                                    ? .{:type}
+                                    : .{:type}[0]
+                                  )
+        const v                 = ( _v  \\ .{:default} \\ (
+                                    .{:val_is_typename}
+                                      ? .{:type}
+                                      : sidefext::construct::maybe_init( one_type() ) )
+                                  )
+        # say "k: '#{k}' _v: '#{_v}' v: '#{v}' itn: '#{Bool(.{:val_is_typename})}'"
+        const need_cast         = ( (! .{:val_is_typename}) && ( type_is_name # only cast when none of the types fit
+                                    ? ( .{:type}        !~ v )
+                                    : ( .{:type}.all{ _ !~ v } )
+                                  ))
+        # TODO: required, subtype, etc
+        (need_cast ? .{:maybe_cast}.run(v) : v).rescope{
+            |v_c|
+          # cast this return value?
+          (.{:conv} ~~ Block)
+            ? .{:conv}.run( v_c )
+            : v_c
+        }
+      }
+    }
+
+    spec.map_kv{
+        |k, spec_v|
+      const self_v = self{k}
+
+      ((k) => given ( spec_v ) {
+        when ( nil ) { self_v }
+        case ( .is_typename ) {
+          sidefext::construct::maybe_init( defined(self_v) ? _( @|self_v ) : _() )
+        }
+        when (Hash) {
+          _templ_tform_single(_, k, self_v)
+        }
+        default { die "don't know that spec value: '#{_}' ('#{self_v}'; key: '#{k}')"}
+      })
+    }
+  }
+}

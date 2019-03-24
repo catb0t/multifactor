@@ -10,7 +10,7 @@ test_sidef () {
     if [[ "$?" != "0" ]]
     then
       echo "*** Test failed!!!"
-      break
+      return 103
     fi
     echo "*** Test passed!"
   done

@@ -15,19 +15,21 @@
 ##    You should have received a copy of the GNU General Public License
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+include sidefext::combi
+include sidefext::iterable
+include sidefext::object
+include sidefext::metatype
+
 include lib::msg_classes
-include lib::combi
 
 module FRExt {
-
-  subset NonEmptyStr < String { .len }
-  subset NonEmptyArr < Array { .len }
-  subset NonEmptyArrStr < NonEmptyArr, NonEmptyStr
+  include sidefext::metatype
+  import sidefext::metatype::ExtantArrStr
 
   define Hash TEMPLATE_SPEC_HAS_OVERLOAD = :(
     :args => Array,
-    :callers => :( :type => Array, :subtype => Hash( :element_subset => NonEmptyStr ), :required => true ),
-    :name => :( :type => String, :subtype => Hash( :subset => NonEmptyStr ) :required => true ),
+    :callers => :( :type => Array, :subtype => Hash( :element_subset => ExtantArrStr ), :required => true ),
+    :name => :( :type => String, :subtype => Hash( :subset => ExtantArrStr ) :required => true ),
 
     :give_return => Bool,
     :clone_call => Bool,
@@ -35,59 +37,7 @@ module FRExt {
     :debug => Bool,
   )
 
-  module TypeUtils {
-    func is_serializable (Object obj) {
-      obj.respond_to(:serial_properties)
-      # obj.has_overload( Hash( :callers => __FUNC_NAME__, :name => :serial_properties) )
-    }
-    # Fully-Qualified Sidef::Runtime:92349879234::main::Typename Typename
-    #   to Universal Main-Derived Typename main::Typename
-    func fqtn_to_umdtn (String fqtn) -> String {
-      (/^Sidef::Runtime::\d+::(main::.+)$/ =~ fqtn)[0]
-    }
-
-    func maybe_call_custom_init (Object obj) {
-      if ( obj.respond_to(:INIT_METHOD_NAME) ) {
-        obj.method( obj.INIT_METHOD_NAME )()
-      } elsif ( obj.is_typename ) {
-        # invoke raw typenames
-        obj()
-      } else {
-        obj
-      }
-    }
-
-    func object_hash_ref (callers < FRExt::NonEmptyArrStr, Object obj, String field_name) {
-      try {
-        # say "#{callers.last}: \t\tREF PROPERTY #{obj.class} #{field_name}"
-        \(obj{field_name})
-      } catch {
-          |_e, msg|
-        Combi::rescope( lib::msg_classes::classify(msg) )({
-            |type, fields|
-          die "\t** object_hash_ref < (#{callers.reverse.join(' < ')}):\n\t\t#{obj.class} { #{field_name} } FAILED! reason: #{type}"
-        })
-      }
-    }
-  }
-
   class Object {
-    # method form of "with", but defined-agnostic
-    method rescope (b) { b.run(self) }
-    method cleave (*b) { b.map{ .run(self) } }
-
-    # internal; doesn't care about overloads
-    /* -> respond_to (String name, *_) -> Bool { self.can(name, _...) } */
-    /* -> can        (String name, *_) -> CODE { UNIVERSAL::can(self, name, _...) } */
-
-    method declares_method (String name) -> Hash {
-      self.grep_methods{ |n, _| n ~~ name }
-    }
-
-    method is_an_object (typename) {
-      self.is_a(typename) && self.is_object
-    }
-
     # test if it can be called with the specific number and type of arguments
     method has_overload (Hash overload_spec) -> Hash {
       overload_spec.template_transform( TEMPLATE_SPEC_HAS_OVERLOAD ).rescope{
@@ -121,7 +71,7 @@ module FRExt {
                 |type, fields|
               if (spec{:debug}) {
                 say("\t\t\t"+'invocation failed! reason: ' + type + ' => ' +
-                  fields.grep_kv{ .!= :block_tried_invoke }
+                  (fields ^ Set(:block_tried_invoke))
                 )
               }
 
@@ -133,7 +83,7 @@ module FRExt {
     }
 
     # declared, exists, can be called
-    method has_public_concrete_method (callers < NonEmptyArrStr, String name) {
+    method has_public_concrete_method (callers < ExtantArrStr, String name) {
       self.cleave(
         { .respond_to(name) },
         { .declares_method(name) },
@@ -149,7 +99,7 @@ module FRExt {
       ).all
     }
 
-    method has_public_concrete_overload (callers < NonEmptyArrStr, Str name, *args) {
+    method has_public_concrete_overload (callers < ExtantArrStr, Str name, *args) {
       self.cleave(
         { .respond_to(name) },
         { .declares_method(name) },
@@ -167,7 +117,7 @@ module FRExt {
     }
 
     # TODO: use hash as arg / return val, and allow getting the value etc (prevent replaying as much as possible)
-    method is_property (callers < NonEmptyArrStr, Str name, Object type_example_arg) -> Bool {
+    method is_property (callers < ExtantArrStr, Str name, Object type_example_arg) -> Bool {
       # self-respecting explicitly declared accessors are typed, and not varargs
       # field accessors generated with "has X" are untyped varargs
       self.has_overload( Hash(
@@ -196,96 +146,6 @@ module FRExt {
     # propbably possible to develop a more efficient algorithm for this
     method grep_sorted_map_methods (Block g, Block s, Block m) {
       self.grep_sorted_methods(g, s).map{ m.run( .key, .value ) }
-    }
-  }
-
-  class Array {
-    method all { self.all{ _ } }
-    method merge_reduce { self.reduce{ |l, r| l.merge(r) } }
-  }
-
-  func _templ_tform_single (Hash one_spec, String k, _v) -> Object {
-    one_spec.rescope{
-      if ( .{:deferred} ) {
-        return .{:deferred}
-      }
-
-      const Bool type_is_name = .{:type}.is_typename
-      const one_type          = ( type_is_name # the typename, or the first one in an iterable
-                                  ? .{:type}
-                                  : .{:type}[0]
-                                )
-      const v                 = ( _v  \\ .{:default} \\ (
-                                  .{:val_is_typename}
-                                    ? .{:type}
-                                    : TypeUtils::maybe_call_custom_init( one_type() ) )
-                                )
-      # say "k: '#{k}' _v: '#{_v}' v: '#{v}' itn: '#{Bool(.{:val_is_typename})}'"
-      const need_cast         = ( (! .{:val_is_typename}) && ( type_is_name # only cast when none of the types fit
-                                  ? ( .{:type}        !~ v )
-                                  : ( .{:type}.all{ _ !~ v } )
-                                ))
-
-      (need_cast ? .{:maybe_cast}.run(v) : v).rescope{
-          |v_c|
-        # cast tgus retyrb value?
-        (.{:conv} ~~ Block)
-          ? .{:conv}.run( v_c )
-          : v_c
-      }
-    }
-  }
-
-  class Set { -> - (Hash other) { other.select{ .~~ (other.keys - self) } } }
-
-  class Hash {
-    -> & (Set other) { self.select{ .~~ (self.keys & other) } }
-    -> | (Set other) { self.select{ .~~ (self.keys | other) } }
-    -> + (Set other) { self.select{ .~~ (self.keys + other) } }
-    -> - (Set other) { self.select{ .~~ (self.keys - other) } }
-    -> ^ (Set other) { self.select{ .~~ (self.keys ^ other) } }
-
-    method run_keys (*ks) {
-      self & ks.to_set -> map_kv{ |k, _| ((k) => .run(k)) }
-    }
-
-    method ordered_run_keys (*ks) {
-      self & ks.to_set -> pairs.sort{
-          |l, r|
-        ks.index(l[0]) <=> ks.index(r[0]) # sort based on their indices in ks
-      }.map{ .[1].run(.[0]) }
-    }
-
-    # inverse of + / merge: only update keys that are already truthy in the LHS
-    method clobber_existing_by (other) -> Hash {
-      self.map_kv{
-          |k, v|
-        ((k) => if ( v && other.has_key(k) ) {
-          other{k}.run(k, v)
-        } else {
-          v
-        })
-      }
-    }
-
-    method template_transform (Hash spec) -> Hash {
-      spec.map_kv{
-          |k, spec_v|
-        const self_v = self{k}
-
-        ((k) => given ( spec_v ) {
-          when ( nil ) { self_v }
-          case ( .is_typename ) {
-            defined(self_v)
-              ? TypeUtils::maybe_call_custom_init( _( @|self_v ) )
-              : TypeUtils::maybe_call_custom_init( _() )
-          }
-          when (Hash) {
-            FRExt::_templ_tform_single(_, k, self_v)
-          }
-          default { die "don't know that spec value: '#{_}' ('#{self_v}'; key: '#{k}')"}
-        })
-      }
     }
   }
 }

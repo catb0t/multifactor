@@ -15,58 +15,53 @@
 ##    You should have received a copy of the GNU General Public License
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-include lib::ABCs
-import lib::ABCs::SeriallyEquatable
-import lib::ABCs::SeriallyAccessible
-import lib::ABCs::Lockable
+module _exported {
+  include sidefext::checked
 
-include lib::shell_words
-import lib::shell_words::BuildSh
+  include lib::ABCs
+  import lib::ABCs::SeriallyEquatable
+  import lib::ABCs::SeriallyAccessible
+  import lib::ABCs::Lockable
 
-class DirSum (Str algo = '', Str names = '', Str contents = '') < SeriallyEquatable {
-  has Hash serial_properties = [:algo, :names, :contents].map{ ( (_) => Str ) }.to_h
-}
-
-class SrcSums (DirSum vm = DirSum(), DirSum core = DirSum(), DirSum basis = DirSum(), Bool basis_ignored = false ) < SeriallyEquatable {
-  has Hash serial_properties = Hash(
-    :basis_ignored => Bool,
-    [:vm, :core, :basis].map{ ( (_) => DirSum ) }...
-  )
-}
-
-class BlobSums (Str algo = '', Str vm = '', Str lib = '', Str boot = '') < SeriallyEquatable {
-  has Hash serial_properties = [:algo, :vm, :lib, :boot].map{ ( (_) => Str ) }.to_h
-  method =~ (other) { self._serial_eq(other, exclude_props: [:boot]) }
-}
-
-class VirtualBase64Blob (Str data = '', Str algo = '', Str sum ='') < SeriallyEquatable {
-  has Hash serial_properties = [:data, :algo, :sum].map{ ( (_) => Str ) }.to_h
-}
-
-class TimeSpec < SeriallyAccessible {
-  has Hash serial_properties = [:created, :modified, :accessed, :tombstoned].map { ( (_) => Num ) }.to_h
-}
-
-
-module _BuiltObjConst {
+  include lib::shell_words
   import lib::shell_words::BuildSh
 
-  import providers::builtobj::DirSum
-  import providers::builtobj::SrcSums
-  import providers::builtobj::BlobSums
-  import providers::builtobj::TimeSpec
-  import providers::builtobj::VirtualBase64Blob
+  define Hash DS_SPROPS = [:algo, :names, :contents].map{ ( (_) => Str ) }.to_h
+  class DirSum (Str algo = '', Str names = '', Str contents = '') < SeriallyEquatable {
+    has Hash serial_properties = DS_SPROPS
+  }
 
-  define Array BLOB_TARGETS = [:vm, :lib, :image, :boot]
+  define Hash SS_SPROPS = Hash( :basis_ignored => Bool, [:vm, :core, :basis].map{ ( (_) => DirSum ) }... )
+  class SrcSums (DirSum vm = DirSum(), DirSum core = DirSum(), DirSum basis = DirSum(), Bool basis_ignored = false ) < SeriallyEquatable {
+    has Hash serial_properties = SS_SPROPS
+  }
 
-  define Hash FORMAT_DEFAULTS = Hash(
+  define Hash BS_SPROPS = [:algo, :vm, :lib, :boot].map{ ( (_) => Str ) }.to_h
+  class BlobSums (Str algo = '', Str vm = '', Str lib = '', Str boot = '') < SeriallyEquatable {
+    has Hash serial_properties = BS_SPROPS
+    method =~ (other) { self._serial_eq(other, exclude_props: [:boot]) }
+  }
+
+  define Hash VBB_SPROPS = [:data, :algo, :sum].map{ ( (_) => Str ) }.to_h
+  class VirtualBase64Blob (Str data = '', Str algo = '', Str sum ='') < SeriallyEquatable {
+    has Hash serial_properties = VBB_SPROPS
+  }
+
+  define Hash TS_SPROPS = [:created, :modified, :accessed, :tombstoned].map { ( (_) => Num ) }.to_h
+  class TimeSpec < SeriallyAccessible {
+    has Hash serial_properties = TS_SPROPS
+  }
+
+  define Array BO_BLOB_TARGETS = [:vm, :lib, :image, :boot]
+
+  define Hash BO_FORMAT_DEFAULTS = Hash(
     :vm => Hash( :pfx_platform => { '' }, :pfx_custom => { :fvm_ }, :ext => { BuildSh.platform_vm_ext } ),
     :image => Hash( :pfx_platform => { '' }, :pfx_custom => { :fvm_ }, :ext => { '.image' } ),
     :lib => Hash( :pfx_platform => { BuildSh.platform_lib_name[0] }, :pfx_custom => { :fvm_ }, :ext => { BuildSh.platform_lib_name[1] } ),
     :boot => Hash( :pfx_platform => { 'boot.' }, :pfx_custom => { :fvm_ }, :ext => { '.image' } ) # '
   )
 
-  define Hash SPROPS = Hash(
+  define Hash BO_SPROPS = Hash(
     :id => Str,
     :factor_version => Str,
     :is_git => Bool,
@@ -83,44 +78,58 @@ module _BuiltObjConst {
     :blob_sums => BlobSums,
     :blob_algorithm => [Str, :sha256, Hash(
       :get => {
-        .blob_sums.algo || *TypeUtils::object_hash_ref([:custom_getter], _, :_blob_algorithm)
+        .blob_sums.algo || *(sidefext::checked::checkedref([:custom_getter], _, :_blob_algorithm, { die :blob_algorithm } ).ref)
       }
     ) ], # default: sha256
 
     :timespec => TimeSpec,
   )
 
-  define Array SPROP_GEN = [ {
-    _BuiltObjConst::BLOB_TARGETS.map{
+  define Array BO_SPROP_GEN = [ {
+    _exported::BO_BLOB_TARGETS.map{
         |target|
       const tf = (target + :_format)
-      ( (tf) => [Hash, _BuiltObjConst::FORMAT_DEFAULTS{target}, Hash(
+      ( (tf) => [Hash, _exported::BO_FORMAT_DEFAULTS{target}, Hash(
         :get => {
           # this underscore is important
           # note the associativity of * dereference here
-          (*TypeUtils::object_hash_ref([:custom_getter], _, :_ + tf )) \\ _BuiltObjConst::FORMAT_DEFAULTS{target}
+          (* (sidefext::checked::checkedref([:custom_getter], _, :_ + tf, { die tf } ).ref) ) \\ _exported::BO_FORMAT_DEFAULTS{target}
         }
       ) ] )
     }.to_h
   } ] # { Hash(:junk => Number) }
-}
 
-class BuiltObj << Lockable, SeriallyAccessible {
-  has Hash serial_properties = _BuiltObjConst::SPROPS
-  has Array serial_property_generator_builtobj = _BuiltObjConst::SPROP_GEN
-  # these are not accessors, just methods that glue accessed values together
-  # create boot_fullname etc
-  has Array init_steps_10_builtobj = [ {
-    _BuiltObjConst::BLOB_TARGETS.each{
-        |name|
-      func gen (self) -> File {
-        const fmt = self.method(name + :_format)()
-        # there is a cleaner way to write this but it would be much slower i imagine
-        # using Combi::binop('+') and combinate or apply
-        File( String( [fmt{:pfx_platform, :pfx_custom}].map{ .run.to_s }... ) + self.id + fmt{:ext}.run )
+  class BuiltObj << Lockable, SeriallyAccessible {
+    has Hash serial_properties = _exported::BO_SPROPS
+    has Array serial_property_generator_builtobj = _exported::BO_SPROP_GEN
+    # these are not accessors, just methods that glue accessed values together
+    # create boot_fullname etc
+    has Array init_steps_10_builtobj = [ {
+      _exported::BO_BLOB_TARGETS.each{
+          |name|
+        func gen (self) -> File {
+          const fmt = self.method(name + :_format)()
+          # there is a cleaner way to write this but it would be much slower i imagine
+          # using Combi::binop('+') and combinate or apply
+          File( fmt.ordered_run_keys(:pfx_platform, :pfx_custom, :ext).insert(2, self.id).join )
+        }
+        # NOTE: create NAME_fullname that calls .format
+        __CLASS__.def_method(name + :_fullname, gen)
       }
-      # NOTE: create NAME_fullname that calls .format
-      __CLASS__.def_method(name + :_fullname, gen)
-    }
-  } ]
+    } ] # _exported::BO_INIT_STEP(__CLASS__)
+  }
+}
+if (__FILE__ == __MAIN__) {
+  assert(_exported::DirSum().serial_properties)
+  assert(_exported::BuiltObj().serial_properties)
+} else {
+  module builtobj {
+    include _exported
+    import _exported::DirSum
+    import _exported::SrcSums
+    import _exported::BlobSums
+    import _exported::VirtualBase64Blob
+    import _exported::TimeSpec
+    import _exported::BuiltObj
+  }
 }

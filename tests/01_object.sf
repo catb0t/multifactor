@@ -88,9 +88,9 @@ assert( ! X.is_object )
 assert( ! String.is_object )
 assert( ! Object.is_object )
 
-assert( ! TypeUtils::is_serializable( Object.new ) )
-assert( ! TypeUtils::is_serializable( String() ) )
-assert( ! TypeUtils::is_serializable( Hash() ) )
+assert( ! ::is_serializable( Object.new ) )
+assert( ! ::is_serializable( String() ) )
+assert( ! ::is_serializable( Hash() ) )
 
 assert( ! Serializable()._is_serialized_obj(Hash) )
 assert( ! Serializable()._is_serialized_obj(Hash()) )

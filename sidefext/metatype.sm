@@ -1,0 +1,13 @@
+#! ruby
+
+# todo: Set ~~ and ~~ Set
+# todo: subsets can't be chained
+subset ExtantArrStr < Array, String { .len && (.~~ Array ? .all{ .len } : true) }
+
+if (__FILE__ == __MAIN__) {
+  func a (e < ExtantArrStr) {
+    e
+  }(["asd"])
+  a("asd")
+}
+(ExtantArrStr)

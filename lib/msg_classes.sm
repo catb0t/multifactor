@@ -15,55 +15,61 @@
 ##    You should have received a copy of the GNU General Public License
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-include lib::combi
+include sidefext::combi
+include sidefext::iterable # Array.merge_reduce, Hash.change_extant_keys
 
 module MsgTypes {
-  define NO_ERROR           = :NO_ERROR
-  define DOES_NOT_MATCH     = :DOES_NOT_MATCH
-  define NO_METHOD          = :NO_METHOD
-  define BAD_ENCODING       = :BAD_ENCODING
-  define PERL_COMPILER      = :PERL_COMPILER
-  define PERL_RUNTIME       = :PERL_RUNTIME
-  define OTHER_UNCLASSIFIED = :OTHER_UNCLASSIFIED
+  define NO_ERROR      = :NO_ERROR
+  define NO_METHOD     = :NO_METHOD
+  define BAD_ENCODING  = :BAD_ENCODING
+  define PERL_COMPILER = :PERL_COMPILER
+  define PERL_RUNTIME  = :PERL_RUNTIME
+  define OTHER_UNCLASSIFIED   = :OTHER_UNCLASSIFIED
+  define CLASS_DOES_NOT_MATCH = :CLASS_DOES_NOT_MATCH
+  define BLOCK_DOES_NOT_MATCH = :BLOCK_DOES_NOT_MATCH
 
-  define Set METHOD_EXISTS    = Set(:NO_ERROR, :DOES_NOT_MATCH, :BAD_ENCODING)
-  define Set OVERLOAD_EXISTS  = Set(:NO_ERROR, :BAD_ENCODING)
-  define Set NOT_PROPERTY     = Set(:NO_METHOD, :DOES_NOT_MATCH, :BAD_ENCODING)
+  define Set METHOD_EXISTS    = Set(MsgTypes::NO_ERROR, MsgTypes::BLOCK_DOES_NOT_MATCH, MsgTypes::BAD_ENCODING)
+  define Set OVERLOAD_EXISTS  = Set(MsgTypes::NO_ERROR, MsgTypes::BAD_ENCODING)
+  define Set NOT_PROPERTY     = Set(MsgTypes::NO_METHOD, MsgTypes::BLOCK_DOES_NOT_MATCH, MsgTypes::BAD_ENCODING)
+
+  define Array MSG_REGEXES = [
+    MsgTypes::NO_ERROR ： /^$/,
+    MsgTypes::NO_METHOD ：
+      /^(?:\[AUTOLOAD\] )?Undefined method `(?<method_name>.*)' called from (?<method_invoked_from>.*)/,
+    MsgTypes::BLOCK_DOES_NOT_MATCH ：
+      /^(?:\[ERROR\] )?(?<block_type>func|method) `(?<block_name>[\S\s]*)` does not match \g{block_name}\((?<block_tried_proto>.*)\), invoked as \g{block_name}\((?<block_tried_invoke>[\S\s]*)\)\n\nPossible candidates are: ?\n(?<block_dispatches>[\S\s]*)\n*/m,
+    MsgTypes::CLASS_DOES_NOT_MATCH ：
+      /^(?:\[ERROR\] )?class `(?<class_name>[\S\s]*)` does not match \g{class_name}\((?<class_tried_proto>.*)\), invoked as \g{class_name}\((?<class_tried_invoke>[\S\s]*)\)\n\nPossible candidates are: ?\n(?<class_dispatches>[\S\s]*)\n*/m,
+    MsgTypes::BAD_ENCODING ： /^Unknown encoding '(?<encoding>.*)'/,
+    MsgTypes::PERL_RUNTIME ：
+      /^(?:Not an? (?<tried_ref>.*) reference|Can't use (?<tried_ref_type>.*) \((?<tried_ref_with>"[^"]+")\) as an? (?<tried_ref>.*) ref while.*) at .*/,
+    MsgTypes::PERL_COMPILER ： /Bareword/,
+    MsgTypes::OTHER_UNCLASSIFIED ： /^(?<value>[\S\s]*)/,
+    # Pair(:PERL_INTERNAL, /^(.*)/)
+  ]
 }
 
-define Array MSG_REGEXES = [
-  Pair(:NO_ERROR, /^$/)
-  Pair(:DOES_NOT_MATCH,
-    /^(?:\[ERROR\] )?(?<block_type>func|method) `(?<block_name>[\S\s]*)` does not match \g{block_name}\((?<block_tried_proto>.*)\), invoked as \g{block_name}\((?<block_tried_invoke>[\S\s]*)\)\n\nPossible candidates are: ?\n(?<block_dispatches>[\S\s]*)\n*/m
-  ),
-  Pair(:NO_METHOD, /^(?:\[AUTOLOAD\] )?Undefined method `(?<method_name>.*)' called from (?<method_invoked_from>.*)/),
-  Pair(:BAD_ENCODING, /^Unknown encoding '(?<encoding>.*)'/)
-  Pair(:PERL_COMPILER, /Bareword/)
-  Pair(:PERL_RUNTIME, /^(?:Not an? (?<tried_ref>.*) reference|Can't use (?<tried_ref_type>.*) \((?<tried_ref_with>"[^"]+")\) as an? (?<tried_ref>.*) ref while.*) at .*/)
-  Pair(:OTHER_UNCLASSIFIED, /^(?<value>[\S\s]*)/)
-  # Pair(:PERL_INTERNAL, /^(.*)/)
-]
-
-func block_dispatches_cleanup (String ds) -> Hash {
-  define Regex r = /\G\s+(?<block_name>.+)\((?<block_dispatch>.*?)\)/
-  r.global_matches(ds, {
+func dispatches_cleanup (String ds, Str type) -> Hash {
+  define Hash rs = :( :block => /\G\s+(?<block_name>.+)\((?<block_dispatch>.*?)\)/,
+                      :class => /\G\s+(?<class_name>.+)\((?<class_dispatch>.*?)\)/)
+  rs{type}.global_matches(ds, {
       |i, _|
     .named_captures.map_kv{
         |k, v|
       ( ("#{k}:#{i}") => v )
     }
-  } ).reduce{ |l, r| l.merge(r) }
+  } ).reduce{ |l, r| l.merge(r) } \\ Hash()
 }
 
 func msg_fields (m) is cached -> Hash {
-  m.named_captures.map_kv{
-      |k, v|
-    ( (k) => k==:block_dispatches ? block_dispatches_cleanup(v) : v )
-  }
+  m.named_captures.change_extant_keys( :(
+    :block_dispatches => { dispatches_cleanup(_, :block) },
+    :class_dispatches => { dispatches_cleanup(_, :class) }
+  ) )
 }
 
 func classify (String msg) is cached -> (String, Object) {
-  const type = MSG_REGEXES.find{ .value ~~ msg }
+  const type = MsgTypes::MSG_REGEXES.find{ .value ~~ msg }
   if (!type) { die "#{__FUNC_NAME__}: can't classify THAT!\n\t#{msg.dump}"}
   (type.key, msg_fields(msg =~ type.value) )
 }
@@ -102,3 +108,8 @@ Not a HASH reference at (eval 30) line 5.
 Can't use string ("Sidef::Types::Hash::Hash") as a HASH ref while "strict refs" in use at (eval 38) line 5.
 %
 method `x` does not match x(X, Number), invoked as x(X(), 1)\n\nPossible candidates are: \n    X.x(self)\n
+%
+class `BlobSums` does not match BlobSums(NamedParam, Pair, Pair, Pair), invoked as BlobSums(NamedParam("algo", "sha256"), Pair("vm", "2e160987cb44223343d38479a97e202e8b9c0e56610c4fec5fde8872f37802e2"), Pair("lib", "119ce9c8820501c90788d22ec1338070a62f88241557d032ce0075f044a4f0b3"), Pair("boot", "e3512cc438154985d2713f88d4624b241a048c4d7b4bbaa157bbae1ac0736d8e"))
+
+Possible candidates are:
+    BlobSums(String algo, String vm, String lib, String boot)

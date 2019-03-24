@@ -288,7 +288,7 @@ class BuildSh {
     const boot_image_urls = BuildSh.boot_image_urls
 
     const boot_image_data = BuildSh.make_http_request( boot_image_urls{:boot_image_url} )
-    const download_md5 = boot_image_data.md5
+    const local_md5 = boot_image_data.md5
 
     const remote_checksum_data = BuildSh.make_http_request( boot_image_urls{:checksum} )
     if (! remote_checksum_data) {
@@ -297,8 +297,8 @@ class BuildSh {
     }
     const remote_md5 = BuildSh._process_checksums_file(remote_checksum_data, boot_image_file)
 
-    say "#{__METHOD_NAME__}: boot image sums: #{remote_md5} / #{download_md5}"
-    if (remote_md5 != download_md5) { die "#{__METHOD_NAME__}: !!! downloaded checksum mismatch !!! (unrecoverable)" }
+    say "#{__METHOD_NAME__}: boot image sums: #{remote_md5} / #{local_md5}"
+    if (remote_md5 != local_md5) { die "#{__METHOD_NAME__}: !!! downloaded checksum mismatch !!! (unrecoverable)" }
 
     boot_image_file.touch.cleave(
       { .binmode },

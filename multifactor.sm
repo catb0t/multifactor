@@ -73,11 +73,11 @@ module MultiFactor {
 
   import lib::shell_words::BuildSh
 
-  import providers::builtobj::DirSum
-  import providers::builtobj::SrcSums
-  import providers::builtobj::BlobSums
-  import providers::builtobj::TimeSpec
-  import providers::builtobj::BuiltObj
+  import builtobj::DirSum
+  import builtobj::SrcSums
+  import builtobj::BlobSums
+  import builtobj::TimeSpec
+  import builtobj::BuiltObj
 
   include Factor
   include FactorBashStateless
