@@ -152,7 +152,7 @@ module GuardIO {
     -> locked_fods (lf) { self._locked_fods = Set(lf...); self }
 
     method setup (Hash g) {
-      g.template_transform( GuardIO::TEMPLATE_SETUP_GLOBLOCKER ).rescope{
+      GuardIO::TEMPLATE_SETUP_GLOBLOCKER.template_transform( g ).rescope{
         self.log = SLog(is_verbose: .{:verbose})
         self.locked_fods( .{:locked_fods}.map{ .abs.realpath } )
         self.remove_old_lock = .{:remove_old_lock}

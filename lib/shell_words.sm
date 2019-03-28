@@ -45,8 +45,12 @@ class BuildSh {
     LWP_UA.new(show_progress => 1)
   }
   -> make_http_request (url) {
-    var resp = BuildSh.downloader.get(url)
-    resp.is_success ? resp.decoded_content : false
+    Combi::ifte(
+      BuildSh.downloader.get(url),
+      { .is_success }
+      { .decoded_content }
+      { false }
+    )
   }
   -> find_programs (String kind, Array ps) is cached -> String {
     STDERR.say("Look for '#{kind}': #{ps.join(', ')}...")
@@ -60,6 +64,7 @@ class BuildSh {
     die "no #{kind}"
   }
   # TODO: not *required*
+  # binaries and images aren't compatible across compiler versions though
   # -> check_cc_version (String name) is cached -> Bool {
   #   Bool(name)
   #   ...
@@ -76,8 +81,7 @@ class BuildSh {
       when (/(?:windows|cygwin)/i) { :windows }
       when (/(?:macos|darwin)/)  { :macos }
       when (/(?:linux|mingw)/)  { :linux }
-      when (:bsd)               { :bsd }
-      when (:haiku)             { :haiku }
+      when (/(?:bsd|haiku|android|ios)/i) { _ }
       default { die "Unknown osname: #{Sys.osname}" }
     }
   }
@@ -85,16 +89,18 @@ class BuildSh {
     given ( t || BuildSh.os_name ) {
       when (/(?:linux|darwin|macos|bsd|mingw)/i) { :unix }
       when (/(?:windows|cygwin)/i) { :windows }
-      case ( %w(haiku).contains(_) ) { BuildSh.os_name }
+      when (/(?:haiku|android|ios)/i) { _ }
       default { die "Can't convert osname to os_type: #{Sys.osname}" }
     }
   }
   -> arch_name () is cached -> String {
     static const uname = `uname -m`.chomp
-    if ( [:ppc64, "Power Macintosh"].any{ uname.contains(_) } ) {
-      :ppc
-    } else {
-      :x86
+    given (uname) {
+      case ( [:ppc64, "Power Macintosh"].any{ uname.contains(_) } ) { :ppc }
+      when ( /a(?:rm|arch)64/i ) { :arm64 }
+      # EABI would be Factor on Bare Metal which isn't in the near future
+      when ( /armv7/i ) { :armhf }
+      default { :x86 }
     }
   }
   -> c_word_size () is cached -> String {
@@ -129,9 +135,9 @@ class BuildSh {
 
   -> generate_make_targets () is cached -> Hash {
     # const (
-    static const ot = BuildSh.os_type,
-    static const on = BuildSh.os_name,
-    static const an = BuildSh.arch_name,
+    static const ot = BuildSh.os_type
+    static const on = BuildSh.os_name
+    static const an = BuildSh.arch_name
     static const ws = BuildSh.word_size
     # )
     Hash(
@@ -217,8 +223,8 @@ class BuildSh {
   #   ( N ~~ :windows ? ['set CL=/MP & nmake'] : ['make', '-j'] )
   # }
 
-  -> make_clean (Bool output = false) {
-    Command::make(:clean, output: output)
+  -> make_clean (Bool output = false) -> Bool {
+    Combi::first( Command::make(:clean, output: output) )
   }
 
   # bo_target: BuiltObj
@@ -230,8 +236,7 @@ class BuildSh {
           _,
           (BuildSh.feature_reproducible ? 'REPRODUCIBLE=1' : ' SITE_CFLAGS="-D__DATE__=\'\"[reproducible-workaround]\"\' -D__TIME__=\'\"\"\'" '),
           output: output
-        )
-      }
+      ) }
     ).last \
       && :factor.cleave(
         Set(:vm, :lib).map{
@@ -278,12 +283,16 @@ class BuildSh {
 
   # failure case?
   -> _process_checksums_file (String data, String want_name) {
-    data.lines.find{ .contains(want_name) }.split(" ").second
+    with ( data.lines.find{ .contains(want_name) } ) {
+      .split(" ").second
+    } else {
+      die "#{__METHOD_NAME__}: !!! gibberish checksum data when looking up '#{want_name}':\n#{data}"
+    }
   }
 
   -> get_boot_image {
     const File boot_image_file = BuildSh.generate_make_targets(){:boot_image}
-    say "#{__METHOD_NAME__}: Downloading boot image file #{boot_image_file}"
+    say (__METHOD_NAME__ + ': Downloading boot image file ' + boot_image_file)
 
     const boot_image_urls = BuildSh.boot_image_urls
 
@@ -342,5 +351,5 @@ class BuildSh {
     }
   }
 
-  -> blob_file_contents_sum (File f, Str algo) { f |> :open_r |> :slurp |> :encode_utf8 |> (algo || :sha256) }
+  -> blob_file_contents_sum (File f, Str algo = :sha256) { f |> :open_r |> :slurp |> :encode_utf8 |> (algo || :sha256) }
 }

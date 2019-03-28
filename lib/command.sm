@@ -3,39 +3,48 @@ include lib::frext
 module Command {
   define Regex RETVAL_REGEX = /__RETURNED=(\d+)/
 
-  func spawn_se (Bool output = false, *cmdline) -> Bool {
+  define Block CHAR_OUTPUTTER = {
+      |full_str, ch|
+    (*full_str).last==(10.chr) && (9.chr.print 9.chr.print)
+    ch.print
+    *full_str += ch
+  }
+  define Block NO_OUTPUT = { |f, c| c.print; *f += c }
+
+  func spawn_se (Bool output = false, *cmdline) -> (Number, Bool) {
     $| = 1
 
     STDERR.say("\t\b\b-> #{cmdline.join(' ')}")
-    0 == Number(
-      (Pipe( [cmdline..., ";", "echo", '"__RETURNED=$?\n"'].join(' ') ) \
+
+    const Block _char_op = (output ? CHAR_OUTPUTTER : NO_OUTPUT)
+
+    Number(
+      (Pipe( cmdline.add([";", "echo", '"__RETURNED=$?\n"']).join(' ') ) \
         .open_r.cleave(
           { .autoflush(true) },
           { "\n\t\t".print if (output) },
           {
+            # if we increased the scope of c and co then the cleave is redundant
             var c = ''
-            .each_char{
-                |b|
-              if (output) {
-                if (c.last == "\n") { "\t\t".print }
-                b.print
-              }
-              c += b
-            }
+            const Block co = { |b| _char_op(\c, b) }
+            .each_char(co)
             c
           }
         ).last \
         .lines.find{ _ ~~ RETVAL_REGEX } =~ RETVAL_REGEX
       )[0].to_n
-    )
+    ).cleave(
+      Block.identity
+      { .== 0 }
+    )...
   }
   func ql (Array args) -> String {
-    args.map{ "#{_.quotemeta} " }.join
+    args.map{ .quotemeta+' ' }.join
   }
-  func make (Bool output = false, *args) -> Bool {
+  func make (Bool output = false, *args) -> (Number, Bool) {
     Command::spawn_se('make', '-j', args..., output: output)
   }
-  func nmake (Bool output = false, *args) -> Bool {
+  func nmake (Bool output = false, *args) -> (Number, Bool) {
     Command::spawn_se('set CL=/MP & nmake', args..., output: output)
   }
 }

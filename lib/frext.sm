@@ -29,55 +29,56 @@ module FRExt {
   define Hash TEMPLATE_SPEC_HAS_OVERLOAD = :(
     :args => Array,
     :callers => :( :type => Array, :subtype => Hash( :element_subset => ExtantArrStr ), :required => true ),
-    :name => :( :type => String, :subtype => Hash( :subset => ExtantArrStr ) :required => true ),
+    :name => :( :type => String, :subtype => Hash( :subset => ExtantArrStr ), :required => true ),
 
     :give_return => Bool,
     :clone_call => Bool,
-    :give_err_info => :( :type => Bool, :default => !__OPTIMIZED__ ),
+    :give_err => :( :type => Bool, :default => !__OPTIMIZED__ ),
     :debug => Bool,
   )
 
   class Object {
     # test if it can be called with the specific number and type of arguments
     method has_overload (Hash overload_spec) -> Hash {
-      overload_spec.template_transform( TEMPLATE_SPEC_HAS_OVERLOAD ).rescope{
+      TEMPLATE_SPEC_HAS_OVERLOAD.template_transform( overload_spec ).rescope{
           |spec|
         # say "#{spec}"
         die 'invalid has_overload spec: \'callers\' must be a non-empty array of non-empty strings' \
-          if ( ! spec{:callers}.cleave( { _ }, { .is_an(Array) }, { .all }, { .all{ .is_a(String) } } ).all  )
+          if ( ! spec{:callers}.cleave( Block.identity, { .is_an(Array) }, { .all }, { .all{ .is_a(String) } } ).all  )
 
         const invalid_caller = 'invalid has_overload spec from ('+spec{:callers}.join(' > ')+'): '
 
         die invalid_caller+'\'name\' must be nonempty string' \
-          if ( ! spec{:name}.cleave( { _ }, { .is_a(String) }, { .respond_to(:len) } ).all )
+          if ( ! spec{:name}.cleave( Block.identity, { .is_a(String) }, { .respond_to(:len) } ).all )
 
-        die invalid_caller+'\'args\' must be iterable' \
-          if ( ! spec{:args}.respond_to("...") )
-
+        # die invalid_caller+'\'args\' must be iterable' if ( ! spec{:args}.respond_to("...") )
         try {
           if (spec{:debug}) {
             say "\t** has_overload < (#{spec{:callers}.reverse.join(' < ')}):\n\t\t.method( '#{spec{:name}}' )( #{spec{:args}.map{.dump}.join(', ')} ) ;; clone_call: #{spec{:clone_call}}"
           }
 
-          const r = ( spec{:clone_call} ? self.dclone : self).method( spec{:name} )( spec{:args}... )
+          const r = Combi::rescope( ( spec{:clone_call} ? self.dclone : self).method( spec{:name} )( spec{:args}... ) )({
+            (spec{:give_return} ? _ : nil)
+          })
           spec{:debug} && say "\t\t\tinvocation worked!"
 
-          :( :state => true, :return => (spec{:give_return} ? r : nil) )
+          :( :state => true, :return => r )
 
         } catch {
             |_e, msg|
-          (!spec{:give_err_info} ? :(state => false)
+          (!spec{:give_err}
+            ? :(state => false)
             : Combi::rescope( lib::msg_classes::classify( msg) )({
                 |type, fields|
               if (spec{:debug}) {
                 say("\t\t\t"+'invocation failed! reason: ' + type + ' => ' +
-                  (fields ^ Set(:block_tried_invoke))
+                  fields-Set(:block_tried_invoke)
                 )
               }
 
               :( :state => false, :why => type, :details => fields )
             })
-          )
+          ) # end ternary
         }
       }
     }
@@ -91,7 +92,7 @@ module FRExt {
             :callers => [@|callers, __METHOD_NAME__],
             :name => name,
             :clone_call => true,
-            :give_err_info => true
+            :give_err => true
           ) ).rescope{
             .{:state} || (MsgTypes::METHOD_EXISTS.contains( .{:why} ))
           }
@@ -108,7 +109,7 @@ module FRExt {
             :name => name,
             :args => args,
             :clone_call => true,
-            :give_err_info => true
+            :give_err => true
           ) ).rescope{
             .{:state} || (MsgTypes::OVERLOAD_EXISTS.contains( .{:why} ) )
           }
@@ -125,7 +126,7 @@ module FRExt {
           :name => name,
           :args => [type_example_arg, :extra_garbage_arg],
           :clone_call => true,
-          :give_err_info => true
+          :give_err => true
       ) ).rescope{
         # say "is_property: #{self.class}::#{name} :: #{.{:state}}"
         .{:state} || ( ! MsgTypes::NOT_PROPERTY.exists( .{:why} ) )

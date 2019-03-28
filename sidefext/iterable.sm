@@ -1,83 +1,46 @@
 include sidefext::construct
+include sidefext::metatype
 
-class Array {
-  method all { self.all{ _ } }
-  method merge_reduce { self.reduce{ |l, r| l.merge(r) } }
+# i would include Enumerator but I don't think they actually are meaninfully constructable
+# Match is not constructible so not listed
+# Glob is iterable but can't be constructed with an iterable
+define ITER_TYPES = Set(Array, String, Set, Bag, Matrix, Hash, Set, Pair, Range, RangeNum, RangeString)
+define CONSTRUCT1 = { |_, v| _(v) }
+func is_iterable_object (Object o) {
+  o.is_object && ITER_TYPES.any{ o.is_a(_) }
 }
 
-module hashset {
-
-  func hash_intersect_set (Hash h1, Set s1) -> Hash {
-    h1.linear_selection(s1 & h1.keys)
-  }
-
-  func hash_intersect_hash (Hash h1, Hash h2) -> Hash {
-    h1.linear_selection( h1.keys.to_set & h2.keys )
-  }
-
-  func hash_concat_set (Hash h1, Set s1) -> Hash {
-    h1{s1...} = nil
-    h1
-  }
-
-  func hash_diff_set (Hash h1, Set s1) {
-    h1.linear_selection( h1.keys.to_set - s1 )
-  }
-
-  func hash_diff_hash (Hash h1, Hash h2) {
-    h1.linear_selection( h1.keys.to_set - h2.keys )
-  }
-
-  func hash_union_set (Hash h1, Set s1) {
-    h1.linear_selection( s1 | h1.keys )
-  }
-
-  func hash_union_hash (Hash h1, Hash h2) {
-    h1{h2.keys...} = h2.values
-  }
-
-  func hash_symdiff_set (Hash h1, Set s1) {
-    h1.linear_selection( s1 ^ h1.keys )
-  }
-
-  func hash_symdiff_hash (Hash h1, Hash h2) {
-    h1.linear_selection( h1.keys.to_set ^ h2.keys )
-  }
-
-  func set_diff_hash (Set s1, Hash h1) -> Set {
-    # other.select{ .~~ (other.keys.to_set - self) } ????
-    s1 - h1.keys
+func complex_typecheck (Object obj, Object basetp, cdids, subtps) -> (Bool, Object) { # /
+  const Bool do_subtps = (is_iterable_object(obj) && subtps)
+  obj.namedcleave(
+    base => { .is_a(basetp) },
+    cdid => (cdids ? { cdids.any{ |c| .is_a(c) } } : { true }),
+    single_etype => ((do_subtps && subtps.has_key(:element_type)) ? { .all{ .is_a(subtps{:element_type}) } } : { true }),
+    multi_etype => ((do_subtps && subtps.has_key(:element_types)) ? { .all{ subtps{:element_type}.any{ |t| .is_a(t) } } } : { true })
+    # subset checks here
+  ).rescope{
+    if (.values.all) {
+      (true, obj)
+    } else {
+      (false, die "complex typecheck failed! #{_}")
+    }
   }
 }
 
 class Hash {
-  # should have better time complexity than grep/select
-  # we don't have to use grep/select since we know exactly which
-  #   keys we want
-  # TODO: allow zip to zip sets
-  # are there faster transformations to zip directly to a hash?
-  -> linear_selection (keys) -> Hash {
-    # [keys.to_a, [ self{keys...} ] ].zip_by{ |_, r| (_, r) }.to_h
-    const h = Hash(); h{keys...} = self{keys...}; h
-    # Hash().rescope{
-    #   .{keys...} = self{keys...}
-    #   _
-    # }
-  }
-
   method run_keys (*ks) {
-    hashset::hash_intersect_set(self, ks.to_set).map_kv{ |k, _| ((k) => .run(k)) }
+    self & ks -> map_kv{ |k, _| ((k) => .run(k)) }
   }
 
   method ordered_run_keys (*ks) {
-    hashset::hash_intersect_set(self, ks.to_set).pairs.sort{
+    self & ks -> pairs.sort{
         |l, r|
       ks.index(l[0]) <=> ks.index(r[0]) # sort based on their indices in ks
     }.map{ .[1].run(.[0]) }
   }
 
   method change_extant_keys (Hash spec) {
-    const Hash shared_keys = hashset::hash_intersect_hash(self, spec).keys
+    const Hash shared_keys = (self & spec).keys
     self{ shared_keys... } = shared_keys.map{
         |k|
       # this is v, k because it's more likely you only care about the v
@@ -98,53 +61,154 @@ class Hash {
     }
   }
 
-  method template_transform (Hash spec) -> Hash {
-    # 'String _' is the key; we're not using it for anything yet
-    # should probably call the block with it
-    func _templ_tform_single (Hash one_spec, String _, _v) -> Object {
-      if ( one_spec{:deferred} ) {
-        return one_spec{:deferred}
-      }
-      one_spec.rescope{
-        const Bool type_is_name = .{:type}.is_typename
-        const one_type          = ( type_is_name # the typename, or the first one in an iterable
-                                    ? .{:type}
-                                    : .{:type}[0]
-                                  )
-        const v                 = ( _v  \\ .{:default} \\ (
-                                    .{:val_is_typename}
-                                      ? .{:type}
-                                      : sidefext::construct::maybe_init( one_type() ) )
-                                  )
-        # say "k: '#{k}' _v: '#{_v}' v: '#{v}' itn: '#{Bool(.{:val_is_typename})}'"
-        const need_cast         = ( (! .{:val_is_typename}) && ( type_is_name # only cast when none of the types fit
-                                    ? ( .{:type}        !~ v )
-                                    : ( .{:type}.all{ _ !~ v } )
-                                  ))
-        # TODO: required, subtype, etc
-        (need_cast ? .{:maybe_cast}.run(v) : v).rescope{
-            |v_c|
-          # cast this return value?
-          (.{:conv} ~~ Block)
-            ? .{:conv}.run( v_c )
-            : v_c
-        }
+  # TODO:
+  # method compile_template (Hash templ) -> Hash {
+  #   (templ{:__compiled} == true) && return templ
+  #   templ.map_kv{
+  #
+  #   }
+  #   templ{:__compiled} = true
+  #   templ
+  # }
+
+  method template_transform (Hash subject) -> Hash {
+    func _do_ewise_construct ( Object typename, Object source ) {
+      if (! defined(source)) {
+        typename()
+      } elsif (ITER_TYPES.exists(typename) && is_iterable_object(source) ) {
+        # say "branch a #{source.dump}"
+        typename( @|(source ~~ String ? source.chars : source) )
+      } else {
+        typename( source )
       }
     }
 
-    spec.map_kv{
-        |k, spec_v|
-      const self_v = self{k}
+    func _do_attempt_cast (Object t, Object _, Block ewc) {
+      sidefext::construct::maybe_init( ewc( t, _ ) )
+    }
 
-      ((k) => given ( spec_v ) {
-        when ( nil ) { self_v }
-        case ( .is_typename ) {
-          sidefext::construct::maybe_init( defined(self_v) ? _( @|self_v ) : _() )
+    func _templ_tform_single (String key, Hash spec, initial_value, Bool attempt_cast_default, Bool ewise_construct_default) {
+      if ( spec{:deferred} ) {
+        return \spec{:deferred}
+      }
+      if ( spec.has_key(:type) && !(spec{:type}.is_typename) ) {
+        die "#{__FILE__}:#{__LINE__}:#{__METHOD_NAME__}: not a typename: '#{spec{:type}.dump}' (key: '#{key}')"
+      }
+      func (_) -> Object {
+        const Bool attempt_cast     = (.{:attempt_cast} \\ attempt_cast_default)
+        const Bool ewise_construct  = (.{:ewise_construct} \\ ewise_construct_default)
+        # say "ewise contruct #{ewise_construct}"
+
+        const val_choice1 = if (!defined(initial_value)) {
+          (.{:required} && (!.{:default})) && die (
+            "#{__FILE__}:#{__LINE__}: #{__METHOD_NAME__}: required value missing for key '#{key}': ",
+            "want '#{.{:type}}' or any of '#{.{:types}}'; got 'nil' (spec provides no default)"
+          )
+          .{:default}
+        } else {
+          initial_value
+        }
+
+        const constructed = if (val_choice1.is_typename && !.{:literal_typename}) {
+          sidefext::construct::maybe_init( val_choice1 )
+        } else {
+          val_choice1
+        }
+
+        const Block do_ewise_construct = (ewise_construct ? _do_ewise_construct : CONSTRUCT1 )
+        const Block do_attempt_cast    = (attempt_cast && ( .has_key(:caster) ? .{:caster} : _do_attempt_cast ) )
+
+        const done_constructing = {
+            |match, re_ctd|
+          if (match) {
+            re_ctd
+          } elsif (attempt_cast) {
+            do_attempt_cast(spec{:type}, re_ctd, do_ewise_construct)
+          } elsif (!attempt_cast) {
+            die "type mismatch (2)"
+          } else { die "???" }
+
+          # we've created /something/, now we have to typecheck
+        }( if (.haskey(:types) || .haskey(:subtype)) {
+          complex_typecheck( constructed, .{:type}, .{:types}, .{:subtype})
+        } elsif (constructed !~ .{:type}) {
+          if (attempt_cast) {
+            (true, do_attempt_cast(spec{:type}, constructed, do_ewise_construct))
+          } else {
+            (false, die (
+              "#{__FILE__}:#{__LINE__}: #{__METHOD_NAME__}: #{__FUNC_NAME__}: type mismatch for '#{key}': ",
+              "want '#{.{:type}}'; got '#{constructed.class}' ('#{constructed.dump}')"
+            ))
+          }
+        } else { (true, constructed) } )
+
+        (.{:converter} \\ Block.identity)(done_constructing)
+      }(spec)
+    }
+
+    <<'EOS' # '
+     Supported keys:
+       (none)            (interpreted as a typename)
+       :required         a boolean
+                         defaults to false
+       :type             a typename, used in conversions
+       :types            an iterable of allowed types
+       :subtype          a Hash
+         :subset           (Sidef feature missing) value must fit this subset
+         :subsets          ditto for many subsets
+         :element_type     Hash value, Array/Set item type constraint (Array<Bool> &c)
+         :element_types    ditto for multiple allowed
+         :element_subset   (Sidef feature missing) elements match this subset
+         :element_subsets  or these subsets
+       :default          a value to be used in lieu of the actual value in `subject`
+                           if unset and value is nil, it will construct :type
+       :deferred         a block, allowing late binding on not-yet-existing scopes
+       :literal_typename a boolean, default: false
+                           this option allows literalizing typenames
+                           when this typename is a value, it would usually be constructed
+       :caster           a block called only if the value is not of the correct type
+       :converter        a block called in any case, as the last step, after all other transformations
+       :ewise_construct  a boolean, whether to detect constructions such as Set([]) obviously having
+                           the intent Set([]...)
+                         defaults to true
+       :attempt_cast     a boolean, whether to immediately throw or cast on type mismatch
+                         defaults to true
+EOS
+
+    const attempt_cast_o = true
+    const ewise_construct_o = true
+    const Block do_ewise_construct = (ewise_construct_o ? _do_ewise_construct : CONSTRUCT1)
+
+    # we're just going to drop keys that aren't in self
+    self.map_kv{
+        |k, self_v|
+      const subj_v = subject{k}
+      # say "\nself_v: '#{self_v}'"
+      ((k) => given ( self_v ) {
+        when ( nil ) { subj_v }
+        case ( .is_typename && subj_v~~_ ) {
+          subj_v
+        }
+        case ( .is_typename && subj_v!~_ ) {
+          # say "b2 subj_v: '#{subj_v}'"
+          if (attempt_cast_o) {
+            (defined(subj_v)
+              ? _do_attempt_cast(_, subj_v, do_ewise_construct)
+              : sidefext::construct::maybe_init( _() )
+            )
+            # sidefext::construct::maybe_init( defined(subj_v) ? _( @|subj_v ) : _() )
+          } else {
+            die (
+              "#{__FILE__}:#{__LINE__}: #{__METHOD_NAME__}: type mismatch for '#{k}': ",
+              "want '#{_}'; got '#{subj_v.class}' ('#{subj_v.dump}')"
+            )
+          }
         }
         when (Hash) {
-          _templ_tform_single(_, k, self_v)
+          # self_v is our spec for this key
+          _templ_tform_single(k, self_v, subj_v, attempt_cast_o, ewise_construct_o)
         }
-        default { die "don't know that spec value: '#{_}' ('#{self_v}'; key: '#{k}')"}
+        default { die "don't know that spec value: '#{subj_v.class}' ('#{subj_v}'; key: '#{k}'; typename: #{subj_v.is_typename})"}
       })
     }
   }

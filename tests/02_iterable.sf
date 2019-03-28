@@ -1,0 +1,23 @@
+include sidefext::object
+include sidefext::iterable
+
+1000.times {
+  assert_eq(
+    Hash( 1 => { assert_eq(_, :1); 2 }, 3 => { 4 }, 5 => { assert_eq(_, :5); 6 } ).run_keys(:1, :5),
+    :( 1 => 2, 5 => 6)
+  )
+
+  assert_eq(
+    Hash( 1 => { assert_eq(_, :1); 2 }, 3 => { 4 }, 5 => { assert_eq(_, :5); 6 } ).ordered_run_keys(:1, :5),
+    [2, 6]
+  )
+
+  assert_eq(
+    Hash( :c => :b, :a => :d ).change_extant_keys( :( :a => { _.uc }, :c => { _.lc }, :x => { die "don't call this" } ) ),
+    Hash( :c => :b, :a => :D )
+  )
+
+  assert( sidefext::iterable::is_iterable_object("") )
+  assert( ! sidefext::iterable::is_iterable_object(Str) )
+  assert( sidefext::iterable::is_iterable_object([]) )
+}

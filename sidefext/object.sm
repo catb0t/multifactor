@@ -3,6 +3,17 @@ class Object {
   method rescope (b) { b.run(self) }
   method cleave (*b) { b.map{ .run(self) } }
 
+  method ifte (Block cond, Block then, Block els) {
+    cond.run(self) ? then.run(self) : els.run(self)
+  }
+
+  method namedcleave (:bx) {
+    bx.map_kv{
+        |k, _|
+      ((k) => .run(self))
+    }
+  }
+
   method n_all (*_bx) -> Bool {
     func _nall (b) {
       !b

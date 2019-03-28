@@ -38,10 +38,10 @@ module FactorBashStateless {
       (
         { "give up" } ¦ { die "[FATAL] #{__FUNC_NAME__}: can't find or download boot image\n\tno boot image, can't compile (sorry!)" }
       )
-    ].find{ .first.run }.cleave{ .second.run }.last.cleave(
-      { say "#{__FUNC_NAME__}: !!! Chose #{_}" },
-      { _ }
-    ).last
+    ].find{ .first.run }.cleave{ .second.run }.last.rescope{
+      say "#{__FUNC_NAME__}: !!! Chose #{_}"
+      _
+    }
   }
 }
 
@@ -78,7 +78,7 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
   }
 
   -> src_sums () is cached -> builtobj::SrcSums {
-    -> single_dirsum (dir, Bool skip = false) is cached -> NamedParam {
+    -> single_dirsum (String dir, Bool skip = false) is cached -> NamedParam {
       dir ⫶ builtobj::DirSum(
         algo: self.sum_src_algo,
         names: skip ? '' : self.sum_git_names_matching(Dir(dir), self.sum_src_algo),
@@ -90,7 +90,7 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
       builtobj::SrcSums(
         # .push( single_dirsum(:basis, self.basis_dev) )...,
         Set(:vm, :core, :basis).map{
-          single_dirsum(_, _ == :basis && self.basis_dev)
+          single_dirsum(_, .== :basis && self.basis_dev)
         }...,
         basis_ignored: self.basis_dev
       )
@@ -136,31 +136,31 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
     say "factor_version=#{self.delegate(:factor_version)}"
   }
 
-  -> build_factor (builtobj::BuiltObj bo_target) {
+  -> build_factor (builtobj::BuiltObj bo_target) -> Bool {
     self.with_directory{
       bo_target.cleave(
-        { .lock }, { lib::shell_words::BuildSh.make_clean_factor(_, output: self.subcommand_output) },
+        { .lock }, { Combi::first( lib::shell_words::BuildSh.make_clean_factor(_, output: self.subcommand_output) ) },
         { .vm_fullname.exists }, { .lib_fullname.exists }, { .unlock }
       ).all
     }
   }
 
-  -> _refresh_image (builtobj::BuiltObj bo_target) {
+  -> _refresh_image (builtobj::BuiltObj bo_target) -> Bool {
     self.with_directory{
-      Command::spawn_se(
+      Combi::first( Command::spawn_se(
         './' + bo_target.vm_fullname, '-no-user-init', "-i='#{bo_target.image_fullname}'",
         "-e='USING: vocabs.loader vocabs.refresh system memory ; refresh-all save 0 exit'",
         output: self.subcommand_output
-      )
+      ) )
     }
   }
-  -> _make_boot_image (builtobj::BuiltObj bo_target, Str target, File want_name) {
+  -> _make_boot_image (builtobj::BuiltObj bo_target, Str target, File want_name) -> Bool {
     self.with_directory{
-      Command::spawn_se(
+      ( Combi::first( Command::spawn_se(
         './' + bo_target.vm_fullname, '-no-user-init', "-i='#{bo_target.image_fullname}'",
         "-e='USING: system bootstrap.image memory ; \"#{target}\" make-image image-path save-image 0 exit'",
         output: self.subcommand_output
-      ) && lib::shell_words::BuildSh.generate_make_targets(){:boot_image}.move(want_name)
+      ) ) && lib::shell_words::BuildSh.generate_make_targets(){:boot_image}.move(want_name) )
     }
   }
 
@@ -177,8 +177,8 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
       # this side-effecting code will be deferred until used, except that isn't acutally what we want
       using_boot_image
 
-      -> run_boot_image {
-        Command::spawn_se("echo \"USE: system 255 (exit)\"", '|', './' + bo_target.vm_fullname, '-no-user-init' "-i='#{using_boot_image}'", output: self.subcommand_output)
+      -> run_boot_image -> Bool {
+        Combi::first( Command::spawn_se("echo \"USE: system 255 (exit)\"", '|', './' + bo_target.vm_fullname, '-no-user-init' "-i='#{using_boot_image}'", output: self.subcommand_output) )
       }
       var count_refresh = 1
       # NOTE: STEP 1: run from boot image

@@ -18,6 +18,10 @@
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 module Combi {
+
+  func ifte (obj, Block cond, Block then, Block els) {
+    cond(obj) ? then(obj) : els(obj)
+  }
   # travelling in a fighter Combi(nators)
   # similar to with, but allows more arguments and doesn't care about definedness
   func rescope (*args) {
@@ -33,9 +37,13 @@ module Combi {
     }
   }
 
+  # return only the top of the stack
+  -> first (*a) { a.last }
+  -> second (*a) { a.last(2).first }
+
   -> rescope_first (*a) { Combi::rescope_n(1, @|a) }
-  -> drop (*a) { Combi::rescope( a[1..a.len-1] ) }
-  -> nip (*a) { Combi::rescope( a[0..a.len-2] ) }
+  -> drop (*a) { Combi::rescope( a[1..a.len-1] ) } # drops from the right (top of the stack)
+  -> nip (*a) { Combi::rescope( a[0..a.len-2] ) }  # from the left
 
   -> drop_n (Number n, *a) { Combi::rescope( a[n..a.len-1] ) }
   -> nip_n  (Number n, *a) { Combi::rescope( a[0 .. a.len-(n + 1) ] ) }
@@ -124,93 +132,64 @@ module Combi {
   func binop_pairs_a (Array args) -> Block { Combi::_bind_binop_pairs(args) }
   func binop_pairs (*args) -> Block { Combi::_bind_binop_pairs(args) }
 
+  struct Finalized {
+    Bool success
+    String f7r_name
+
+    Array obj_args
+    Array f7r_args
+
+    Array success_ret
+    Array f7r_ret
+
+    Hash exc_info
+  }
+
   # how to deal with multiple return values, without assigning a local?
   # use rescope_n! or apply, maybe
-  func with_finalizer (obj, name, *final_args) {
+  func with_finalizer (obj, f7r_name, *final_args) {
     # say "got here"
-    func _finalizer (block, *bargs) -> (Bool, Object) {
-      try {
-        (true, block.run(obj, @|bargs))
+    func _finalizer (block, *bargs) -> Finalized {
+
+      -> fin (String type, String msg) { obj.method(f7r_name)(:(type => type, msg => msg), @|final_args) }
+
+      const Set params_rest = Set(f7r_name: f7r_name, obj_args: bargs, f7r_args: final_args)
+
+      const finalized = try {
+        Finalized(
+          success: true,
+          success_ret: [block.run(obj, @|bargs)],
+          f7r_ret: [],
+          exc_info: :(),
+          params_rest...
+        )
       } catch {
-          |_, msg|
-        (false, obj.method(name)(msg, @|final_args))
+          |type, msg|
+        return Finalized(
+          success: false,
+          f7r_ret: [fin(type, msg)],
+          success_ret: [],
+          exc_info: :(type => type, msg => msg),
+          params_rest...
+        )
       }
+      finalized.f7r_ret.push([fin(:success, '')])
+      finalized
     }
   }
 
   func with_destructor (o, n, *f) { with_finalizer(o, n, f...) }
 
-  func with_finalizers (Array specs) -> (Bool, Array) {
-    func _finalizers (*ba_pairs) {
-      try {
-        (true, [specs, ba_pairs].zip.map{ _[1].key.run(_[0], @|.value ) } )
-      } catch {
-          |_, msg|
-        (false, specs.map{ .method( _[1] )( msg, @|_.last(_.len - 2) ) } )
-      }
-    }
-  }
-
-  func with_destructors (s) { Combi::with_finalizers(s) }
-}
-
-if (__FILE__ == __MAIN__) {
-  -> A((0), n) { n + 1 }
-  -> A(m, (0)) { A(m - 1, 1) }
-  -> A(m,  n)  { A(m-1, A(m, n-1)) }
-
-  Combi::applyf( )(
-    { assert_eq( 0, Combi::binop(1, 2)('&') ) },
-    { assert_eq( [61, 125], Combi::applyf( ([3, 3], [3, 4]) )( { A(_...) }, { A(_...) } ) ) },
-    { assert_eq( [3, 7], Combi::binop_pairs(1, 2, 3, 4)('+') ) },  # '
-    { assert_eq( [3, 12], Combi::binop_pairs(1, 2, 3, 4)('+', '*') ) }, # '
-    { assert_eq( [3, 12, 11], Combi::binop_pairs(1, 2, 3, 4, 5, 6)('+', '*') ) } # '
-    { assert_eq( [3, 12, 11, 0], Combi::binop_pairs(1, 2, 3, 4, 5, 6, 7)('+', '*') ) } # '
-    { assert_eq( [Pair(1, 2), Pair(3, 4), Pair(5, 6), Pair(7, 0)], Combi::binop_pairs(1, 2, 3, 4, 5, 6, 7)(Pair) ) }
-  )
-
-  class A {
-    method be { say __CLASS_NAME__+': i feel sick...'; die 'i am dead' }
-    method destroy (msg, *rest) {
-      say "#{__CLASS_NAME__}: destructor called: #{msg.dump}; #{rest}"
-      "OHNOES!"
-    }
-  }
-
-  var a = A()
-
-  Combi::rescope_first(
-    Combi::with_finalizer(a, :destroy, :args)({
-      .be
-    })
-  )({
-      |v, r|
-    assert(/failed! \["OHNOES!"\]/ ~~ (v ? "the code worked" : "the code has failed! #{r.dump}"))
-  })
-
-  Combi::rescope( true, :was_true )({
-      |_, v|
-    assert( .&& v )
-  })
-
-  Combi::rescope( false, nil )({
-      |_, v|
-    assert( .|| !defined(v) )
-  })
-
-  func multi (c) {
-    c ? (true, @| c*2) : (false, nil)
-  }
-
-  Combi::rescope( multi([1, 2]) )({
-      |*_|
-    assert_eq( _, [true, 1, 2, 1, 2] )
-  })
-
-  Combi::rescope( multi([]) )({
-      |*_|
-    assert_eq(_, [false, nil])
-  })
-
-  say "\n*** Combi tests passed! "
+  # TODO
+  #func with_finalizers (Array specs) -> (Bool, Array) {
+  #  func _finalizers (*ba_pairs) {
+  #    try {
+  #      (true, [specs, ba_pairs].zip.map{ _[1].key.run(_[0], @|.value ) } )
+  #    } catch {
+  #        |_, msg|
+  #      (false, specs.map{ .method( _[1] )( msg, @|_.last(_.len - 2) ) } )
+  #    }
+  #  }
+  #}
+  #func with_destructors (s) { Combi::with_finalizers(s) }
 }

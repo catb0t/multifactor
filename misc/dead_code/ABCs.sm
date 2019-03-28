@@ -139,18 +139,8 @@ class Array {
   method all_eq {
     self«==»
   }
-  method all {
-    self.all{ _ }
-  }
-  method none {
-    self.all{ !_ }
-  }
   method all_neq {
     self.combinations(2).map{ !.all_eq }.all
-  }
-
-  method merge {
-    self.reduce{ |l, r| l.merge(r) }
   }
 }
 
@@ -385,7 +375,7 @@ class SeriallyAccessible < SeriallyEquatable {
   -> _bind_self_in_accessor_generator () -> Block {
     {
         |k, v|
-      -> try_index(Num i, Block b = { _ }) { (is_fqco(v) && v.is_a(Array)) ? v[i] : b.run(v) }
+      -> try_index(Num i, Block b = Block.identity) { (is_fqco(v) && v.is_a(Array)) ? v[i] : b.run(v) }
       const typename = try_index(0)
       const default_val = try_index(1, { _() } )
       const custom_blocks = try_index(2, b: { Hash() } )

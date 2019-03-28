@@ -345,7 +345,7 @@ class ArgParse (Array argv) {
     const continuing = "\t[Now continuing due to backward compatibility and excessive paranoia.]"
 
     -> unknown_option (String length, Number nr, String name, Number short_pos = 0, String short_char = "" , String parent_param = "") {
-      name = if ( [short_pos, short_char].any{ _ } ) {
+      name = if ( [short_pos, short_char].any ) {
         "'#{parent_param}' char #{short_pos}: '#{short_char}'"
       } else {
         "'#{name}'"

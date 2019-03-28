@@ -16,7 +16,7 @@
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 include sidefext::combi
-include sidefext::iterable # Array.merge_reduce, Hash.change_extant_keys
+include sidefext::iterable # Hash.change_extant_keys
 
 module MsgTypes {
   define NO_ERROR      = :NO_ERROR
@@ -58,27 +58,31 @@ func dispatches_cleanup (String ds, Str type) -> Hash {
         |k, v|
       ( ("#{k}:#{i}") => v )
     }
-  } ).reduce{ |l, r| l.merge(r) } \\ Hash()
+  } ).reduce('merge') \\ Hash()
 }
 
 func msg_fields (m) is cached -> Hash {
   m.named_captures.change_extant_keys( :(
-    :block_dispatches => { dispatches_cleanup(_, :block) },
-    :class_dispatches => { dispatches_cleanup(_, :class) }
+    [:block, :class].map{ (
+      (.+:_dispatches) =>
+        { |s| dispatches_cleanup(s, _) }
+    ) }.to_h
   ) )
 }
 
 func classify (String msg) is cached -> (String, Object) {
-  const type = MsgTypes::MSG_REGEXES.find{ .value ~~ msg }
-  if (!type) { die "#{__FUNC_NAME__}: can't classify THAT!\n\t#{msg.dump}"}
-  (type.key, msg_fields(msg =~ type.value) )
+  with ( MsgTypes::MSG_REGEXES.find{ .value ~~ msg } ) {
+    (.key, msg_fields(msg =~ .value) )
+  } else {
+    die "#{__FUNC_NAME__}: can't classify THAT!\n\t#{msg.dump}"
+  }
 }
 
 if (__FILE__ == __MAIN__) {
   DATA.slurp.split("\n%\n").each{
     Combi::applyf( classify(.apply_escapes) )(
       { assert_ne(_, MsgTypes::OTHER_UNCLASSIFIED); _+' => ' },
-      { _ },
+      Block.identity,
     ).join.say
   }
   say "*** Test passed!"

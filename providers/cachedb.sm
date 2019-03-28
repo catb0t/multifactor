@@ -113,8 +113,8 @@ class CacheDB < lib::withdirectory::CapturedWriter {
   -> data { self.orig_data }
 
   method setup (Hash cdb_opts) -> __CLASS__ {
-    cdb_opts.template_transform( TEMPLATE_SETUP_CACHEDB ).rescope{
-      self.log = .{:logger}(_)
+    TEMPLATE_SETUP_CACHEDB.template_transform(cdb_opts).rescope{
+      self.log = (*.{:logger})(_)
       self.dry_run = .{:dry_run}
 
       self.db_dir = .{:dir}

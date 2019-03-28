@@ -117,7 +117,7 @@ module MultiFactor {
       .field_groups.map{
         const tn = .first
         .second.map{ ((_) => tn) }.to_h
-      }.merge_reduce
+      }.reduce('merge')
     } ]
 
     # has Bool _force
@@ -168,7 +168,7 @@ module MultiFactor {
       # say "MFRuntime: #{self.uuid}"
       self.initial_wd( Dir.cwd )
       Hash(
-        :action => { _ },
+        :action => Block.identity,
       ).merge(
         [:force, :dry_run, :info, :clean, :sums, :basis_dev] \
           .map{ ( (_) => { Bool(_) } ) }.to_h # all these parentheses are important
@@ -440,8 +440,8 @@ module MultiFactor {
       }
       const BuiltObj db_data = self.db_man.data
       if (self.debug) {
-        say current_status.dump
-        say db_data.dump
+        #say current_status.dump
+        #say db_data.dump
       }
 
       const match_bo = db_data.values.find{

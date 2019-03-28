@@ -92,17 +92,17 @@ class Serializable {
         if (! (uexcl || uincl)) {
           { _() }
         } elsif (uexcl && !uincl) {
-          { hashset::hash_diff_set( _(), excl ) }
+          { _() - excl }
         } elsif (!uexcl && uincl) {
-          { hashset::hash_intersect_set( _(), incl) }
+          { _() & incl }
         } else  { # (uincl && uexcl)
           if (incl.len > excl.len) {
-            { hashset::hash_diff_set( hashset::hash_intersect_set( _(), incl ), excl ) }
+            { _()&incl - excl }
           } else {
-            { hashset::hash_intersect_set( hashset::hash_diff_set( _(), excl), incl) }
+            { _()-excl & incl }
           }
         }
-      ).merge_reduce \\ Hash()
+      ).reduce('merge') \\ Hash()
   }
 
   -> _do_serial (Block d, incl = Set(), excl = Set()) {
