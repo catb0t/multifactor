@@ -1,11 +1,11 @@
 #! /usr/bin/ruby
-include sidefext::combi 
+include sidefext::combi
 
 -> A((0), n) { n + 1 }
 -> A(m, (0)) { A(m - 1, 1) }
 -> A(m,  n)  { A(m-1, A(m, n-1)) }
 
-Combi::applyf( )(
+Combi::apply( )(
   { assert_eq( 0, Combi::binop(1, 2)('&') ) },
   { assert_eq( [61, 125], Combi::applyf( ([3, 3], [3, 4]) )( { A(_...) }, { A(_...) } ) ) },
   { assert_eq( [3, 7], Combi::binop_pairs(1, 2, 3, 4)('+') ) },  # '
@@ -16,23 +16,23 @@ Combi::applyf( )(
 )
 
 class A {
-  method be { say __CLASS_NAME__+': i feel sick...'; die 'i am dead' }
-  method destroy (msg, *rest) {
-    say "#{__CLASS_NAME__}: destructor called: #{msg.dump}; #{rest}"
-    "OHNOES!"
+
+  method be_ok { say __CLASS_NAME__+': i feel ok...' }
+
+  method be_die { say __CLASS_NAME__+': i feel sick...'; die 'i am dead' }
+
+  method destroy (Hash exc_info, *rest) {
+    say "#{__CLASS_NAME__}: destructor called: '#{exc_info{:type}}'; #{rest}"
   }
 }
 
-var a = A()
+# var a = A()
 
-Combi::rescope_first(
-  Combi::with_finalizer(a, :destroy, :args)({
-    .be
-  })
-)({
-    |v, r|
-  assert(/failed! \["OHNOES!"\]/ ~~ (v ? "the code worked" : "the code has failed! #{r.dump}"))
-})
+# Combi::with_finalizers(a, :destroy, :args)({
+#   .be_ok
+# }).rescope(func (Combi::Finalized _) {
+#   assert(/failed! \["OHNOES!"\]/ ~~ (v ? "the code worked" : "the code has failed! #{r.dump}"))
+# })
 
 Combi::rescope( true, :was_true )({
     |_, v|

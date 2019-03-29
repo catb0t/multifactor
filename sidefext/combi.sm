@@ -22,6 +22,10 @@ module Combi {
   func ifte (obj, Block cond, Block then, Block els) {
     cond(obj) ? then(obj) : els(obj)
   }
+  func ifte (Block cond, Block then, Block els) {
+    const c = [cond()]
+    if ( c.all ) { then(c...) } else { els(c...) }
+  }
   # travelling in a fighter Combi(nators)
   # similar to with, but allows more arguments and doesn't care about definedness
   func rescope (*args) {
@@ -33,7 +37,7 @@ module Combi {
 
   func rescope_n (Num n, *args) {
     func _bind_rsn (Block b) {
-      b.run( args[0..^n], args.last(args.len - n) )
+      b.run( args[0..^n], args.slice(n) )
     }
   }
 
@@ -56,11 +60,17 @@ module Combi {
     }
   }
 
-  func combinate (*blocks) {
+  func combinate (*blocks) -> Block {
     func _combinate_args (*args) {
       func _r_combinate (last_res, Num i) {
         __FUNC__( blocks[i].run(last_res), i )
       }(blocks[0].run(args), 1)
+    }
+  }
+
+  func curry (Block b) {
+    func _curry( *args ) {
+      b(@|args)
     }
   }
 
@@ -94,6 +104,7 @@ module Combi {
         when (Block) { continue }
         when (String) { op.run(a, b) }
         when (LazyMethod) { continue }
+        case (.is_typename) { continue }
         default { op(a, b) }
       }
     }
@@ -103,7 +114,7 @@ module Combi {
     func _recur_binop_pair_fewer_wrap (Array args, Num index) {
       !args ? [] : [
         Combi::binop( args[0, 1] )( ops[ index % ops.len ] ),
-        @|__FUNC__( args.last(args.len - 2), index + 1)
+        @|__FUNC__( args.slice(2), index + 1)
       ]
     }(_args, 0)
   }
@@ -112,7 +123,7 @@ module Combi {
     func _recur_binop_pair_n_op (Array args, Array ops) -> Array {
       !args ? [] : [
         Combi::binop( args[0, 1] )( ops[0] ),
-        @|__FUNC__( args.last(args.len - 2), _single ? ops : ops.last(ops.len - 1) )
+        @|__FUNC__( args.slice(2), _single ? ops : ops.slice(1) )
       ]
     }
   }
@@ -121,75 +132,90 @@ module Combi {
     func _binops (*ops) {
       # make up an argument if there was 1 less than even
       const Array padded_args = args+(args.len.is_odd ? [args.last.new] : [])
-      with ( ops.len.is_one || (args.len / ops.len -> int == 2 ) ) {
-        del args
-        # assert(args.len+args.len.is_odd / ops.len -> eq(2) )
-        .? _bind_recur_binop_pair_n_op( ops.len.is_one  )( padded_args, ops )
-        :  _binop_pair_fewer_wrap( padded_args, ops )
-      }
+      const cond = { ops.len.is_one || (args.len / ops.len -> int == 2 ) }
+      del args
+      ifte( cond
+        { _bind_recur_binop_pair_n_op( ops.len.is_one )( padded_args, ops ) }
+        { _binop_pair_fewer_wrap( padded_args, ops ) }
+      )
     }
   }
   func binop_pairs_a (Array args) -> Block { Combi::_bind_binop_pairs(args) }
   func binop_pairs (*args) -> Block { Combi::_bind_binop_pairs(args) }
 
+  struct FinalizerSpec {
+    obj,
+    Array obj_blocks = [],
+
+    Array shared_f7rs, # always call these
+    Array ok_f7rs
+    Array exc_f7rs
+
+    Bool exc_only = true
+  }
+
   struct Finalized {
     Bool success
-    String f7r_name
-
-    Array obj_args
-    Array f7r_args
 
     Array success_ret
-    Array f7r_ret
+    Hash f7r_ret
+
+    FinalizerSpec fs
+    Array _obj_blocks
 
     Hash exc_info
   }
 
-  # how to deal with multiple return values, without assigning a local?
-  # use rescope_n! or apply, maybe
-  func with_finalizer (obj, f7r_name, *final_args) {
-    # say "got here"
-    func _finalizer (block, *bargs) -> Finalized {
+  func with_finalizers (FinalizerSpec fs) -> Block {
+    const obj_class = fs.obj.class
+    say "\tFinalizer #{fs.dump} registered; calling it on exceptions only: #{fs.exc_only}"
+    func _finalizer (*_obj_blocks) -> Finalized {
 
-      -> fin (String type, String msg) { obj.method(f7r_name)(:(type => type, msg => msg), @|final_args) }
+      const obj_blocks = ifte( { _obj_blocks || fs.obj_blocks }
+        { cleave(.[0])( { .is_a(Block) }, { .is_object } ).all ? [ .[0] ] : _ }
+        { [ [Block.list_identity] ] }
+      )
 
-      const Set params_rest = Set(f7r_name: f7r_name, obj_args: bargs, f7r_args: final_args)
+      const exc_info = :( type => 'The operation completed successfully.', msg => '' ) # '
+
+      -> fin (Bool is_exc) -> Hash {
+        with (fs) {
+          const caller = { [ fs.obj.method( .[0] )( is_exc, exc_info, @|.slice(1) ) ] }
+          :((
+            :shared => .shared_f7rs.map(caller),
+            :exc => is_exc ? .exc_f7rs.map(caller) : [],
+            :ok => (!is_exc && !.exc_only) ? .ok_f7rs.map(caller) : [],
+          ))
+        }
+      }
+
+      const Set params_rest = Set(_obj_blocks: _obj_blocks, fs: fs, exc_info: exc_info
+)
 
       const finalized = try {
         Finalized(
           success: true,
-          success_ret: [block.run(obj, @|bargs)],
+          success_ret: obj_blocks.map{ [ .[0].run( fs.obj, @|.slice(1) ) ] },
           f7r_ret: [],
-          exc_info: :(),
           params_rest...
         )
       } catch {
           |type, msg|
+        say "\tFinalizer #{fs.dump} called because '#{type}'"
+        exc_info{:type, :msg} = (type, msg)
         return Finalized(
           success: false,
-          f7r_ret: [fin(type, msg)],
+          f7r_ret: fin(true),
           success_ret: [],
-          exc_info: :(type => type, msg => msg),
           params_rest...
         )
       }
-      finalized.f7r_ret.push([fin(:success, '')])
+      if (! fs.exc_only) {
+        finalized.f7r_ret = fin(false)
+      }
       finalized
     }
   }
 
-  func with_destructor (o, n, *f) { with_finalizer(o, n, f...) }
-
-  # TODO
-  #func with_finalizers (Array specs) -> (Bool, Array) {
-  #  func _finalizers (*ba_pairs) {
-  #    try {
-  #      (true, [specs, ba_pairs].zip.map{ _[1].key.run(_[0], @|.value ) } )
-  #    } catch {
-  #        |_, msg|
-  #      (false, specs.map{ .method( _[1] )( msg, @|_.last(_.len - 2) ) } )
-  #    }
-  #  }
-  #}
-  #func with_destructors (s) { Combi::with_finalizers(s) }
+  func with_destructors (o, n, *f) -> Block { with_finalizer(o, n, f...) }
 }

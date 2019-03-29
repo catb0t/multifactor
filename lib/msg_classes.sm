@@ -33,7 +33,8 @@ module MsgTypes {
   define Set NOT_PROPERTY     = Set(MsgTypes::NO_METHOD, MsgTypes::BLOCK_DOES_NOT_MATCH, MsgTypes::BAD_ENCODING)
 
   define Array MSG_REGEXES = [
-    MsgTypes::NO_ERROR ： /^$/,
+    MsgTypes::NO_ERROR ： /^$/
+    MsgTypes::NO_ERROR ： /^The operation completed successfully\.$/i,
     MsgTypes::NO_METHOD ：
       /^(?:\[AUTOLOAD\] )?Undefined method `(?<method_name>.*)' called from (?<method_invoked_from>.*)/,
     MsgTypes::BLOCK_DOES_NOT_MATCH ：
@@ -43,8 +44,8 @@ module MsgTypes {
     MsgTypes::BAD_ENCODING ： /^Unknown encoding '(?<encoding>.*)'/,
     MsgTypes::PERL_RUNTIME ：
       /^(?:Not an? (?<tried_ref>.*) reference|Can't use (?<tried_ref_type>.*) \((?<tried_ref_with>"[^"]+")\) as an? (?<tried_ref>.*) ref while.*) at .*/,
-    MsgTypes::PERL_COMPILER ： /Bareword/,
-    MsgTypes::OTHER_UNCLASSIFIED ： /^(?<value>[\S\s]*)/,
+    MsgTypes::PERL_COMPILER ： /Bareword/
+    MsgTypes::OTHER_UNCLASSIFIED ： /^(?<value>[\S\s]*)/
     # Pair(:PERL_INTERNAL, /^(.*)/)
   ]
 }
@@ -80,7 +81,7 @@ func classify (String msg) is cached -> (String, Object) {
 
 if (__FILE__ == __MAIN__) {
   DATA.slurp.split("\n%\n").each{
-    Combi::applyf( classify(.apply_escapes) )(
+    Combi::apply( classify(.apply_escapes) )(
       { assert_ne(_, MsgTypes::OTHER_UNCLASSIFIED); _+' => ' },
       Block.identity,
     ).join.say
@@ -117,3 +118,7 @@ class `BlobSums` does not match BlobSums(NamedParam, Pair, Pair, Pair), invoked 
 
 Possible candidates are:
     BlobSums(String algo, String vm, String lib, String boot)
+%
+
+%
+The operation completed successfully.

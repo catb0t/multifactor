@@ -18,7 +18,7 @@ class Object {
     func _nall (b) {
       !b
         ? true
-        : (b.first.run(self) ? __FUNC__(b.last(b.len-1)) : false)
+        : (b.first.run(self) ? __FUNC__(b.slice(1)) : false)
     }(_bx)
   }
 
@@ -26,7 +26,7 @@ class Object {
     func _nany (b) {
       !b
         ? false
-        : (b.first.run(self) ? true : __FUNC__(b.last(b.len-1)) )
+        : (b.first.run(self) ? true : __FUNC__(b.slice(1)) )
     }(_bx)
   }
 
