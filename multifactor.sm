@@ -76,6 +76,7 @@ module MultiFactor {
   import builtobj::DirSum
   import builtobj::SrcSums
   import builtobj::BlobSums
+  import builtobj::VirtualBase64Blob
   import builtobj::TimeSpec
   import builtobj::BuiltObj
 
@@ -165,7 +166,7 @@ module MultiFactor {
     has Array init_steps_10_mfruntime = [ {
         |self|
       self.uuid( GuardIO::make_uuid(words: true) )
-      # say "MFRuntime: #{self.uuid}"
+      say "MFRuntime: #{self.uuid}"
       self.initial_wd( Dir.cwd )
       Hash(
         :action => Block.identity,
@@ -221,11 +222,12 @@ module MultiFactor {
       self.log.trc(__FILE__, __LINE__, :init_steps_10_mfruntime, "finished configuration") #, wd now: '#{self.db_dir}'")
     } ]
 
-    method destroy (msg, *rest) {
-      Combi::rescope( lib::msg_classes::classify( msg ) )({
+    method destroy (Bool is_exc, Hash exc_info, *rest) {
+      Combi::rescope( lib::msg_classes::classify( exc_info{:msg} ) )({
           |type, fields|
-        say "#{__CLASS_NAME__}: destructor called!\n\t\t#{type} :: #{fields.grep_kv{ .!= :block_tried_invoke }}\n"
-        [self.db_man, self.locker].map{ .destroy }
+        say "#{__CLASS_NAME__}: destructor called!\n\t\t#{exc_info{:type}} :: #{fields.grep_kv{ .!= :block_tried_invoke }}\n"
+        [self.db_man, self.locker].map{ .destroy(is_exc, exc_info) }
+        say "eo dtor"
         type
       })
     }
@@ -312,14 +314,14 @@ module MultiFactor {
         ))
       }
 
-      const disk_sum_stored = self._blob_file_contents_sum(bo.boot_fullname, bo.stored_boot_image(){:algo})
+      const disk_sum_stored = self._blob_file_contents_sum(bo.boot_fullname, bo.stored_boot_image.algo)
 
-      if ( disk_sum_stored != bo.stored_boot_image(){:sum} ) {
-        bo.stored_boot_image(Hash(
-          :sum => disk_sum_stored,
-          :data => self.fbash.with_directory{ GuardIO::read_binary_b64(bo.boot_fullname) },
-          :algo => bo.stored_boot_image(){:algo} || bo.blob_algorithm || self.sum_blob_algo
-        ))
+      if ( disk_sum_stored != bo.stored_boot_image.sum ) {
+        bo.stored_boot_image( VirtualBase64Blob(
+          sum: disk_sum_stored,
+          data: self.fbash.with_directory{ GuardIO::read_binary_b64(bo.boot_fullname) },
+          algo: (bo.stored_boot_image.algo || bo.blob_algorithm || self.sum_blob_algo)
+        ) )
       }
     }
 
@@ -354,13 +356,13 @@ module MultiFactor {
       })
     }
 
-    -> _make_disk_blob_sums (BuiltObj bo, Array targets) {
+    -> _make_disk_blob_sums (BuiltObj bo, Array targets) -> BlobSums {
       self.fbash.with_directory{
         BlobSums(
           algo: self.sum_blob_algo,
           targets.map{
               |target|
-            ( target ¦ self._blob_file_contents_sum( bo.method(target + :_fullname)(), bo.blob_algorithm ) )
+            ( target ⫶ self._blob_file_contents_sum( bo.method(target + :_fullname)(), bo.blob_algorithm ) )
           }...
         )
       }
@@ -599,27 +601,29 @@ func main {
   var (opts, args, *_) = parser.go...
   # say "#{opts} #{args} #{_}"
 
-  # const r =
-  Combi::rescope_first(
-    Combi::with_destructor(
-      MultiFactor::MFRuntime(opts, args.keys).debug(true),
-      :destroy
-    )({
-        # MFRuntime object inside with_destructor
-      .go
-    })
-  )({
-      # inside rescope_first
-      |status, destructor_returned|
-    if (!status) {
-      say "~MFRuntime called due to runtime error, it said: #{destructor_returned}"
-    }
+  const destroy_mf = Combi::FinalizerSpec(
+    obj: MultiFactor::MFRuntime(opts, args.keys).debug(true),
+    shared_f7rs: [[:destroy]],
+    exc_only: false
+  )
+
+  const done = Combi::with_destructors( destroy_mf )({
+      # MFRuntime object inside with_destructor
+    die "Stopped"
+    # .go
   })
+  #...
+  say Combi::dump(done)
+  # with (done) {
+  #   if (!.success) {
+  #     say "~MFRuntime called due to runtime error: #{Combi::dump(_)}"
+  #   }
+  # }
 
   Factor::say_stderr("\n\tΔ#{μsec(μs)} ×1,000μ")
 }
 
 if (__FILE__ == __MAIN__) {
-  say SCRIPT{:name}+'entrypoint main()'
+  say SCRIPT{:name}+' entrypoint main()'
   main()
 }

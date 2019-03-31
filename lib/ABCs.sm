@@ -315,7 +315,7 @@ class SeriallyAccessible << ModularInit, SeriallyEquatable {
           .is_a(typename) \
             || die(
               "#{__FILE__}:#{__LINE__}: #{__METHOD_NAME__}:  ",
-              "type mismatch in generated setter '#{field_name}': want '#{typename}'; got '#{_.class}'  ('#{_.dump}')"
+              "type mismatch in generated setter '#{field_name}': want '#{typename}'; got '#{_.class}'  ('#{_.dump.first(200)} ...')"
           )
         }
 

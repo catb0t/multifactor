@@ -1,0 +1,41 @@
+include sidefext::combi
+include lib::msg_classes
+
+# module X {
+  class R ( Hash h, Arr a ) {
+    method debug (Bool _) {
+      self
+    }
+
+    method destroy (Bool is_exc, Hash exc_info, *_) {
+      say "is_exc: #{is_exc}"
+      Combi::rescope( lib::msg_classes::classify( exc_info{:msg} ) )({
+          |type, fields|
+        say type
+        say fields
+        type
+      })
+    }
+  }
+# }
+
+func main () {
+  const destroy_mf = Combi::FinalizerSpec(
+    obj: R(:(1 2 3 4), [5 6 7 8]).debug(true),
+    shared_f7rs: [[:destroy]],
+    exc_only: false
+  )
+
+  const done = Combi::with_destructors( destroy_mf )({
+      # MFRuntime object inside with_destructor
+    die "Stopped"
+    # .go
+  })
+  #...
+  say Combi::dump(done)
+}
+
+if (__FILE__ == __MAIN__) {
+  say 'test entrypoint main()'
+  main()
+}

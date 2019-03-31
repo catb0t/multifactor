@@ -3,13 +3,14 @@ include lib::frext
 module Command {
   define Regex RETVAL_REGEX = /__RETURNED=(\d+)/
 
+  # this can be sped up further but it needs a bit of algorithm R&D
   define Block CHAR_OUTPUTTER = {
       |full_str, ch|
     (*full_str).last==(10.chr) && (9.chr.print 9.chr.print)
     ch.print
     *full_str += ch
   }
-  define Block NO_OUTPUT = { |f, c| c.print; *f += c }
+  define Block NO_OUTPUT = { |f, c| *f += c }
 
   func spawn_se (Bool output = false, *cmdline) -> (Number, Bool) {
     $| = 1
@@ -28,7 +29,7 @@ module Command {
             var c = ''
             const Block co = { |b| _char_op(\c, b) }
             .each_char(co)
-            c
+            c.last(16)
           }
         ).last \
         .lines.find{ _ ~~ RETVAL_REGEX } =~ RETVAL_REGEX

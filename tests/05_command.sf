@@ -5,3 +5,6 @@ assert_eq([0, true], [Command::spawn_se( :echo, "ab cd e", output: true )])
 # test the common non-list context
 assert_eq(false, Command::make( :asdf, output: true ))
 assert_eq(true, Command::spawn_se( :echo, "ab cd e", output: true ))
+
+assert_eq([2, false], [Command::make( output: false, :asdf )])
+assert_eq([0, true], [Command::spawn_se( output: false, :echo, "ab cd e" )])

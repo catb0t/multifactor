@@ -167,7 +167,7 @@ module GuardIO {
       self
     }
 
-    method destroy {
+    method destroy (Bool is_exc, Hash exc_info) {
       self.cleanup
     }
 

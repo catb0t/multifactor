@@ -17,22 +17,147 @@ Combi::apply( )(
 
 class A {
 
-  method be_ok { say __CLASS_NAME__+': i feel ok...' }
+  has Bool exc_destructor_ran = false
+  has Bool normal_destructor_ran = false
 
-  method be_die { say __CLASS_NAME__+': i feel sick...'; die 'i am dead' }
+  method be_ok { say __CLASS_NAME__+': i feel ok...'; :be_ok_return }
 
-  method destroy (Hash exc_info, *rest) {
-    say "#{__CLASS_NAME__}: destructor called: '#{exc_info{:type}}'; #{rest}"
+  method be_die { say __CLASS_NAME__+': i feel sick...'; die 'i am dead'; :be_die_return }
+
+  method destroy_exc (Bool is_exc, Hash exc_info, *rest) {
+    self.exc_destructor_ran = true
+    say "#{__CLASS_NAME__}: exception destructor called: '#{exc_info{:type}}' '#{exc_info{:msg}}'; #{rest}"
+    assert(is_exc)
+    :destroy_exc_return
+  }
+  method destroy_normal (Bool is_exc, Hash exc_info, *rest) {
+    self.normal_destructor_ran = true
+    say "#{__CLASS_NAME__}: normal destructor called: '#{exc_info{:type}}'; #{rest}"
+    assert(!is_exc)
+    :destroy_normal_return
   }
 }
 
-# var a = A()
+say 'TEST: don\t call any destructors because no exception occurs and they are not run in normal operation'# '
+3.times{
+  var a = A()
+  var block_ran = false
 
-# Combi::with_finalizers(a, :destroy, :args)({
-#   .be_ok
-# }).rescope(func (Combi::Finalized _) {
-#   assert(/failed! \["OHNOES!"\]/ ~~ (v ? "the code worked" : "the code has failed! #{r.dump}"))
-# })
+  const s1 = Combi::FinalizerSpec(
+    obj: a, ok_f7rs: [[:destroy_normal]], exc_f7rs: [[:destroy_exc]], exc_only: true
+  )
+
+  const f1 = Combi::with_finalizers(s1)({
+    say 'call nothing'
+    block_ran = true
+    .be_ok
+    :block_return
+  })
+  # say "\n\tNOTE: run finished, starting diagnostics\n"
+  # say Combi::_indent_by(Combi::dump(f1), ' ' * 4)
+  assert_eq(block_ran, true)
+  assert_eq(a.normal_destructor_ran, false)
+  assert_eq(a.exc_destructor_ran, false)
+  assert_eq(f1.success, true)
+  assert_eq(f1.blocks_ret, [ [:block_return] ])
+
+  assert_eq(f1.f7r_ret.ok, [])
+  assert_eq(f1.f7r_ret.exc, [])
+  assert_eq(f1.f7r_ret.shared, [])
+
+  assert_eq(f1.exc_info, :(type => 'The operation completed successfully.', msg => '') )
+}
+
+say 'TEST: shared'# '
+3.times{
+  var a = A()
+  var block_ran = false
+
+  const s1 = Combi::FinalizerSpec(
+    obj: a, shared_f7rs: [[:destroy_normal]], exc_only: false
+  )
+
+  const f1 = Combi::with_finalizers(s1)({
+    say 'call nothing'
+    block_ran = true
+    .be_ok
+    :block_return
+  })
+  # say "\n\tNOTE: run finished, starting diagnostics\n"
+  # say Combi::_indent_by(Combi::dump(f1), ' ' * 4)
+  assert_eq(block_ran, true)
+  assert_eq(a.normal_destructor_ran, true)
+  assert_eq(a.exc_destructor_ran, false)
+  assert_eq(f1.success, true)
+  assert_eq(f1.blocks_ret, [ [:block_return] ])
+
+  assert_eq(f1.f7r_ret.ok, [])
+  assert_eq(f1.f7r_ret.exc, [])
+  assert_eq(f1.f7r_ret.shared, [ [:destroy_normal_return] ])
+
+  assert_eq(f1.exc_info, :(type => 'The operation completed successfully.', msg => '') )
+}
+
+say 'normal operation with normal destructors called, and no shared' # '
+3.times{
+  var a = A()
+  var block_ran = false
+
+  const s1 = Combi::FinalizerSpec(
+    obj: a, ok_f7rs: [[:destroy_normal]], exc_f7rs: [[:destroy_exc]], exc_only: false
+  )
+
+  const f1 = Combi::with_finalizers(s1)({
+    say 'call normal dtors'
+    block_ran = true
+    .be_ok
+    :block_return
+  })
+  # say "\n\tNOTE: run finished, starting diagnostics\n"
+
+  # say Combi::_indent_by(Combi::dump(f1), ' ' * 4)
+  assert_eq(block_ran, true)
+  assert_eq(a.normal_destructor_ran, true)
+  assert_eq(a.exc_destructor_ran, false)
+  assert_eq(f1.success, true)
+  assert_eq(f1.blocks_ret, [ [:block_return] ])
+
+  assert_eq(f1.f7r_ret.ok, [[:destroy_normal_return]])
+  assert_eq(f1.f7r_ret.exc, [])
+  assert_eq(f1.f7r_ret.shared, [])
+
+  assert_eq(f1.exc_info, :(type => 'The operation completed successfully.', msg => '') )
+}
+
+say "TEST abnormal operation with exception destructors called" # "
+3.times{
+  var a = A()
+  var block_ran = false
+
+  const s2 = Combi::FinalizerSpec(
+    obj: a, ok_f7rs: [[:destroy_normal]], exc_f7rs: [[:destroy_exc]]
+  )
+  const f2 = Combi::with_finalizers(s2)({
+    say 'call exc dtors'
+    block_ran = true
+    .be_die
+    :block_return
+  })
+  # say "\n\tNOTE: run finished, starting diagnostics\n"
+  # say Combi::_indent_by(Combi::dump(f2), ' ' * 4)
+  assert_eq(block_ran, true)
+  assert_eq(a.normal_destructor_ran, false)
+  assert_eq(a.exc_destructor_ran, true)
+  assert_eq(f2.success, false)
+  assert_eq(f2.blocks_ret, [ ] )
+
+  assert_eq(f2.f7r_ret.ok, [])
+  assert_eq(f2.f7r_ret.exc, [[:destroy_exc_return]])
+  assert_eq(f2.f7r_ret.shared, [])
+
+  assert_eq(f2.exc_info(){:type}, :error)
+  assert(/i am dead/ ~~ f2.exc_info(){:msg} )
+}
 
 Combi::rescope( true, :was_true )({
     |_, v|

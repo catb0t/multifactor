@@ -25,10 +25,10 @@ module FactorBashStateless {
       (
         {
           bo_target.stored_boot_image.cleave(
-            { .{:data}.len },
-            { .{:data}.base64_decode.method( .{:algo} ) },
-            { .{:sum} },
-            { GuardIO::write_binary_b64( bo_target.boot_fullname, .{:data} ) }
+            { .data.len },
+            { .data.base64_decode.method( .algo ) },
+            { .sum },
+            { GuardIO::write_binary_b64( bo_target.boot_fullname, .data ) }
           ).cleave(
             { .first && .last },
             { [ .[1, 2] ]«==» },
