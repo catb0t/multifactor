@@ -5,6 +5,7 @@ perl:
 sudo: true
 dist: xenial
 install:
+  - perlbrew install-cpanm
   - git clone --branch=master --depth=50 https://github.com/trizen/sidef sidef
   - sudo apt update
   - yes | sudo apt install libmpfr-dev libmpc-dev libgmp10 libgmp3-dev
