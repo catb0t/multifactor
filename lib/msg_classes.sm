@@ -50,9 +50,11 @@ module MsgTypes {
   ]
 }
 
+
 func dispatches_cleanup (String ds, Str type) -> Hash {
-  define Hash rs = :( :block => /\G\s+(?<block_name>.+)\((?<block_dispatch>.*?)\)/,
-                      :class => /\G\s+(?<class_name>.+)\((?<class_dispatch>.*?)\)/)
+  define Hash rs = :( :block => /\G\s+(?<block_name>.+)\((?<block_dispatch>.*?)\)/ ,
+                      :class => /\G\s+(?<class_name>.+)\((?<class_dispatch>.*?)\)/ )
+  # assert( type ~~ Set(:block, :class) )
   rs{type}.global_matches(ds, {
       |i, _|
     .named_captures.map_kv{
@@ -63,12 +65,12 @@ func dispatches_cleanup (String ds, Str type) -> Hash {
 }
 
 func msg_fields (m) is cached -> Hash {
-  m.named_captures.change_extant_keys( :(
+  m.named_captures.change_extant_keys(
     [:block, :class].map{ (
       (.+:_dispatches) =>
         { |s| dispatches_cleanup(s, _) }
     ) }.to_h
-  ) )
+  )
 }
 
 func classify (String msg) is cached -> (String, Object) {
@@ -103,6 +105,7 @@ Possible candidates are:
     GG()
     GG(Num)
     GG(GGGG)
+    GG(GGGG, AAAA)
 %
 [AUTOLOAD] Undefined method `Hash.asdasd' called from main()
 %
@@ -122,3 +125,8 @@ Possible candidates are:
 
 %
 The operation completed successfully.
+%
+func `classify` does not match classify(nil), invoked as classify(nil)
+
+Possible candidates are:
+    lib::msg_classes::classify(String msg)

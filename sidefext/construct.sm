@@ -1,10 +1,9 @@
+#! ruby 
+
 func maybe_init (Object obj) {
-  if ( obj.respond_to(:INIT_METHOD_NAME) ) {
-    obj.method( obj.INIT_METHOD_NAME )()
-  } elsif ( obj.is_typename ) {
-    # invoke raw typenames
-    obj()
-  } else {
-    obj
+  with  ( obj.is_typename ? obj() : obj ) {
+    ( .respond_to(:INIT_METHOD_NAME)
+      ? .method( obj.INIT_METHOD_NAME )()
+      : _ )
   }
 }

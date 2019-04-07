@@ -1,3 +1,5 @@
+#! ruby
+
 include sidefext::construct
 include sidefext::metatype
 
@@ -194,9 +196,8 @@ EOS
           if (attempt_cast_o) {
             (defined(subj_v)
               ? _do_attempt_cast(_, subj_v, do_ewise_construct)
-              : sidefext::construct::maybe_init( _() )
+              : sidefext::construct::maybe_init( _ )
             )
-            # sidefext::construct::maybe_init( defined(subj_v) ? _( @|subj_v ) : _() )
           } else {
             die (
               "#{__FILE__}:#{__LINE__}: #{__METHOD_NAME__}: type mismatch for '#{k}': ",
@@ -210,6 +211,19 @@ EOS
         }
         default { die "don't know that spec value: '#{subj_v.class}' ('#{subj_v}'; key: '#{k}'; typename: #{subj_v.is_typename})"}
       })
+    }
+  }
+}
+
+class ImmutableHash ( Hash _data = :(), *_unpacked_data) {
+  method init {
+    if (!self._data && self._unpacked_data) { self._data = self._unpacked_data.to_h }
+
+    [:values, :item, :grep, :grep_kv, :item, :items, :map_kv, :dclone].each{
+      assert( self._data.respond_to( _ ) )
+      __CLASS__.def_method( _, func generated_forwarder (__CLASS__ _s, *args) {
+        self._data.method( _ )( args... )
+      } )
     }
   }
 }

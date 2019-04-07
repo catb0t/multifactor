@@ -164,6 +164,14 @@ Combi::rescope( true, :was_true )({
   assert( .&& v )
 })
 
+Combi::first( 2, 1 )({
+  assert_eq(_, 1)
+})
+
+Combi::second( 2, 1 )({
+  assert_eq(_, 2)
+})
+
 Combi::rescope( false, nil )({
     |_, v|
   assert( .|| !defined(v) )

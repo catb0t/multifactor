@@ -1,0 +1,51 @@
+#! ruby
+
+func curry_props_1d (Array prop_methods) {
+  func curried (Bool keys_only) {
+    with ( prop_methods.map{ _(keys_only: keys_only) } ) {
+      keys_only ? .flatten : .reduce('merge')
+    }
+  }
+}
+
+# { .all{ .~~ String } }
+-> sum_keys (Array _) { .sort.join(';').sha1 }
+
+class Super {
+  has Hash _cached_props = :(
+    :checksum => Hash( :a => [ ] )
+  )
+
+  method _props_lazymethods () -> Array {
+    self.methods.grep_kv{ .~~ /props/ }.values
+  }
+
+  method collect_props {
+    const props_1d = curry_props_1d( self._props_lazymethods )
+
+    # could also store the curried props_1d function .... maybe
+    self._cached_props{ sum_keys( props_1d(true) ) } \\= props_1d(false)
+  }
+
+  method change_props (Hash chg) {
+    const props_1d = curry_props_1d( self._props_lazymethods )
+    self._cached_props{ sum_keys( props_1d(true) ) } = (
+      self.props = props_1d(false).merge(chg)
+    )
+  }
+
+  method change_props_by (Hash chg) {
+    const props_1d = curry_props_1d( self._props_lazymethods )
+    self._cached_props{ sum_keys( props_1d(true) ) } = (
+      self.props = props_1d(false).map_kv{ |k, v| ( (k) => chg{k}.run(v) ) }
+    )
+  }
+}
+
+class Sub < Super {
+  has Hash props = :(
+    :a => [Bool, true, :( get => { true } ) ],
+    :b => Number
+  )
+
+}

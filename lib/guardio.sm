@@ -20,22 +20,31 @@
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 include lib::ABCs
+include lib::feature
 include lib::shell_words
 
 module GuardIO {
   func _bn (Str f) { File(f).basename.split('.').first }
 
-  class SLog (is_trace = true, is_verbose = false, logger = { |*a| STDERR.say( a... ) } ) {
-    -> wrn (Str f, Num l, Str m, *args) { say "[WARN]\t#{_bn(f)}:#{l}: #{m}: #{args.join(' ')}" }
-    -> inf (Str f, Num l, Str m, *args) { self.logger.run("[INFO]\t", _bn(f), ':', l, ': ', m, ': ', args.join(' ')) }
-    -> trc (Str f, Num l, Str m, *args) { self.logger.run("[TRACE]\t", _bn(f), ':', l, ': ', m, ': ', args.join(' ')) if ( self.is_trace) }
-    -> vbs (Str f, Num l, Str m, *args) { self.logger.run("[VBOSE]\t", _bn(f), ':', l, ': ', m, ': ', args.join(' ')) if ( self.is_verbose) }
+  class SLog (is_trace = true, is_verbose = false, logger = {
+        |c, *a|
+      with ( Feature::ANSIColor ) {
+        STDERR.say( .color('bold', c), a..., .RESET )
+      }
+    }
+  ) {
+    -> wrn (Str f, Num l, Str m, *args) {
+      say "#{Feature::ANSIColor.RED}[WARN]\t#{_bn(f)}:#{l}: #{m}: #{args.join(' ')}#{Feature::ANSIColor.RESET}"
+    }
+    -> inf (Str f, Num l, Str m, *args) { self.logger.run('bright_white', "[INFO]\t", _bn(f), ':', l, ': ', m, ': ', args.join(' ')) }
+    -> trc (Str f, Num l, Str m, *args) { self.is_trace && self.logger.run('cyan', "[TRACE]\t", _bn(f), ':', l, ': ', m, ': ', args.join(' ')) }
+    -> vbs (Str f, Num l, Str m, *args) { self.is_verbose && self.logger.run('cyan', "[VBOSE]\t", _bn(f), ':', l, ': ', m, ': ', args.join(' ')) }
   }
 
   -> make_uuid (Bool words = false, Num len = nil) -> String {
     const len = (len || words ? 7 : 32)
     if (words) {
-      %f(/usr/share/dict/words).open_r.lines.grep{ _ ~~ /^\w+$/ }.sample(len).map{ .downcase }.join('_')
+      %f(/usr/share/dict/words).open_r.lines.sample(len ** 3).grep{ _ ~~ /^\w+$/ }.sample(len).map{ .downcase }.join('_')
     } else {
       `tr -dc 'a-z0-9\-_' < /dev/urandom | fold -w#{len} | head -n1`.chomp
     }
@@ -139,6 +148,7 @@ module GuardIO {
     :lock_ext => :( :type => String, :default => '.lock_ext' ), # '
     :locked_fods => :( :type => Array, :subtype => :( :element_subset => FsObj ) ),
     :verbose => Bool,
+    :trace => Bool,
   )
 
   class GlobLocker {
@@ -153,7 +163,7 @@ module GuardIO {
 
     method setup (Hash g) {
       GuardIO::TEMPLATE_SETUP_GLOBLOCKER.template_transform( g ).rescope{
-        self.log = SLog(is_verbose: .{:verbose})
+        self.log = SLog(is_verbose: .{:verbose}, is_trace: .{:trace})
         self.locked_fods( .{:locked_fods}.map{ .abs.realpath } )
         self.remove_old_lock = .{:remove_old_lock}
         self.lock_ext = .{:lock_ext}

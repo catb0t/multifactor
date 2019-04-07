@@ -183,17 +183,18 @@ FinalizerSpec(
   obj_blocks:  #{fs.obj_blocks.dump}
   shared_f7rs: #{fs.shared_f7rs.dump}
   ok_f7rs:     #{fs.ok_f7rs.dump}
-  ok_f7rs:     #{fs.exc_f7rs.dump}
+  exc_f7rs:     #{fs.exc_f7rs.dump}
   exc_only:    #{fs.exc_only.dump}
 )
 EOT
     )
   }
 
-  struct F7rsReturned { Array shared, Array ok, Array exc }
+  class F7rsReturned ( Array shared, Array ok, Array exc ) { }
+  # class F7rsReturned (Array shared = [], Array ok = [], Array exc = []) { }
 
   # you can't ~~ structs
-  subset LazyF7rsReturned < Block, F7rsReturned { !defined(.can(:refaddr)) || ((.is_a(Block)) && .is_object && ._returns==[F7rsReturned]) }
+  subset LazyF7rsReturned < Block, F7rsReturned # { !defined(.can(:refaddr)) || ((.is_a(Block)) && .is_object && ._returns==[F7rsReturned]) }
 
   func dump (fr < LazyF7rsReturned) {
     (defined(fr.can(:refaddr)) && fr.is_a(Block)) ? "( func () -> (F7rsReturned) { ... } )" : ::chomp(<<EOT
@@ -209,10 +210,10 @@ EOT
   struct Finalized {
     Bool success
 
-    Array blocks_ret
-    f7r_ret < LazyF7rsReturned
+    Array blocks_ret,
+    f7r_ret < LazyF7rsReturned,
 
-    FinalizerSpec fs
+    FinalizerSpec fs,
     Array _obj_blocks
 
     Hash exc_info
@@ -273,7 +274,6 @@ EOT
         )
       }
       finalized.f7r_ret.run!
-      # say dump(finalized)
       finalized
     }
   }

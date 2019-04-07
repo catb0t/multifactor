@@ -1,3 +1,4 @@
+#! ruby
 include sidefext::object
 include sidefext::iterable
 

@@ -1,3 +1,4 @@
+#! ruby
 include lib::ABCs
 include lib::shell_words
 import lib::shell_words::BuildSh

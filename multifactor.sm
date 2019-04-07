@@ -19,7 +19,6 @@
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 include lib::ABCs
-include lib::shell_words
 include lib::withdirectory
 
 include lib::msg_classes
@@ -60,16 +59,28 @@ module Factor {
   const Bool CHECKSUM_WITH = Factor::find_config("default-checksum", must_exist: false)
 
   # ???
-  func say_stderr (*args) {
+  func say_stderr (color, *args) {
     if (STDOUT.is_on_tty || (!STDOUT.is_on_tty && !Factor::QUIET_PIPE)) {
       STDERR.autoflush(true)
-      STDERR.say(args...)
+
+      with ( Feature::ANSIColor ) {
+        STDERR.say( .color('bold', color), args..., .RESET )
+      }
     }
     # else, not a TTY and quiet-pipe is true
   }
 }
 
 module MultiFactor {
+
+  include lib::shell_words
+
+  include Factor
+  include FactorBashStateless
+  include GuardIO
+
+  include sidefext::iterable
+  import sidefext::iterable::ImmutableHash
 
   import lib::shell_words::BuildSh
 
@@ -79,10 +90,6 @@ module MultiFactor {
   import builtobj::VirtualBase64Blob
   import builtobj::TimeSpec
   import builtobj::BuiltObj
-
-  include Factor
-  include FactorBashStateless
-  include GuardIO
 
   # historical interest
   # func compare_properties (Array properties, BuiltObj b, Object o, Bool debug = false) {
@@ -109,7 +116,7 @@ module MultiFactor {
 
     # todo: collect generated methods that don't appear in .methods
     has Array field_groups = [
-      (Bool   ¦ [:force, :debug, :info, :dry_run, :clean, :sums, :basis_dev]),
+      (Bool   ¦ [:force, :debug, :info, :dry_run, :spoof_build, :clean, :sums, :basis_dev]),
       (String ¦ [:sum_blob_algo, :sum_src_algo, :action, :uuid]),
       (Dir    ¦ [:initial_wd] )
     ]
@@ -128,17 +135,13 @@ module MultiFactor {
     # has Bool _clean
     # has Bool _sums
     # has Bool _basis_dev
-
     # has Str _action
     # has String _sum_blob_algo = :sha256
     # has String _sum_src_algo = :sha256
     # set in config file etc, not a cmdline option
     # has Number uuid_len
-
     # where the process started before any chdir
     # has Dir initial_wd
-
-
     # -> UUID ()         { self._UUID }
     # -> action          { self._action }
     # -> force           { self._force }
@@ -171,8 +174,9 @@ module MultiFactor {
       Hash(
         :action => Block.identity,
       ).merge(
-        [:force, :dry_run, :info, :clean, :sums, :basis_dev] \
-          .map{ ( (_) => { Bool(_) } ) }.to_h # all these parentheses are important
+        # need to use field_groups here
+        [:force, :dry_run, :info, :clean, :sums, :basis_dev, :spoof_build] \
+          .map{ ( (_) => Bool ) }.to_h # all these parentheses are important
       ).each_kv{
           |name, convert|
         self.method( name )( convert( self.options(){ name.replace_all("_", "-") } ) )
@@ -186,25 +190,26 @@ module MultiFactor {
       self.sum_src_algo(cs)
       self.sum_blob_algo(cs)
 
+      const is_trace = ( [:trace, :verbose, 'dry-run'].any{ self.options(){_} } )
+      const is_verbose = ( [:verbose, 'dry-run'].any{ self.options(){_} } )
+
       # initialise helper objects
-      self.log = GuardIO::SLog(
-        is_trace: ( [:trace, :verbose, 'dry-run'].any{ self.options(){_} } ),
-        is_verbose: ( [:verbose, 'dry-run'].any{ self.options(){_} } ),
-        logger: { |*a| Factor::say_stderr( a... ) }
-      )
+      self.log = GuardIO::SLog( is_trace: is_trace, is_verbose: is_verbose, logger: Factor::say_stderr )
 
       self.fbash = providers::factorbash::FactorBash(
         Dir( self.options(){'factor-dir'} || Factor::FACTOR_DIR ),
         self.sum_src_algo,
         self.basis_dev,
-        subcommand_output: ((!self.options(){'quiet-subcom'} \\ Factor::QUIET_PIPE) || (self.options(){'no-quiet-subcom'} \\ (!Factor::QUIET_PIPE)))
+        subcommand_output: ((!self.options(){'quiet-subcom'} \\ Factor::QUIET_PIPE) || (self.options(){'no-quiet-subcom'} \\ (!Factor::QUIET_PIPE))),
+        spoof_build: self.spoof_build
       )
-      # ...
+
       self.db_man = providers::cachedb::CacheDB().setup( :(
           :dir =>              self.options(){'db-dir'},
           :filename_base =>    self.options(){'db-name'},
           :dry_run =>          self.dry_run,
-          :verbose =>          self.options(){:verbose},
+          :verbose =>          is_verbose,
+          :trace =>            is_trace,
           :replace_existing => self.options(){'from-scratch'},
           :element_type =>     BuiltObj,
           # :logger => self.log # separate or same loggers?
@@ -216,20 +221,22 @@ module MultiFactor {
         :remove_old_lock => self.options(){'remove-old-lock'},
         :lock_ext => '.multifactor_lock',
         :locked_fods => [ self.db_man.db_name, self.fbash.wd ],
-        :verbose => self.options(){:verbose}
+        :verbose => is_verbose,
+        :trace => is_trace
       ) )
 
       self.log.trc(__FILE__, __LINE__, :init_steps_10_mfruntime, "finished configuration") #, wd now: '#{self.db_dir}'")
     } ]
 
     method destroy (Bool is_exc, Hash exc_info, *rest) {
-      Combi::rescope( lib::msg_classes::classify( exc_info{:msg} ) )({
+      const type = (is_exc && Combi::rescope( lib::msg_classes::classify( exc_info{:msg} ) )({
           |type, fields|
-        say "#{__CLASS_NAME__}: destructor called!\n\t\t#{exc_info{:type}} :: #{fields.grep_kv{ .!= :block_tried_invoke }}\n"
-        [self.db_man, self.locker].map{ .destroy(is_exc, exc_info) }
-        say "eo dtor"
+        self.log.wrn(__FILE__, __LINE__, __METHOD_NAME__, "#{__CLASS_NAME__}: destructor called!\n\t#{type} :: #{fields.grep_kv{ .!= :block_tried_invoke }}\n")
         type
-      })
+      }))
+      # say "IS_EXC: #{is_exc}"
+      [self.db_man, self.locker].map{ .destroy(is_exc, exc_info) }
+      type
     }
 
      method show_info {}
@@ -240,10 +247,10 @@ module MultiFactor {
      #  say "\tFactor arguments: #{self.factor_arguments}"
      #}
 
-    -> _blob_file_contents_sum (File f, Str algo) {
+    -> _blob_file_contents_sum (File f, Str algo) -> String {
       # self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, "checksumming #{f} with algorithm '#{algo}'")
       # give checksum of empty file, or die?
-      self.fbash.with_directory{
+      self.spoof_build ? '' : self.fbash.with_directory{
         (f.exists && BuildSh.blob_file_contents_sum(f, algo || self.sum_blob_algo)) \
           || die "[FATAL] #{__METHOD_NAME__}: empty algo: file: #{f}"
       }
@@ -330,9 +337,7 @@ module MultiFactor {
       const MN = __METHOD_NAME__
       ((target) => match_bo.method(target + :_fullname)().rescope{
           |target_fullname|
-        (false == previous_recompiled{target})
-        ? false
-        : if (
+        (! previous_recompiled{target} ) || if (
           match_bo.rescope{
               # |b|
             self.fbash.with_directory{
@@ -383,7 +388,7 @@ module MultiFactor {
         { self.log.trc(__FILE__, __LINE__, MN, 'writing the new BuiltObj to disk db because it changed') },
         { self.db_man.insert(_) },
         { self.log.trc(__FILE__, __LINE__, MN, "ok, running factor!") },
-        { self.destroy },
+        # { self.destroy( false, :() ) },
         { self._detach_factor_thread(_.vm_fullname) }
       )
     }
@@ -440,7 +445,7 @@ module MultiFactor {
       status_properties.each{
         with ( self.fbash.delegate( _ ) ) { |v| current_status.method( _ )( v ) }
       }
-      const BuiltObj db_data = self.db_man.data
+      const ImmutableHash db_data = self.db_man.data
       if (self.debug) {
         #say current_status.dump
         #say db_data.dump
@@ -450,7 +455,6 @@ module MultiFactor {
           |b|
         # remember, we're not testing *all* properties like .lock or tombstoned
         current_status._serial_eq(b, incl: status_properties)
-
       }
       # need to generate new ID and compile
       if (! match_bo) { return self.build_new_factor(current_status) }
@@ -541,10 +545,10 @@ module MultiFactor {
       const MN = __METHOD_NAME__
       {
         self.log.inf(__FILE__, __LINE__, MN, 'Launching Factor: ', "'", vm_name, self.factor_arguments..., "'")
-        if ( ! self.fbash.with_directory{
-            Command::spawn_se('./' + vm_name, self.factor_arguments..., output: false)
+        if ( self.fbash.with_directory{
+            [Command::spawn_se('./' + vm_name, self.factor_arguments..., output: false)]
         } ) {
-          self.log.inf(__FILE__, __LINE__, MN, "Failed: #{$!}")
+          self.log.inf(__FILE__, __LINE__, MN, "Failed!")
         }
       }.thr.detach
       # don't segfault
@@ -572,26 +576,27 @@ func main {
 
   const parser = providers::argparse::ArgParse(ARGV) \
     .info(SCRIPT) \
-    .option("force", :f, doc: "Force a rebuild in any case") \
-    .option("trace", :t, doc: "Some debug tracing") \
-    .option("verbose", :V, doc: "Verbose debug tracing") \
-    .option("info", :i, doc: "Just show configuration information") \
-    .option("dry-run", :n, doc: "Change no disk files") \
-    .option("from-scratch", :g, doc: "ignore existing DB (debug)") \
-    .option("sums", :s,  negate: (:Always ¦ :Never), doc: "use checksums") \
+    .option(:force, :f, doc: 'Force a rebuild in any case') \
+    .option(:trace, :t, doc: 'Some debug tracing') \
+    .option(:verbose, :V, doc: 'Verbose debug tracing') \
+    .option(:info, :i, doc: 'Just show configuration information') \
+    .option('dry-run', :n, doc: 'Change no disk files') \
+    .option('from-scratch', :g, doc: 'ignore existing DB (debug)') \
+    # .option('sums', :c,  negate: (:Always ¦ :Never), doc: 'use checksums') \
 
-    .option("db-name", :D, param: (:name ¦ ".multifactor.db"), doc: "Custom database filename") \
-    .option("db-dir", :d, param: (:dir ¦ "."), doc: "Directory containing database") \
-    .option("factor-dir", :w, param: (:dir ¦ "."), doc: "Path to Factor working directory") \
-    .option("remove-old-lock", :R, doc: "Blindly remove any lock files (unsafe!)") \
-    .option("quiet-subcom", :q, negate: (:Never ¦ :Always), doc: "show subcommand outputs") \
+    .option('db-name', :D, param: (:name ¦ '.multifactor.db'), doc: 'Custom database filename') \
+    .option('db-dir', :d, param: (:dir ¦ '.'), doc: 'Directory containing database') \
+    .option('factor-dir', :w, param: (:dir ¦ "."), doc: 'Path to Factor working directory') \
+    .option('remove-old-lock', :R, doc: 'Blindly remove any lock files (unsafe!)') \
+    .option('quiet-subcom', :q, negate: (:Never ¦ :Always), doc: 'show subcommand outputs') \
     # TODO: argparse can accept a list of allowed values
     .option(
-      "action", "a", param: (:name ¦ "run-factor"),
+      :action, :a, param: (:name ¦ 'run-factor'),
       doc: "Perform this action\nactions: run-factor, src-sums, env-info"
     ) \
-    .option("basis-dev", :b, doc: "Ignore changes in basis/\n(basis development mode)") \
-    .use_option_terminator("Further arguments are given to Factor") \
+    .option('basis-dev', :b, doc: "Ignore changes in basis/\n(basis development mode)") \
+    .option('spoof-build', :s, doc: "Don't actually compile or build anything") \
+    .use_option_terminator('Further arguments are given to Factor') \
     # .use_stdin_file_arg \
     # .use_arg_list_terminator \
     # .ignore_unknowns \
@@ -608,19 +613,20 @@ func main {
   )
 
   const done = Combi::with_destructors( destroy_mf )({
-      # MFRuntime object inside with_destructor
-    die "Stopped"
-    # .go
+    .go
   })
-  #...
-  say Combi::dump(done)
-  # with (done) {
-  #   if (!.success) {
-  #     say "~MFRuntime called due to runtime error: #{Combi::dump(_)}"
-  #   }
-  # }
+  # say Combi::dump(done)
+  with (done) {
+   if (!.success) {
+     Combi::rescope( lib::msg_classes::classify( .{:exc_info}{:msg} ) )({
+         |type, fields|
+       Factor::say_stderr('red', "~MFRuntime called due to runtime error: #{type} :: #{fields.grep_kv{ .!= :block_tried_invoke }}\n")
+     })
+     # #{Combi::dump(_)}
+   }
+  }
 
-  Factor::say_stderr("\n\tΔ#{μsec(μs)} ×1,000μ")
+  # Factor::say_stderr('bold bright_white', "\n\tΔ#{μsec(μs)} ×1,000μ")
 }
 
 if (__FILE__ == __MAIN__) {

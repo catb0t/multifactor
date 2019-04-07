@@ -1,3 +1,4 @@
+#! ruby
 # include ABCs
 #import ABCs::TimeSpec
 #var ts = TimeSpec().start

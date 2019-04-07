@@ -4,7 +4,9 @@ To end the hassle of having to manage [Factor](https://github.com/factor/factor)
 
 ## Overview
 
-Written in Trizen's [Sidef](https://github.com/trizen/sidef); requires 3.70 or master if possible.
+Written in Trizen's [Sidef](https://github.com/trizen/sidef); HEAD is preferred but 3.70 should work.
+
+Trying to use as few (3rd party) CPAN modules as possible. Depends on the core modules `forks` and `JSON::XS` (but `JSON::PP` will be used if it's found).
 
 `sidef multifactor.sm [options] [--] [parameters to Factor]`
 

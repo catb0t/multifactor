@@ -1,3 +1,4 @@
+#! ruby
 class Object {
   # method form of "with"
   method rescope (b) { b.run(self) }

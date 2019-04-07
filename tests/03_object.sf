@@ -1,3 +1,4 @@
+#! ruby
 include lib::ABCs
 import lib::ABCs::Serializable
 

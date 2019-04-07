@@ -1,0 +1,4 @@
+#! ruby
+class Summary {
+  method summary () -> String { ... }
+}

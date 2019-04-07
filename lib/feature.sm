@@ -1,0 +1,16 @@
+#! ruby
+module Feature {
+  'forks'.require
+
+  const Set _INSTALLED_MODULES = Set(
+    'ExtUtils::Installed'.require.new.modules,
+    'Module::CoreList'.require.find_modules,
+    `cpan -l 2>/dev/null`.lines.map{ .split("\t").first }...
+  )
+  # const Array _INSTALLED_MODULES_V = _INSTALLED_MODULES.values
+
+  const ANSIColor = 'Term::ANSIColor'.frequire
+  const JSON = (_INSTALLED_MODULES.grep{ .~~ /^JSON::XS$/ }.pop \\ _INSTALLED_MODULES.grep{ .~~ /^JSON::PP$/ }.pop).require
+}
+
+# say "#{Feature::JSON}"

@@ -1,6 +1,6 @@
 #! ruby
 
-##  WithDirectory, OO-functional style context managers for Sidef 
+##  WithDirectory, OO-functional style context managers for Sidef
 ##    Copyright Cat Stevens 2018
 ##  This program is free software: you can redistribute it and/or modify
 ##    it under the terms of the GNU General Public License as published by
@@ -20,18 +20,18 @@
 class WithDirectory {
   -> with_directory (operation) {
     var oldwd = Dir.cwd
-    if (oldwd == self.wd) {
-      operation.run
+    (if (oldwd == self.wd) {
+      (operation.run)
     } else {
       self.wd.chdir
-      var r = operation.run
+      var (*r) = (operation.run)
       oldwd.chdir
-      r
-    }
+      r...
+    })
   }
 }
 
-/* abstract */
+/* abstract */ # /
 class CapturedWriter < WithDirectory {
   method capture_write_disk (String caller_name, Block operation) {
     if (! self.dry_run) {

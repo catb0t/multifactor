@@ -81,7 +81,7 @@ class Serializable {
   -> _grep_serial_properties (Set incl, Set excl) is cached -> Hash {
     const Bool uincl = Bool(incl)
     const Bool uexcl = Bool(excl)
-    self.grep_methods{ |n| n ~~ /^serial_properties/ } \
+    self.grep_methods{ .~~ /^serial_properties/ } \
       .values \
       .map(
         # we could compute this before calling map, but maybe
