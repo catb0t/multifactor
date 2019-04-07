@@ -35,7 +35,7 @@ func set_first_rest (Set s) -> (Object, Set) {
   (f, (s - f))
 }
 
-class String {
+# class String {
 
   # method map_lines (Block block) -> Array {
   #   var Array collected = []
@@ -45,13 +45,12 @@ class String {
   # }
 
   # method grep_lines (Block block) -> Array { ... }
-}
+# }
 
-class Array {
-  method map_sample (Number len, Block block) { ... }
-
-  method map_join (Block block, Object joiner) { ... }
-}
+# class Array {
+#   method map_sample (Number len, Block block) { ... }
+#   method map_join (Block block, Object joiner) { ... }
+# }
 
 class Hash {
   method run_keys (*ks) {
