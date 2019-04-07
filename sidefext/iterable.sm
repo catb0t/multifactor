@@ -2,6 +2,7 @@
 
 include sidefext::construct
 include sidefext::metatype
+include sidefext::combi
 
 # i would include Enumerator but I don't think they actually are meaninfully constructable
 # Match is not constructible so not listed
@@ -27,6 +28,29 @@ func complex_typecheck (Object obj, Object basetp, cdids, subtps) -> (Bool, Obje
       (false, die "complex typecheck failed! #{_}")
     }
   }
+}
+
+func set_first_rest (Set s) -> (Object, Set) {
+  const f = s{s.keys[0]}
+  (f, (s - f))
+}
+
+class String {
+
+  # method map_lines (Block block) -> Array {
+  #   var Array collected = []
+  #   const composed = Combi::compose([ { |*_| collected.concat!( _ ) }, block ])
+  #   self.each_line( composed )
+  #   collected
+  # }
+
+  # method grep_lines (Block block) -> Array { ... }
+}
+
+class Array {
+  method map_sample (Number len, Block block) { ... }
+
+  method map_join (Block block, Object joiner) { ... }
 }
 
 class Hash {

@@ -1,16 +1,36 @@
 #! ruby
+include sidefext::iterable
+
 module Feature {
-  'forks'.require
+  'forks'.require # Block.thr without segfaulting
 
-  const Set _INSTALLED_MODULES = Set(
-    'ExtUtils::Installed'.require.new.modules,
-    'Module::CoreList'.require.find_modules,
-    `cpan -l 2>/dev/null`.lines.map{ .split("\t").first }...
+  define File WORD_LIST_FILE = ( (Sys.osname ~~ :windows) ? %f(misc/words) : %f(/usr/share/dict/words) )
+  define   _WORD_LIST_THREAD = { Feature::WORD_LIST_FILE.open_r.grep{ .~~ /^[a-zA-Z]+$/ } }.thr
+
+  define Array _INSTALLED_MODULES_THREADS = Array(
+    ::ffork({ `cpan -l 2>/dev/null`.map_lines{ .split(9.chr).first } })
+    ::ffork({ ['Module::CoreList'.require.find_modules] }) ,
+    ::ffork({ ['ExtUtils::Installed'.require.new.modules] }) ,
   )
-  # const Array _INSTALLED_MODULES_V = _INSTALLED_MODULES.values
 
-  const ANSIColor = 'Term::ANSIColor'.frequire
-  const JSON = (_INSTALLED_MODULES.grep{ .~~ /^JSON::XS$/ }.pop \\ _INSTALLED_MODULES.grep{ .~~ /^JSON::PP$/ }.pop).require
+  define ANSIColor = 'Term::ANSIColor'.frequire
+
+  # other non-dependent code goes here ...
+
+  define Set _INSTALLED_MODULES = Feature::_INSTALLED_MODULES_THREADS.map{ .wait... }.to_set
+
+  define Hash _lookup_cache = Hash()
+  define Block lookup = func ( by { .is_a(String) || .is_a(Regex) } ) -> Set {
+    Feature::_lookup_cache{by} \\= Feature::_INSTALLED_MODULES.grep{ .~~ by }
+  }
+
+  define JSON = with ( (lookup( /^JSON::XS$/ ) || lookup( /^JSON::PP$/ )).dclone.pop ) {
+    .require
+  } else { die "Need one of: JSON::PP, JSON::XS" }
+
+  define Array WORD_LIST = Feature::_WORD_LIST_THREAD.join
 }
 
-# say "#{Feature::JSON}"
+with ( Feature::ANSIColor ) {
+  say( .color('bright_green'), 'Feature : ContentLoaded with ', Feature::WORD_LIST.len, ' words', .RESET)
+}

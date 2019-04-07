@@ -107,7 +107,7 @@ module MultiFactor {
   # }
 
   class MFRuntime (Hash options, Array factor_arguments) << lib::ABCs::SeriallyAccessible, lib::withdirectory::CapturedWriter {
-    has Array known_actions = ['env-info', 'src-sums', 'run-factor']
+    has Set known_actions = ['env-info', 'src-sums', 'run-factor']
 
     has GuardIO::SLog                      log
     has providers::cachedb::CacheDB        db_man
@@ -239,7 +239,7 @@ module MultiFactor {
       type
     }
 
-     method show_info {}
+     method show_info { ... }
      #  say "MultiFactor #{self.UUID} options"
      #  say "\tverbose: #{self.verbose}\tinfo: #{self.info}\ttrace: #{self.trace}\tdry_run: #{self.dry_run}"
      #  say "\tclean: #{self.clean}\tsums: #{self.sums}\tdb_name: #{self.db_name}\tdb_path: #{self.db_path}"
@@ -626,10 +626,12 @@ func main {
    }
   }
 
-  # Factor::say_stderr('bold bright_white', "\n\tΔ#{μsec(μs)} ×1,000μ")
+  Factor::say_stderr('bold bright_white', "\n\tΔ#{μsec(μs)} ×1,000μ")
 }
 
 if (__FILE__ == __MAIN__) {
-  say SCRIPT{:name}+' entrypoint main()'
+  with ( Feature::ANSIColor ) {
+    say ( .color('bright_green'), SCRIPT{:name}, ' entrypoint main()', .RESET)
+  }
   main()
 }

@@ -26,27 +26,20 @@ include lib::shell_words
 module GuardIO {
   func _bn (Str f) { File(f).basename.split('.').first }
 
-  class SLog (is_trace = true, is_verbose = false, logger = {
-        |c, *a|
-      with ( Feature::ANSIColor ) {
-        STDERR.say( .color('bold', c), a..., .RESET )
-      }
-    }
-  ) {
-    -> wrn (Str f, Num l, Str m, *args) {
-      say "#{Feature::ANSIColor.RED}[WARN]\t#{_bn(f)}:#{l}: #{m}: #{args.join(' ')}#{Feature::ANSIColor.RESET}"
-    }
+  class SLog (is_trace = true, is_verbose = false, logger = { |c, *a| with ( Feature::ANSIColor ) { STDERR.say( .color('bold', c), a..., .RESET ) } }) {
+
+    -> wrn (Str f, Num l, Str m, *args) { with ( Feature::ANSIColor ) { say "#{.RED}[WARN]\t#{_bn(f)}:#{l}: #{m}: #{args.join(' ')}#{.RESET}" } }
+
     -> inf (Str f, Num l, Str m, *args) { self.logger.run('bright_white', "[INFO]\t", _bn(f), ':', l, ': ', m, ': ', args.join(' ')) }
     -> trc (Str f, Num l, Str m, *args) { self.is_trace && self.logger.run('cyan', "[TRACE]\t", _bn(f), ':', l, ': ', m, ': ', args.join(' ')) }
     -> vbs (Str f, Num l, Str m, *args) { self.is_verbose && self.logger.run('cyan', "[VBOSE]\t", _bn(f), ':', l, ': ', m, ': ', args.join(' ')) }
   }
 
   -> make_uuid (Bool words = false, Num len = nil) -> String {
-    const len = (len || words ? 7 : 32)
-    if (words) {
-      %f(/usr/share/dict/words).open_r.lines.sample(len ** 3).grep{ _ ~~ /^\w+$/ }.sample(len).map{ .downcase }.join('_')
-    } else {
-      `tr -dc 'a-z0-9\-_' < /dev/urandom | fold -w#{len} | head -n1`.chomp
+    with (len || (words ? 7 : 32)) {
+      ( words
+        ? Feature::WORD_LIST.sample( _ ).map{ .downcase }.join('_')
+        : .random_bytes.map{ .base(62).rescope{ (.len.is_one ? :0 : '') -> + _ } }.join )
     }
   }
 
@@ -158,8 +151,8 @@ module GuardIO {
     has String lock_ext
     has String uuid
 
-    -> locked_fods { self._locked_fods }
-    -> locked_fods (lf) { self._locked_fods = Set(lf...); self }
+    -> locked_fods () -> Set { self._locked_fods }
+    -> locked_fods (lf) -> __CLASS__ { self._locked_fods = lf.to_set; self }
 
     method setup (Hash g) {
       GuardIO::TEMPLATE_SETUP_GLOBLOCKER.template_transform( g ).rescope{
