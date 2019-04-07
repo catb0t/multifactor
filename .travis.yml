@@ -1,4 +1,7 @@
 language: perl
+perl:
+  - "5.26-shrplib"
+  - "5.26"
 sudo: true
 dist: xenial
 install:
