@@ -24,6 +24,7 @@ module MsgTypes {
   define BAD_ENCODING  = :BAD_ENCODING
   define PERL_COMPILER = :PERL_COMPILER
   define PERL_RUNTIME  = :PERL_RUNTIME
+  define UNIMPLEMENTED = :UNIMPLEMENTED
   define OTHER_UNCLASSIFIED    = :OTHER_UNCLASSIFIED
   define CLASS_DOES_NOT_MATCH  = :CLASS_DOES_NOT_MATCH
   define BLOCK_DOES_NOT_MATCH  = :BLOCK_DOES_NOT_MATCH
@@ -49,6 +50,7 @@ module MsgTypes {
     MsgTypes::PERL_RUNTIME ：
       /^(?:Not an? (?<tried_ref>.*) reference|Can't use (?<tried_ref_type>.*) \((?<tried_ref_with>"[^"]+")\) as an? (?<tried_ref>.*) ref while.*) at .*/,
     MsgTypes::PERL_COMPILER ： /Bareword/
+    MsgTypes::UNIMPLEMENTED ： /Unimplemented at (?<file>.+) line (?<line>[-\d]+)$/
     MsgTypes::OTHER_UNCLASSIFIED ： /^(?<value>[\S\s]*)/
     # Pair(:PERL_INTERNAL, /^(.*)/)
   ]
@@ -142,3 +144,5 @@ struct `BlobStatus` does not match BlobStatus(NamedParam, NamedParam, NamedParam
 
 Possible candidates are:
     BlobStatus(Bool exists, Define checksum_match, Bool recompiled)
+%
+Unimplemented at multifactor.sm line 541
