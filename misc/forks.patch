@@ -1,0 +1,15 @@
+--- a/lib/forks.pm
++++ b/lib/forks.pm
+@@ -1567,8 +1567,10 @@ sub _server {
+     
+ # Localize Storable variables to allow CODE refs, if using Storable >= 2.05
+ 
+-    local $Storable::Deparse = 1 if $Storable::VERSION >= 2.05;
+-    local $Storable::Eval = 1 if $Storable::VERSION >= 2.05;
++    use version;
++    my $suitable_storable = version->parse($Storable::VERSION) >= version->parse("2.05");
++    local $Storable::Deparse = 1 if $suitable_storable;
++    local $Storable::Eval    = 1 if $suitable_storable;
+ 
+ # Initialize the number of polls
+ # While we're running in the main dispatch loop

@@ -1,4 +1,7 @@
 #! ruby
+# Perl.eval('push @INC, "."')
+# Perl.eval('use Data::Dumper; Dumper( \@INC )')
+
 include sidefext::iterable
 
 module Feature {
