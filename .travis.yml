@@ -19,7 +19,7 @@ install:
 # https://lists.freebsd.org/pipermail/freebsd-perl/2015-May/010803.html
   - chmod u+w /home/$USER/perl5/lib/perl5/x86_64-linux-gnu-thread-multi/forks.pm
   - patch -p2 -F2 -u -i misc/forks.patch /home/$USER/perl5/lib/perl5/x86_64-linux-gnu-thread-multi/forks.pm
-  - perl -Mforks
+  - echo | perl -Mforks
 
 script:
   - misc/test-sidef.sh sidef/bin/sidef sidefext/* lib/* providers/* tests/*
