@@ -30,7 +30,7 @@ module GuardIO {
 
     -> wrn (Str f, Num l, Str m, *args) { with ( Feature::ANSIColor ) { say "#{.RED}[WARN]\t#{_bn(f)}:#{l}: #{m}: #{args.join(' ')}#{.RESET}" } }
 
-    -> inf (Str f, Num l, Str m, *args) { self.logger.run('bright_white', "[INFO]\t", _bn(f), ':', l, ': ', m, ': ', args.join(' ')) }
+    -> inf (Str f, Num l, Str m, *args) { self.logger.run('green', "[INFO]\t", _bn(f), ':', l, ': ', m, ': ', args.join(' ')) }
     -> trc (Str f, Num l, Str m, *args) { self.is_trace && self.logger.run('cyan', "[TRACE]\t", _bn(f), ':', l, ': ', m, ': ', args.join(' ')) }
     -> vbs (Str f, Num l, Str m, *args) { self.is_verbose && self.logger.run('cyan', "[VBOSE]\t", _bn(f), ':', l, ': ', m, ': ', args.join(' ')) }
   }
@@ -38,7 +38,7 @@ module GuardIO {
   -> make_uuid (Bool words = false, Num len = nil) -> String {
     with (len || (words ? 7 : 32)) {
       ( words
-        ? Feature::WORD_LIST.sample( _ ).map{ .downcase }.join('_')
+        ? Feature::WORD_LIST().sample( _ ).map{ .downcase }.join('_')
         : .random_bytes.map{ .base(62).rescope{ (.len.is_one ? :0 : '') -> + _ } }.join )
     }
   }

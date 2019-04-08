@@ -107,7 +107,7 @@ module MultiFactor {
   # }
 
   class MFRuntime (Hash options, Array factor_arguments) << lib::ABCs::SeriallyAccessible, lib::withdirectory::CapturedWriter {
-    has Set known_actions = ['env-info', 'src-sums', 'run-factor']
+    has Set known_actions = ['env-info', 'src-sums', 'run-factor', 'spoof-exists']
 
     has GuardIO::SLog                      log
     has providers::cachedb::CacheDB        db_man
@@ -118,7 +118,7 @@ module MultiFactor {
     has Array field_groups = [
       (Bool   ¦ [:force, :debug, :info, :dry_run, :spoof_build, :clean, :sums, :basis_dev]),
       (String ¦ [:sum_blob_algo, :sum_src_algo, :action, :uuid]),
-      (Dir    ¦ [:initial_wd] )
+      (Dir    ¦ [:wd] )
     ]
 
     has Array serial_property_generator_mfruntime = [ {
@@ -169,8 +169,8 @@ module MultiFactor {
     has Array init_steps_10_mfruntime = [ {
         |self|
       self.uuid( GuardIO::make_uuid(words: true) )
-      say "MFRuntime: #{self.uuid}"
-      self.initial_wd( Dir.cwd )
+      # say "MFRuntime: #{self.uuid}"
+      self.wd( Dir.cwd )
       Hash(
         :action => Block.identity,
       ).merge(
@@ -396,7 +396,7 @@ module MultiFactor {
     -> _tombstone_entry (BuiltObj bo, Array tracked_targets) {
       const tombstoning = (bo |> :dclone |> :unlock)
       del bo
-      tombstoning.time_tombstoned(Time.now)
+      tombstoning.timespec.tombstoned(Time.now)
 
       self.db_man.insert(tombstoning)
       self.capture_write_disk(__METHOD_NAME__, { tracked_targets.each{ tombstoning.method(_ + :_fullname)().remove } } )
@@ -451,19 +451,21 @@ module MultiFactor {
         #say db_data.dump
       }
 
-      const match_bo = db_data.values.find{
+      self.log.wrn(__FILE__, __LINE__, MN, 'make this const again')
+      var match_bo = db_data.values.find{
           |b|
         # remember, we're not testing *all* properties like .lock or tombstoned
         current_status._serial_eq(b, incl: status_properties)
       }
       # need to generate new ID and compile
-      if (! match_bo) { return self.build_new_factor(current_status) }
-      ...
+      if (!match_bo && (self.action != 'spoof-exists')) { return self.build_new_factor(current_status) }
+      match_bo = current_status.dclone
+      # ...
       # now this is definitely defined
       match_bo.lock
       define tracked_targets = [:vm, :lib]
 
-      if (match_bo.time_tombstoned != 'never') {
+      if (match_bo.timespec.tombstoned != 'never') {
         say '!!! matching entry is tombstoned!'
         # need to trash the old entry
         self._tombstone_entry(match_bo, tracked_targets)
@@ -548,7 +550,7 @@ module MultiFactor {
         if ( self.fbash.with_directory{
             [Command::spawn_se('./' + vm_name, self.factor_arguments..., output: false)]
         } ) {
-          self.log.inf(__FILE__, __LINE__, MN, "Failed!")
+          self.log.wrn(__FILE__, __LINE__, MN, "Failed!")
         }
       }.thr.detach
       # don't segfault

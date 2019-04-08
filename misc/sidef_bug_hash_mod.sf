@@ -1,0 +1,12 @@
+:( :JSON => { 'JSON'.require }.ffork )
+r = :( :JSON => { 'JSON'.require }.ffork )
+r.map_kv{ |_, v| ((_) => v.wait) } 
+r{:JSON} 
+f = r.map_kv{ |_, v| ((_) => v.wait) } 
+f
+f{:JSON} 
+f{:JSON}.new
+f{:JSON}.methods
+# save hash_mod.sf
+r = :( :JSON => 'JSON'.require )
+r{:JSON}.new

@@ -5,16 +5,45 @@
 include sidefext::iterable
 
 module Feature {
-  'forks'.require # Block.thr without segfaulting
-
-  define File WORD_LIST_FILE = ( (Sys.osname ~~ :windows) ? %f(misc/words) : %f(/usr/share/dict/words) )
-  define   _WORD_LIST_THREAD = { Feature::WORD_LIST_FILE.open_r.grep{ .~~ /^[a-zA-Z]+$/ } }.thr
-
   define Array _INSTALLED_MODULES_THREADS = Array(
     ::ffork({ `cpan -l 2>/dev/null`.map_lines{ .split(9.chr).first } })
     ::ffork({ ['Module::CoreList'.require.find_modules] }) ,
     ::ffork({ ['ExtUtils::Installed'.require.new.modules] }) ,
   )
+
+  define _forks = try {
+    'forks'.require
+  } catch {
+      |type, msg|
+    given (msg) {
+      when (/^Can't locate forks.pm/) { die "Please install forks! try 'cpanm forks'" }
+      when (/Argument .+ isn't numeric in numeric ge/) {
+        say "Patching local forks.pm..."
+        const File forks = %f(/home/$USER/perl5/lib/perl5/x86_64-linux-gnu-thread-multi/forks.pm)
+        # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=780351
+        # https://rt.cpan.org/Public/Bug/Display.html?id=102730
+        # https://lists.freebsd.org/pipermail/freebsd-perl/2015-May/010803.html
+        `chmod u+w #{forks}`
+        Number($?)==0 || die "Couldn't make local forks.pm writable: #{$!}"
+        `patch -p2 -F2 -u -i misc/forks.patch #{forks}`
+        Number($?)==0 || die "Couldn't patch local forks.pm: #{$!}"
+        `sidef -E '{}.thr.detach'`
+        Number($?)==0 || die "Sidef couldn't use the forks module: #{$!}"
+        'forks'.require
+        say "Success! loaded forks.pm"
+      }
+      default { die "Couldn't load the forks module for an unexpected reason: Perl said: '#{msg}'" }
+    }
+  }
+
+  define File WORD_LIST_FILE = ( (Sys.osname ~~ :windows) ? %f(misc/words) : %f(/usr/share/dict/words) )
+
+  func WORD_LIST () is cached -> Array {
+    static const x = { say "Word list loading..." }()
+    static const _ = Feature::WORD_LIST_FILE.open_r.grep{ .~~ /^[a-zA-Z]+$/ }
+    static const y = ->{ say "Loaded #{.len} words." }()
+    _
+  }
 
   define ANSIColor = 'Term::ANSIColor'.frequire
 
@@ -27,13 +56,21 @@ module Feature {
     Feature::_lookup_cache{by} \\= Feature::_INSTALLED_MODULES.grep{ .~~ by }
   }
 
+  # broken due to Sidef bug
+  # define Hash _LOADING_MODULES = :(
+  #   :JSON => {
+  #     with ( (lookup( /^JSON::XS$/ ) || lookup( /^JSON::PP$/ )).dclone.pop ) {
+  #       .require
+  #     } else { die "Need one of: JSON::PP, JSON::XS" }
+  #   }.ffork
+  # )
+  # define _LOADED_MODULES = Feature::_LOADING_MODULES.map_kv{ |_, v| ((_) => v.wait) }
+
   define JSON = with ( (lookup( /^JSON::XS$/ ) || lookup( /^JSON::PP$/ )).dclone.pop ) {
     .require
-  } else { die "Need one of: JSON::PP, JSON::XS" }
-
-  define Array WORD_LIST = Feature::_WORD_LIST_THREAD.join
+  } else { die "Need one of: JSON::PP, JSON::XS" } # Feature::_LOADED_MODULES{:JSON}
 }
 
 with ( Feature::ANSIColor ) {
-  say( .color('bright_green'), 'Feature : ContentLoaded with ', Feature::WORD_LIST.len, ' words', .RESET)
+  say( .color('bright_green'), 'Feature : ContentLoaded', .RESET)
 }

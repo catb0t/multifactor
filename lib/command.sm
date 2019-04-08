@@ -13,6 +13,9 @@ module Command {
   }
   define Block NO_OUTPUT = { |f, c| *f += c }
 
+  # TODO: use an algorithm that only looks for as many characters as the RETURNED
+  #   regex needs, unless the caller wants the output which they almost never do
+  #   instead of building the entire string only to look at the end
   func spawn_se (Bool output = false, *cmdline) -> (Number, Bool) {
     $| = 1
 
