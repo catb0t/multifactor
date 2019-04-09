@@ -12,7 +12,7 @@ module Feature {
   )
 
   define File forks = File('/home/'+Sys.user+'/perl5/lib/perl5/x86_64-linux-gnu-thread-multi/forks.pm')
-  define y = say [ forks.open_r.lines[1569, 1570] ].join("\n")
+  define y = say [ forks.open_r.grep{ .~~ /2.53_01/ } ].join("\n")
 
   define _forks = try {
     'forks'.require
