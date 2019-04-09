@@ -18,10 +18,12 @@
 ##    You should have received a copy of the GNU General Public License
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-include lib::ABCs
-include lib::withdirectory
+include sidefext::metatype
 
+include lib::ABCs
 include lib::msg_classes
+include lib::feature
+include lib::withdirectory
 
 include providers::argparse
 include providers::builtobj
@@ -29,7 +31,7 @@ include providers::cachedb
 include providers::factorbash
 
 define Hash SCRIPT = :(
-  "version" => "0.3",
+  "version" => "0.3", # "
   "name" => "multifactor",
   "doc" => "a meta build system for Factor core development",
   "bug" => "github.com/catb0t/multifactor/issues",
@@ -38,29 +40,35 @@ define Hash SCRIPT = :(
 
 # basic variable definitions for working with Factor from a high-level perspective
 module Factor {
-  const File RC_FILE = Dir.home+%f(.factor-rc)
 
-  func rc_config_lines () is cached -> Array {
-    Factor::RC_FILE.open_r.lines.grep{ _ ~~ /^! multifactor:.+/ }
+  define File RC_FILE = Dir.home+%f(.factor-rc)
+
+  define Hash _config_lines_cache = []
+
+  define Block rc_config_lines = func () -> Hash {
+    Factor::_config_lines_cache[0] \\= Factor::RC_FILE.open_r.map{
+      [ (.=~ /^! multifactor:(.+) ?(.*)/)[0, 1] ]
+    }.grep.map{ _... }.to_h
   }
 
-  func find_config (name, Bool must_exist = true) is cached -> String {
-    const regex = Regex("^! multifactor:#{name} (.*)")
-    const result = Factor::rc_config_lines().find{ _ ~~ regex }
-    if ( !result ) {
-      must_exist && die "Config 'multifactor:#{name}' not found in #{Factor::RC_FILE}"
-      return nil
-    }
-    (regex =~ result)[0]
+  define Block _config_cache = :()
+
+  define Block find_config = func find_config (name, Bool must_exist = true) {
+    Factor::_config_cache{name} \\= (Factor::rc_config_lines(){name} \\ do {
+      must_exist && die "Required config '! multifactor:#{name}' not found in #{Factor::RC_FILE}"
+      ''
+    })
   }
 
-  const Dir FACTOR_DIR = Dir( Factor::find_config("factor-dir") )
-  const Bool QUIET_PIPE = Bool( Factor::find_config("quiet-pipe") )
-  const Bool CHECKSUM_WITH = Factor::find_config("default-checksum", must_exist: false)
+  define Maybe::Maybe FACTOR_DIR = Maybe::maybe( Dir,  Factor::find_config('factor-dir', false) )
+  define Maybe::Maybe QUIET_PIPE = Maybe::maybe( Bool, Factor::find_config('quiet-pipe', false) )
+  define Maybe::Maybe DEFAULT_CHECKSUM = Maybe::maybe( String,
+    Factor::find_config('default-checksum', false) || Feature::DEFAULT_CHECKSUM
+  )
 
   # ???
-  func say_stderr (color, *args) {
-    if (STDOUT.is_on_tty || (!STDOUT.is_on_tty && !Factor::QUIET_PIPE)) {
+  define Block say_stderr = func (String color, *args) {
+    if (STDOUT.is_on_tty || (!STDOUT.is_on_tty && !Maybe::unmaybe(Factor::QUIET_PIPE, { false }) ) ) {
       STDERR.autoflush(true)
 
       with ( Feature::ANSIColor ) {
@@ -105,6 +113,26 @@ module MultiFactor {
   #     properties.map{ |prop| b.method(prop)() } ~Z== o{properties...} -> all
   #   }
   # }
+  struct BlobStatus {
+    Bool exists = false
+    Maybe::Maybe_Type checksum_match = Maybe::maybe(Bool, nil)
+    Bool recompiled = false
+  }
+
+  func dump (BlobStatus b) {
+    with (b) {
+      "BlobStatus( exists: #{.exists}, recompiled: #{.recompiled}, checksum_match: #{Maybe::dump(.checksum_match)} )"
+    }
+  }
+
+  struct AlgoBox {
+    String blob
+    String src
+  }
+
+  func absent_config (String rc_name, param_name = nil) {
+    die "Absent config!\n\t'#{rc_name}' or '#{param_name \\ rc_name}' must be set in either the RC file ('! multifactor:#{rc_name} ...') or command line argument ('--#{param_name \\ rc_name}=...')!"
+  }
 
   class MFRuntime (Hash options, Array factor_arguments) << lib::ABCs::SeriallyAccessible, lib::withdirectory::CapturedWriter {
     has Set known_actions = ['env-info', 'src-sums', 'run-factor', 'spoof-exists']
@@ -113,18 +141,19 @@ module MultiFactor {
     has providers::cachedb::CacheDB        db_man
     has GuardIO::GlobLocker                locker
     has providers::factorbash::FactorBash  fbash
+    has AlgoBox                            algos
 
     # todo: collect generated methods that don't appear in .methods
     has Array field_groups = [
-      (Bool   ¦ [:force, :debug, :info, :dry_run, :spoof_build, :clean, :sums, :basis_dev]),
-      (String ¦ [:sum_blob_algo, :sum_src_algo, :action, :uuid]),
-      (Dir    ¦ [:wd] )
+      (Bool    ¦ [:force, :debug, :info, :dry_run, :spoof_build, :clean, :basis_dev]),
+      (String  ¦ [:action, :uuid, :sum_algo]),
+      (Dir     ¦ [:wd]),
     ]
 
     has Array serial_property_generator_mfruntime = [ {
       .field_groups.map{
-        const tn = .first
-        .second.map{ ((_) => tn) }.to_h
+        const tn =
+        .second.map{ |k| ((k) => .first) }.to_h
       }.reduce('merge')
     } ]
 
@@ -171,36 +200,47 @@ module MultiFactor {
       self.uuid( GuardIO::make_uuid(words: true) )
       # say "MFRuntime: #{self.uuid}"
       self.wd( Dir.cwd )
+      # need to use field_groups here
       Hash(
         :action => Block.identity,
+        :sum_algo => String
       ).merge(
-        # need to use field_groups here
-        [:force, :dry_run, :info, :clean, :sums, :basis_dev, :spoof_build] \
+        [:force, :dry_run, :info, :clean, :basis_dev, :spoof_build] \
           .map{ ( (_) => Bool ) }.to_h # all these parentheses are important
       ).each_kv{
           |name, convert|
         self.method( name )( convert( self.options(){ name.replace_all("_", "-") } ) )
       }
 
+      with (self.sum_algo || Maybe::unmaybe(Factor::DEFAULT_CHECKSUM, { absent_config('default-checksum', :sum_algo) }) ) {
+        self.algos = AlgoBox( [ _ ]*2 ... )
+      }
+
+      const Dir factor_dir = Dir( with ( 'factor-dir' ) {
+          self.options(){_} || Maybe::unmaybe(Factor::FACTOR_DIR, { absent_config(_) } )
+      } )
+
+      const Bool is_trace = ( [:trace, :verbose, 'dry-run'].any{ self.options(){_} } )
+      const Bool is_verbose = ( [:verbose, 'dry-run'].any{ self.options(){_} } )
+      const Bool subcommand_output = Bool( with ( self.options ) {
+        .{'no-quiet-subcom'} || ( .{'quiet-subcom'} \\ Maybe::unmaybe(
+          Factor::QUIET_PIPE,
+          { absent_config('quiet-pipe', '[no-]quiet-subcom') }
+        ) )
+      } )
+
       # need a way for the consumer ofthe ArgParse API to know the exact syntax of the command line
       self.known_actions.contains(self.action) \
         || die "[FATAL] #{__FILE__, __LINE__}: init_steps_mfruntime: don\'t know action '#{self.action}' [--action | -a]"
-
-      const cs = (Factor::CHECKSUM_WITH \\ :sha256)
-      self.sum_src_algo(cs)
-      self.sum_blob_algo(cs)
-
-      const is_trace = ( [:trace, :verbose, 'dry-run'].any{ self.options(){_} } )
-      const is_verbose = ( [:verbose, 'dry-run'].any{ self.options(){_} } )
 
       # initialise helper objects
       self.log = GuardIO::SLog( is_trace: is_trace, is_verbose: is_verbose, logger: Factor::say_stderr )
 
       self.fbash = providers::factorbash::FactorBash(
-        Dir( self.options(){'factor-dir'} || Factor::FACTOR_DIR ),
-        self.sum_src_algo,
+        factor_dir,
+        self.algos.src,
         self.basis_dev,
-        subcommand_output: ((!self.options(){'quiet-subcom'} \\ Factor::QUIET_PIPE) || (self.options(){'no-quiet-subcom'} \\ (!Factor::QUIET_PIPE))),
+        subcommand_output: subcommand_output,
         spoof_build: self.spoof_build
       )
 
@@ -251,7 +291,7 @@ module MultiFactor {
       # self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, "checksumming #{f} with algorithm '#{algo}'")
       # give checksum of empty file, or die?
       self.spoof_build ? '' : self.fbash.with_directory{
-        (f.exists && BuildSh.blob_file_contents_sum(f, algo || self.sum_blob_algo)) \
+        (f.exists && BuildSh.blob_file_contents_sum(f, algo || self.algos.blob)) \
           || die "[FATAL] #{__METHOD_NAME__}: empty algo: file: #{f}"
       }
     }
@@ -311,7 +351,7 @@ module MultiFactor {
 
       if ( disk_sum_toplevel != bo.blob_sums.boot ) {
         bo.blob_sums( BlobSums(
-          algo: bo.blob_algorithm || self.sum_blob_algo,
+          algo: bo.blob_algorithm || self.algos.blob,
           boot: disk_sum_toplevel,
           # set the rest of the properties to their old values
           [:vm, :lib].map{
@@ -327,7 +367,7 @@ module MultiFactor {
         bo.stored_boot_image( VirtualBase64Blob(
           sum: disk_sum_stored,
           data: self.fbash.with_directory{ GuardIO::read_binary_b64(bo.boot_fullname) },
-          algo: (bo.stored_boot_image.algo || bo.blob_algorithm || self.sum_blob_algo)
+          algo: (bo.stored_boot_image.algo || bo.blob_algorithm || self.algos.blob)
         ) )
       }
     }
@@ -361,13 +401,16 @@ module MultiFactor {
       })
     }
 
-    -> _make_disk_blob_sums (BuiltObj bo, Array targets) -> BlobSums {
+    -> _algo (BuiltObj prefer) is cached -> String { prefer.blob_algorithm || self.algos.blob }
+
+    -> _make_disk_blob_sums (BuiltObj bo, Hash targets) -> BlobSums {
       self.fbash.with_directory{
         BlobSums(
-          algo: self.sum_blob_algo,
-          targets.map{
-              |target|
-            ( target ⫶ self._blob_file_contents_sum( bo.method(target + :_fullname)(), bo.blob_algorithm ) )
+          # TODO: algo
+          algo: self._algo(bo),
+          targets.map_kv{
+              |name, test|
+            ( name ⫶ test || self._blob_file_contents_sum( bo.method(name + :_fullname)(), self._algo(bo) ) )
           }...
         )
       }
@@ -393,13 +436,13 @@ module MultiFactor {
       )
     }
 
-    -> _tombstone_entry (BuiltObj bo, Array tracked_targets) {
+    -> _tombstone_entry (BuiltObj bo, Array TARGETS) {
       const tombstoning = (bo |> :dclone |> :unlock)
       del bo
       tombstoning.timespec.tombstoned(Time.now)
 
       self.db_man.insert(tombstoning)
-      self.capture_write_disk(__METHOD_NAME__, { tracked_targets.each{ tombstoning.method(_ + :_fullname)().remove } } )
+      self.capture_write_disk(__METHOD_NAME__, { TARGETS.each{ tombstoning.method(_ + :_fullname)().remove } } )
     }
 
     # multifactor's actual entry point
@@ -441,7 +484,7 @@ module MultiFactor {
         :vm_format, :image_format, :lib_format, :boot_format,
         :blob_algorithm, :src_sums
       )
-      var BuiltObj current_status = BuiltObj().blob_algorithm( self.sum_blob_algo )
+      var BuiltObj current_status = BuiltObj().blob_algorithm( self.algos.blob )
       status_properties.each{
         with ( self.fbash.delegate( _ ) ) { |v| current_status.method( _ )( v ) }
       }
@@ -463,20 +506,47 @@ module MultiFactor {
       # ...
       # now this is definitely defined
       match_bo.lock
-      define tracked_targets = [:vm, :lib]
+      define TARGETS = :( :vm => true, :lib => true, :image => false )
 
-      if (match_bo.timespec.tombstoned != 'never') {
+      if ( ! Set(:never, 0, nil).has(match_bo.timespec.tombstoned) ) {
         say '!!! matching entry is tombstoned!'
         # need to trash the old entry
-        self._tombstone_entry(match_bo, tracked_targets)
+        self._tombstone_entry(match_bo, TARGETS.grep{ .[1] }.keys)
         return self.build_new_factor(current_status)
       }
 
       self.log.vbs(__FILE__, __LINE__, MN, 'matching object in db')
 
+      # if either the vm or lib are missing or out of date, recompile them
+      #   if the checksums don't match after both have been recompiled, stop
+      const Hash blob_stats = TARGETS.map_kv{
+          |k, v|
+        # say "blob_stats 1" say "blob stats 2" &&
+        const target_fullname = match_bo.method( k + :_fullname )
+        const e = target_fullname.exists
+        # const new_v =
+        # say new_v
+        ( (k) => BlobStatus(
+          exists: e,
+          recompiled: false,
+          checksum_match: Maybe::maybe(Bool, !e ? nil : (current_status.blob_algorithm==self._algo(match_bo) \
+            && current_status.blob_sums.method(k)==self._blob_file_contents_sum( target_fullname(), self._algo(match_bo) ) ) )
+        ) )
+      }
+
+      blob_stats.each_kv{
+          |k, v|
+        say "t: #{k} : #{dump(v)}"
+      }
+      ...
+
+      # NOTE: compiling only the lib can be done in parallel with the next step
+      # next, if the image is missing, rebuild it
+      # don't update the database's blob sums if the blob wasn't recompiled
+
       -> do_recompile_needed (BlobSums cur_blob_sums = nil, Hash previous_recompiled = nil) -> Hash {
         [
-          tracked_targets.map{ self.maybe_recompile_target(match_bo, cur_blob_sums, _, previous_recompiled) }...,
+          TARGETS.map{ self.maybe_recompile_target(match_bo, cur_blob_sums, _, previous_recompiled) }...,
           :image => (
             (false == previous_recompiled{:image} )
               ? false
@@ -489,14 +559,14 @@ module MultiFactor {
       # ...
       var (
         new_recompiled = do_recompile_needed(),
-        current_blob_sums = self._make_disk_blob_sums(match_bo, tracked_targets)
+        current_blob_sums = self._make_disk_blob_sums(match_bo, TARGETS)
       )
       # self.log.vbs(__FILE__, __LINE__, MN, "NOTE: ONCE: #{new_recompiled}")
 
       new_recompiled = do_recompile_needed(cur_blob_sums: current_blob_sums, previous_recompiled: new_recompiled)
       current_blob_sums = (new_recompiled.values.all{ !_ }
         ? current_blob_sums
-        : self._make_disk_blob_sums(match_bo, tracked_targets))
+        : self._make_disk_blob_sums(match_bo, TARGETS))
 
       # self.log.vbs(__FILE__, __LINE__, MN, "NOTE: TWICE: #{new_recompiled}")
       self.log.trc(__FILE__, __LINE__, MN, "done calculating checksums / rebuilding")
@@ -509,7 +579,7 @@ module MultiFactor {
           return self.destroy
         }
         self.log.trc(__FILE__, __LINE__, MN, "starting over...")
-        self._tombstone_entry(match_bo, tracked_targets)
+        self._tombstone_entry(match_bo, TARGETS)
         return self.go(is_restart: true)
       }
 
@@ -518,7 +588,7 @@ module MultiFactor {
       # only updating the blob sums IFF the blob was newly compiled
       # otherwise, just update the mod/access times and run count
       const new_match_bo = match_bo.cleave( { .lock }, { .dclone } ).last
-      if ( [ new_recompiled{ tracked_targets... } ].any{ _ == true } ) {
+      if ( [ new_recompiled{ TARGETS... } ].any{ _ == true } ) {
         self.log.vbs(__FILE__, __LINE__, MN, 'writing memory BuiltObj because of the newly compiled VM')
         new_match_bo.blob_sums(current_blob_sums)
         new_match_bo.time_modified(Time.now)
@@ -585,6 +655,8 @@ func main {
     .option('dry-run', :n, doc: 'Change no disk files') \
     .option('from-scratch', :g, doc: 'ignore existing DB (debug)') \
     # .option('sums', :c,  negate: (:Always ¦ :Never), doc: 'use checksums') \
+    # TODO
+    .option('sum-algo', :k,  param: (:algo ¦ :sha256), doc: 'Checksum algorithm to use') \
 
     .option('db-name', :D, param: (:name ¦ '.multifactor.db'), doc: 'Custom database filename') \
     .option('db-dir', :d, param: (:dir ¦ '.'), doc: 'Directory containing database') \

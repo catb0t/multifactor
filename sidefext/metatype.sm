@@ -4,6 +4,34 @@
 # todo: subsets can't be chained
 subset ExtantArrStr < Array, String { .len && (.~~ Array ? .all{ .len } : true) }
 
+module Maybe {
+  subset Val < Object, null, nil
+
+  define Maybe = struct Maybe_Type {
+    Object just_type
+    Object just = Object.new
+    Bool nothing = false
+  }
+
+  define Block maybe = func (Object type, a ) -> Maybe_Type {
+    (a==null || !defined(a)) ? Maybe(just_type: type, nothing: true) : Maybe( just_type: type, just: a )
+  }
+
+  # func unmaybe (Maybe a) { # < MaybeVal
+  #   a.nothing ? null : a.just_type(a.just)
+  # }
+
+  # a is a Maybe, but actually is a Define
+  define Block unmaybe = func (Maybe_Type a, Block b = Block.list_identity) { # < MaybeVal
+    a.nothing ? b(a) : a.just_type(a.just)
+  }
+
+  func dump (Maybe_Type a) {
+    ['Maybe(', a.nothing ? 'nil' : a.just_type(a.just).to_s, ')'].join
+  }
+}
+
+
 if (__FILE__ == __MAIN__) {
   func a (e < ExtantArrStr) {
     e
