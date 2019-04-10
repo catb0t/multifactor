@@ -1,4 +1,4 @@
-# multifactor v0.3 [![Travis build status](https://api.travis-ci.org/catb0t/multifactor.svg?branch=master)](https://travis-ci.org/catb0t/multifactor) [![GitLab pipeline status](https://gitlab.com/psybrcat/multifactor/badges/master/pipeline.svg)](https://gitlab.com/psybrcat/multifactor/commits/master)
+# multifactor v0.3 [![Travis build status](https://api.travis-ci.org/catb0t/multifactor.svg?branch=master)](https://travis-ci.org/catb0t/multifactor) 
 
 To end the hassle of having to manage [Factor](https://github.com/factor/factor) images and executables for different branches / revisions.
 
