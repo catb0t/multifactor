@@ -30,10 +30,10 @@ func complex_typecheck (Object obj, Object basetp, cdids, subtps) -> (Bool, Obje
   }
 }
 
-func set_first_rest (Set s) -> (Object, Set) {
-  const f = s{s.keys[0]}
-  (f, (s - f))
-}
+# func set_first_rest (Set s) -> (Object, Set) {
+#   const f = s{s.keys[0]}
+#   (f, (s - f))
+# }
 
 # class String {
 
@@ -204,35 +204,33 @@ EOS
     const ewise_construct_o = true
     const Block do_ewise_construct = (ewise_construct_o ? _do_ewise_construct : CONSTRUCT1)
 
+    # say self.dump
+    # say subject.dump
     # we're just going to drop keys that aren't in self
     self.map_kv{
         |k, self_v|
       const subj_v = subject{k}
-      # say "\nself_v: '#{self_v}'"
+      # say "k: #{k} subj_v: '#{subj_v}' self_v: '#{self_v}'"
       ((k) => given ( self_v ) {
         when ( nil ) { subj_v }
-        case ( .is_typename && subj_v~~_ ) {
-          subj_v
-        }
-        case ( .is_typename && subj_v!~_ ) {
-          # say "b2 subj_v: '#{subj_v}'"
-          if (attempt_cast_o) {
-            (defined(subj_v)
-              ? _do_attempt_cast(_, subj_v, do_ewise_construct)
-              : sidefext::construct::maybe_init( _ )
-            )
-          } else {
-            die (
-              "#{__FILE__}:#{__LINE__}: #{__METHOD_NAME__}: type mismatch for '#{k}': ",
-              "want '#{_}'; got '#{subj_v.class}' ('#{subj_v.dump}')"
-            )
+
+        case ( .is_typename ) {
+          given (subj_v) {
+              |sj|
+            when (nil) { sidefext::construct::maybe_init( _ ) }
+            when (self_v) { sj }
+            default {
+              # say "b2 subj_v: '#{subj_v}'"
+              attempt_cast_o || die ( "#{__FILE__}:#{__LINE__}: #{__METHOD_NAME__}: type mismatch for '#{k}': ",
+                      "want '#{_}'; got '#{subj_v.class}' ('#{subj_v.dump}')" )
+              _do_attempt_cast(_, subj_v, do_ewise_construct)
+            }
           }
         }
-        when (Hash) {
-          # self_v is our spec for this key
-          _templ_tform_single(k, self_v, subj_v, attempt_cast_o, ewise_construct_o)
-        }
-        default { die "don't know that spec value: '#{subj_v.class}' ('#{subj_v}'; key: '#{k}'; typename: #{subj_v.is_typename})"}
+        # self_v is our spec for this key
+        when (Hash) { _templ_tform_single(k, self_v, subj_v, attempt_cast_o, ewise_construct_o)  }
+
+        default { die "don't know that spec value in subject: '#{with (subj_v) { subj_v.class } else { '(nil)' }}' (value: '#{subj_v}'; key: '#{k}'; typename: #{with (subj_v) { .is_typename } else { 'no (nil)' }})"}
       })
     }
   }

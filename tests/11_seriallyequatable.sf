@@ -1,0 +1,26 @@
+#! ruby
+include providers::builtobj
+import builtobj::BlobSums
+import builtobj::SrcSums
+
+assert(BlobSums   ~~ BlobSums)
+assert(BlobSums   ~~ BlobSums())
+assert(BlobSums() ~~ BlobSums)
+assert(BlobSums() ~~ BlobSums())
+
+assert(BlobSums   !~ SrcSums)
+assert(BlobSums   !~ SrcSums())
+assert(BlobSums() !~ SrcSums)
+assert(BlobSums() !~ SrcSums())
+
+assert_eq(false, BlobSums   !~ BlobSums)
+assert_eq(false, BlobSums   !~ BlobSums())
+assert_eq(false, BlobSums() !~ BlobSums)
+assert_eq(false, BlobSums() !~ BlobSums())
+
+assert(BlobSums(boot: 'a') ~~ BlobSums())
+assert(BlobSums(algo: 'a') !~ BlobSums())
+assert(BlobSums(algo: 'a') !~ BlobSums(algo: 'b'))
+assert(BlobSums(algo: 'a') ~~ BlobSums(algo: 'a'))
+assert(BlobSums(algo: 'a') ~~ BlobSums(algo: 'a', boot: 'b'))
+assert(BlobSums(algo: 'a') != BlobSums(algo: 'a', boot: 'b'))

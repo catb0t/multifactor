@@ -1,7 +1,7 @@
-#! ruby 
+#! ruby
 
-func maybe_init (Object obj) {
-  with  ( obj.is_typename ? obj() : obj ) {
+func maybe_init (Object obj) -> Object {
+  with  ( obj.is_typename ? (obj.respond_to(:call) ? obj() : obj.new) : obj ) {
     ( .respond_to(:INIT_METHOD_NAME)
       ? .method( obj.INIT_METHOD_NAME )()
       : _ )

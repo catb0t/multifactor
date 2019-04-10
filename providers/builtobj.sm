@@ -37,9 +37,14 @@ module _exported {
   }
 
   define Hash BS_SPROPS = [:algo, :vm, :lib, :boot].map{ ( (_) => Str ) }.to_h
+
+  define Block BS_SMATCH_BLOCK = func (self) -> Block { func (_) -> Bool { self._serial_eq(_, excl: Set(:boot)) } }
+
   class BlobSums (Str algo = '', Str vm = '', Str lib = '', Str boot = '') < SeriallyEquatable {
     has Hash serial_properties = BS_SPROPS
-    method =~ (other) { self._serial_eq(other, exclude_props: [:boot]) }
+
+    method ~~ (other) -> Bool {  self.smatch(other, BS_SMATCH_BLOCK(self)) }
+    method !~ (other) -> Bool { !self.smatch(other, BS_SMATCH_BLOCK(self)) }
   }
 
   define Hash VBB_SPROPS = [:data, :algo, :sum].map{ ( (_) => Str ) }.to_h
@@ -121,6 +126,8 @@ module _exported {
 }
 if (__FILE__ == __MAIN__) {
   assert(_exported::DirSum().serial_properties)
+  assert(_exported::BlobSums().serial_properties)
+  say "got here"
   assert(_exported::BuiltObj().serial_properties)
 } else {
   module builtobj {

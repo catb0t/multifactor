@@ -11,8 +11,9 @@ module Feature {
     ::ffork({ ['ExtUtils::Installed'.require.new.modules] }) ,
   )
 
+  # WIP: doesn't work on travis for some convoluted reason
   define File forks = File('/home/'+Sys.user+'/perl5/lib/perl5/x86_64-linux-gnu-thread-multi/forks.pm')
-  define y = say forks.open_r.slurp
+  # define y = say [ forks.open_r.lines[1569, 1570] ].join("\n")
 
   define _forks = try {
     'forks'.require
@@ -22,19 +23,19 @@ module Feature {
     given (msg) {
       when (/^Argument .* isn't numeric in numeric ge/) {
         say "Patching local forks.pm..."
-        # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=780351
-        # https://rt.cpan.org/Public/Bug/Display.html?id=102730
-        # https://lists.freebsd.org/pipermail/freebsd-perl/2015-May/010803.html
-        `chmod u+w #{forks}`
-        Number($?)==0 || die "Couldn't make local forks.pm writable: #{$!}"
-        `patch -p2 -F2 -u -i misc/forks.patch #{forks}`
-        Number($?)==0 || die "Couldn't patch local forks.pm: #{$!}"
-        `sidef -E '{}.thr.detach'`
-        Number($?)==0 || die "Sidef couldn't use the forks module: #{$!}"
-        'forks'.require
-        `perl -Ilib -Mforks -e1`
-        Number($?)==0 || die "Perl still couldn't load the forks module: #{$!}"
-        say "Success! loaded forks.pm"
+        # # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=780351
+        # # https://rt.cpan.org/Public/Bug/Display.html?id=102730
+        # # https://lists.freebsd.org/pipermail/freebsd-perl/2015-May/010803.html
+        # `chmod u+w #{forks}`
+        # Number($?)==0 || die "Couldn't make local forks.pm writable: #{$!}"
+        # `patch -p2 -F2 -u -i misc/forks.patch #{forks}`
+        # Number($?)==0 || die "Couldn't patch local forks.pm: #{$!}"
+        # `sidef -E '{}.thr.detach'`
+        # Number($?)==0 || die "Sidef couldn't use the forks module: #{$!}"
+        # 'forks'.require
+        # `perl -Ilib -Mforks -e1`
+        # Number($?)==0 || die "Perl still couldn't load the forks module: #{$!}"
+        # say "Success! loaded forks.pm"
       }
       when (/^Can't locate forks.pm/) { die "Please install forks! try 'cpanm forks'" }
       default { die "Couldn't load the forks module for an unexpected reason: Perl said: '#{msg}'" }

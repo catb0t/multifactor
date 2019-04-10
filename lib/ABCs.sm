@@ -30,6 +30,7 @@ module SProcess {
   define Hash WANT_ALL_VALS = :(:typename => true, :default_val => true, :custom_blocks => true)
   define Hash WANT_EXCLUDE_BLOCKS = :(:typename => true, :default_val => true)
   define Block CUSTOM_BLOCKS_DEFAULT = { Hash() }
+  define Set WANT_KINDS_REFADDRS = Set(WANT_ALL_VALS.refaddr, WANT_EXCLUDE_BLOCKS.refaddr)
 
   # SIDEF BUG: ExtantArrStr is not in scope when optimizing
   func process_serial_prop_rhs (callers < sidefext::metatype::ExtantArrStr, String name, Object obj, Hash want_vals) -> Hash {
@@ -63,7 +64,7 @@ module SProcess {
         )
       }
     }.rescope{
-      if ( want_vals.refaddr ~~ [WANT_ALL_VALS.refaddr, WANT_EXCLUDE_BLOCKS.refaddr] ) {
+      if ( WANT_KINDS_REFADDRS.has(want_vals.refaddr) ) {
         .remove(:custom_blocks) if (WANT_EXCLUDE_BLOCKS.refaddr == want_vals.refaddr)
         call_blocks_kv( _ )
       } else {
@@ -81,6 +82,9 @@ class Serializable {
   -> _grep_serial_properties (Set incl, Set excl) is cached -> Hash {
     const Bool uincl = Bool(incl)
     const Bool uexcl = Bool(excl)
+    #say self.ref
+    #say "incl #{incl} excl #{excl}"
+    #say "#{self.method(:serial_properties)()}"
     self.grep_methods{ .~~ /^serial_properties/ } \
       .values \
       .map(
@@ -105,7 +109,9 @@ class Serializable {
       ).reduce('merge') \\ Hash()
   }
 
-  -> _do_serial (Block d, incl = Set(), excl = Set()) {
+  -> _do_serial (Block d, incl = Set(), excl = Set()) -> Hash {
+    if (self.is_typename) { return :() }
+    # say "#{self.serial_properties}"
     self._grep_serial_properties(incl, excl).map_kv(d)
   }
 
@@ -223,24 +229,44 @@ class Serializable {
 # use the serializable functionality to equate two objects
 /* abstract interface */ # /
 class SeriallyEquatable < Serializable {
-  -> _serial_eq (other, incl = Set(), excl = Set()) -> Bool {
-
+  -> _serial_eq (other { .is_object }, incl = Set(), excl = Set()) -> Bool {
+    assert(! self.is_typename, 'assertion `! self.is_typename` failed (bug: overload invokes _serial_eq on typename LHS)')
     if ( other.is_a(Serializable) ) {
       other.serialize(incl: incl, excl: excl) == self.serialize(incl: incl, excl: excl)
 
     # somehow... maybe other is our superclass
-    } elsif (other ~~ self) {
-     [self, other].map{
-       |obj| self._do_serial(incl: incl, excl: excl, { obj.method(_)() } )
-     }«==»
+    # TODO:
+    } elsif ( self.is_a(other) ) {
+      [self, other].map{
+        |obj| self._do_serial(incl: incl, excl: excl, { obj.method(_)() } )
+      }«==»
 
-     # TODO: use object_checkedref here
+    # TODO: use object_checkedref here
     } else { self._do_serial(incl: incl, excl: excl, { other{_} == self{_} } ).all }
   }
-  method == (o) { self._serial_eq(o) }
-  # method <=> (o, p) { self.cmp(o, p) }
-}
+  method == (o { .is_object })   { self.is_object && self._serial_eq(o) }
+  method == (o { .is_typename }) { self.is_typename && o.ref==self.ref }
 
+  method != (o { .is_object })   { self.is_object && !self._serial_eq(o) }
+  method != (o { .is_typename }) { self.is_typename && (o.ref != self.ref) }
+  # cmp is not yet quantified for the subtypes / field types of SeriallyEquatables
+  # method <=> (o, p) { self.cmp(o, p) }
+
+  method _smartmatch_helper (other) -> Maybe::Maybe_Type {
+    Maybe::MaybeBool( :(
+      # 0 => { nil }# both are objects: defer to user-defined caller
+      1 => self.is_a(other),
+      2 => other.is_a(self),
+      3 => self.is_a(other),
+    ){ Combi::binop( [self other].reverse.map_kv{ |i, n| Number(* (n.is_typename) ) << i }... )('|') }  ) # '
+  }
+
+  method smatch (other, Block defer_to) {
+    func sm (_ < Maybe::Nothing) -> Bool { defer_to(other) }
+    func sm (_ < Maybe::Just)    -> Bool { Maybe::unmaybe(_) }
+    sm( self._smartmatch_helper(other) )
+  }
+}
 
 func _call_methods_blocks_by (Object obj, Regex name_match) {
   # 0..30 -> map{ "sdf"+.to_s+"abcde" }.sort{ |l, r| [l, r].all{ _ ~~ /(\d+)/ } ? [l, r].map{ (_ =~ /(\d+)/ )[0].to_n }.reduce{ |p, q| p <=> q } : (l <=> r) }
@@ -294,7 +320,7 @@ class SeriallyAccessible << ModularInit, SeriallyEquatable {
         const default_val = .{:default_val}
         const custom_blocks = .{:custom_blocks}
 
-        (typename ~~ default_val) \
+        default_val.is_a(typename) \
           || die (
             "#{__FILE__}:#{__LINE__}: #{__METHOD_NAME__}: type mismatch when generating default value for '#{field_name}': ",
             "want '#{typename}'; got '#{default_val.class}' ('#{default_val.dump}')"

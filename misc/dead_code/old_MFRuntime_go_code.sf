@@ -1,0 +1,96 @@
+
+      # -> do_recompile_needed (BlobSums cur_blob_sums = nil, Hash previous_recompiled = nil) -> Hash {
+      #   [
+      #     TARGETS.map{ self.maybe_recompile_target(match_bo, cur_blob_sums, _, previous_recompiled) }...,
+      #     :image => (
+      #       (false == previous_recompiled{:image} )
+      #         ? false
+      #         : self.fbash.with_directory{ match_bo.image_fullname.exists ? false : self.compile_image(match_bo) }
+      #       )
+      #   ].to_h
+      # }
+      #self.log.vbs(__FILE__, __LINE__, MN, "NOTE: no checksums in main path yet")
+      #var (
+      #  new_recompiled = do_recompile_needed(),
+      #  current_blob_sums = self._make_disk_blob_sums(match_bo, TARGETS)
+      #)
+      #self.log.vbs(__FILE__, __LINE__, MN, "NOTE: ONCE: #{new_recompiled}")
+      #new_recompiled = do_recompile_needed(cur_blob_sums: current_blob_sums, previous_recompiled: new_recompiled)
+      #current_blob_sums = (new_recompiled.values.all{ !_ }
+      #  ? current_blob_sums
+      #  : self._make_disk_blob_sums(match_bo, TARGETS))
+      #self.log.vbs(__FILE__, __LINE__, MN, "NOTE: TWICE: #{new_recompiled}")
+      #self.log.trc(__FILE__, __LINE__, MN, "done calculating checksums / rebuilding")
+      ## if they STILL don't match, delete the files + tombstone the entry and quit
+      #if ( ! (current_blob_sums =~ match_bo.blob_sums) ) {
+      #  self.log.trc(__FILE__, __LINE__, MN, 'blob sums still mismatched!')
+      #  if (is_restart) {
+      #    self.log.trc(__FILE__, __LINE__, MN, "i give up (already in a restart)")
+      #    return self.destroy
+      #  }
+      #  self.log.trc(__FILE__, __LINE__, MN, "starting over...")
+      #  self._tombstone_entry(match_bo, TARGETS)
+      #  return self.go(is_restart: true)
+      #}
+      ## OK, going to update the DB and run Factor
+      ## only updating the blob sums IFF the blob was newly compiled
+      ## otherwise, just update the mod/access times and run count
+      #const new_match_bo = match_bo.cleave( { .lock }, { .dclone } ).last
+      #if ( [ new_recompiled{ TARGETS... } ].any{ _ == true } ) {
+      #  self.log.vbs(__FILE__, __LINE__, MN, 'writing memory BuiltObj because of the newly compiled VM')
+      #  new_match_bo.blob_sums(current_blob_sums)
+      #  new_match_bo.time_modified(Time.now)
+      #}
+      #new_match_bo.lock
+      ## ?????
+      #const changed_db = if (match_bo != new_match_bo) {
+      #  self.log.trc(__FILE__, __LINE__, MN, 'writing the new BuiltObj to disk db because it changed')
+      #  self.db_insert(new_match_bo)
+      #  true
+      #}
+      ## say "Eventual successful configuration!"
+      ## say "\tmatching_vm_name:\t'#{matching_vm_name}' # #{disk_vm_sum[0..10]}...\tmatching_image_name:\t'#{matching_image_name}' ##{disk_image_sum[0..10]}..."
+      ## say "\tvm_sums_match:\t\t#{vm_blob_sums_match}/#{new_vm_blob_sums_match}"
+      ## say "\timage_sums_match:\t#{image_blob_sums_match}/#{new_image_blob_sums_match}"
+      ## say "\tchanged_db:\t\t#{changed_db}\t\t\tnewly_compiled: #{newly_compiled.to_s.chars.grep{|p|![\"\n\",' '].any{p==_} }.join}"
+      #self.log.trc(__FILE__, __LINE__, MN, "ok, running factor!")
+      #self._detach_factor_thread(match_bo.vm_fullname)
+
+# _make_disk_blob_sums
+self.fbash.with_directory{
+  BlobSums(
+    # TODO: algo
+    algo: self._algo(bo),
+    targets.map_kv{
+        |name, test|
+      ( name ⫶ test || self._blob_file_contents_sum( bo.method(name + :_fullname)(), self._algo(bo) ) )
+    }...
+  )
+}
+
+# maybe_recompile_target
+const MN = __METHOD_NAME__
+((target) => match_bo.method(target + :_fullname)().rescope{
+    |target_fullname|
+  (! previous_recompiled{target} ) || if (
+    match_bo.rescope{
+        # |b|
+      self.fbash.with_directory{
+        const exists = target_fullname.exists
+        const disk_sum = self._blob_file_contents_sum( target_fullname, .blob_algorithm )
+        const matched_sum = .blob_sums.method(target)()
+        const sum_indirect = (defined(cur_blob_sums)
+          ? ( .blob_sums.method(target)() =~ cur_blob_sums.method(target)() )
+          : nil)
+        (! exists) || ((disk_sum != matched_sum) && (sum_indirect == false))
+      }
+    }
+  ) {
+    self.log.trc(__FILE__, __LINE__, MN, "NOT EXIST/MATCH #{target} named '#{target_fullname}' rebuilding")
+    self.method(:compile_ + target)(match_bo, __METHOD_NAME__)
+    # true
+  } else {
+    self.log.vbs(__FILE__, __LINE__, MN, "EXIST+MATCH #{target} named '#{target_fullname}' not rebuilding")
+    false
+  }
+})

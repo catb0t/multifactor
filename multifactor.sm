@@ -60,9 +60,9 @@ module Factor {
     })
   }
 
-  define Maybe::Maybe FACTOR_DIR = Maybe::maybe( Dir,  Factor::find_config('factor-dir', false) )
-  define Maybe::Maybe QUIET_PIPE = Maybe::maybe( Bool, Factor::find_config('quiet-pipe', false) )
-  define Maybe::Maybe DEFAULT_CHECKSUM = Maybe::maybe( String,
+  define Maybe::Maybe FACTOR_DIR = Maybe::MaybeDir(  Factor::find_config('factor-dir', false) )
+  define Maybe::Maybe QUIET_PIPE = Maybe::MaybeBool( Factor::find_config('quiet-pipe', false) )
+  define Maybe::Maybe DEFAULT_CHECKSUM = Maybe::MaybeStr(
     Factor::find_config('default-checksum', false) || Feature::DEFAULT_CHECKSUM
   )
 
@@ -115,13 +115,13 @@ module MultiFactor {
   # }
   struct BlobStatus {
     Bool exists = false
-    Maybe::Maybe_Type checksum_match = Maybe::maybe(Bool, nil)
     Bool recompiled = false
+    Maybe::Maybe_Type checksum = Maybe::MaybeStr(nil)
   }
 
   func dump (BlobStatus b) {
     with (b) {
-      "BlobStatus( exists: #{.exists}, recompiled: #{.recompiled}, checksum_match: #{Maybe::dump(.checksum_match)} )"
+      "BlobStatus( exists: #{.exists}, recompiled: #{.recompiled}, checksum: #{Maybe::dump(.checksum)} )"
     }
   }
 
@@ -198,7 +198,7 @@ module MultiFactor {
     has Array init_steps_10_mfruntime = [ {
         |self|
       self.uuid( GuardIO::make_uuid(words: true) )
-      # say "MFRuntime: #{self.uuid}"
+      say "MFRuntime: #{self.uuid}"
       self.wd( Dir.cwd )
       # need to use field_groups here
       Hash(
@@ -228,7 +228,6 @@ module MultiFactor {
           { absent_config('quiet-pipe', '[no-]quiet-subcom') }
         ) )
       } )
-
       # need a way for the consumer ofthe ArgParse API to know the exact syntax of the command line
       self.known_actions.contains(self.action) \
         || die "[FATAL] #{__FILE__, __LINE__}: init_steps_mfruntime: don\'t know action '#{self.action}' [--action | -a]"
@@ -254,8 +253,7 @@ module MultiFactor {
           :element_type =>     BuiltObj,
           # :logger => self.log # separate or same loggers?
       ) )
-      # assert_eq( self.db_man.element_type, BuiltObj )
-      # say self.options
+
       self.locker = GuardIO::GlobLocker().setup( :(
         :uuid => self.uuid,
         :remove_old_lock => self.options(){'remove-old-lock'},
@@ -266,60 +264,41 @@ module MultiFactor {
       ) )
 
       self.log.trc(__FILE__, __LINE__, :init_steps_10_mfruntime, "finished configuration") #, wd now: '#{self.db_dir}'")
+      self.locker.do_lock_files
     } ]
 
     method destroy (Bool is_exc, Hash exc_info, *rest) {
+      say "~MFRuntime entry"
       const type = (is_exc && Combi::rescope( lib::msg_classes::classify( exc_info{:msg} ) )({
           |type, fields|
-        self.log.wrn(__FILE__, __LINE__, __METHOD_NAME__, "#{__CLASS_NAME__}: destructor called!\n\t#{type} :: #{fields.grep_kv{ .!= :block_tried_invoke }}\n")
+        self.log.wrn(__FILE__, __LINE__, __METHOD_NAME__, "#{__CLASS_NAME__}: destructor called!\n\t#{type} :: #{fields}\n") # .grep_kv{ .!= :block_tried_invoke }
         type
       }))
-      # say "IS_EXC: #{is_exc}"
       [self.db_man, self.locker].map{ .destroy(is_exc, exc_info) }
       type
     }
 
      method show_info { ... }
-     #  say "MultiFactor #{self.UUID} options"
-     #  say "\tverbose: #{self.verbose}\tinfo: #{self.info}\ttrace: #{self.trace}\tdry_run: #{self.dry_run}"
-     #  say "\tclean: #{self.clean}\tsums: #{self.sums}\tdb_name: #{self.db_name}\tdb_path: #{self.db_path}"
-     #  say "\tfactor_path: #{self.factor_path}\tdb: #{self.db}\tremove_old_lock: #{self.remove_old_lock}"
-     #  say "\tFactor arguments: #{self.factor_arguments}"
-     #}
 
     -> _blob_file_contents_sum (File f, Str algo) -> String {
       # self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, "checksumming #{f} with algorithm '#{algo}'")
       # give checksum of empty file, or die?
-      self.spoof_build ? '' : self.fbash.with_directory{
+      self.spoof_build ? '(empty checksum)' : self.fbash.with_directory{
         (f.exists && BuildSh.blob_file_contents_sum(f, algo || self.algos.blob)) \
           || die "[FATAL] #{__METHOD_NAME__}: empty algo: file: #{f}"
       }
     }
 
-    # -> current_status_to_builtobj (Hash status) -> BuiltObj {
-    #   self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, 'creating BuiltObj from scratch')
-    #   var bo = BuiltObj().id(self.uuid)
-    #   status.each_kv{
-    #       |prop, val|
-    #     # self.vbs(__FILE__, __LINE__, __METHOD_NAME__, "invoke method / property '#{prop}'")
-    #     say "got here: #{prop} '#{status{prop}}'"
-    #     bo.method(prop)( val )
-    #   }
-    #   self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, 'setting creation time')
-    #   bo.time_created(Time.now)
-    # }
-
     -> _compile_vm_lib (BuiltObj bo) {
       if ( ! self.fbash.build_factor(bo) ) {
-        # self.locker.cleanup
         die "vm compilation failed!"
       }
       self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, "vm/lib compiled")
       true
     }
 
+    # TODO:REWRITE
     -> compile_vm_lib (BuiltObj bo, String caller_name = "") -> Bool {
-      # no double jeopardy; technically redundant but that's okay
       if (caller_name == :maybe_recompile_target) {
         static var have_compiled = false
         if (! have_compiled) {
@@ -335,15 +314,16 @@ module MultiFactor {
     -> compile_vm (o, c)  { self.compile_vm_lib(o, caller_name: c) }
     -> compile_lib (o, c) { self.compile_vm_lib(o, caller_name: c) }
 
+    # TODO:REWRITE
     -> compile_image (BuiltObj bo) -> Bool {
       if (! self.fbash.build_image(bo) ) {
-        # self.locker.cleanup
         die "image compilation failed!"
       }
       self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, "image compiled")
       true
     }
 
+    # TODO:REWRITE
     # NOTE: modifies obj
     -> sum_save_boot_image (BuiltObj bo) {
       self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, "saving boot image sums for #{bo.boot_fullname}")
@@ -372,49 +352,14 @@ module MultiFactor {
       }
     }
 
+    # TODO:REWRITE
     # complex check for vm and lib
-    -> maybe_recompile_target (BuiltObj match_bo, BlobSums cur_blob_sums, String target, Hash previous_recompiled) {
-      const MN = __METHOD_NAME__
-      ((target) => match_bo.method(target + :_fullname)().rescope{
-          |target_fullname|
-        (! previous_recompiled{target} ) || if (
-          match_bo.rescope{
-              # |b|
-            self.fbash.with_directory{
-              const exists = target_fullname.exists
-              const disk_sum = self._blob_file_contents_sum( target_fullname, .blob_algorithm )
-              const matched_sum = .blob_sums.method(target)()
-              const sum_indirect = (defined(cur_blob_sums)
-                ? ( .blob_sums.method(target)() =~ cur_blob_sums.method(target)() )
-                : nil)
-              (! exists) || ((disk_sum != matched_sum) && (sum_indirect == false))
-            }
-          }
-        ) {
-          self.log.trc(__FILE__, __LINE__, MN, "NOT EXIST/MATCH #{target} named '#{target_fullname}' rebuilding")
-          self.method(:compile_ + target)(match_bo, __METHOD_NAME__)
-          # true
-        } else {
-          self.log.vbs(__FILE__, __LINE__, MN, "EXIST+MATCH #{target} named '#{target_fullname}' not rebuilding")
-          false
-        }
-      })
-    }
+    -> maybe_recompile_target (BuiltObj match_bo, BlobSums cur_blob_sums, String target, Hash previous_recompiled) { }
 
     -> _algo (BuiltObj prefer) is cached -> String { prefer.blob_algorithm || self.algos.blob }
 
-    -> _make_disk_blob_sums (BuiltObj bo, Hash targets) -> BlobSums {
-      self.fbash.with_directory{
-        BlobSums(
-          # TODO: algo
-          algo: self._algo(bo),
-          targets.map_kv{
-              |name, test|
-            ( name ⫶ test || self._blob_file_contents_sum( bo.method(name + :_fullname)(), self._algo(bo) ) )
-          }...
-        )
-      }
-    }
+    # TODO:REWRITE (obsolete)
+    -> _make_disk_blob_sums (BuiltObj bo, Hash targets) -> BlobSums { }
 
     -> build_new_factor (BuiltObj current_status) {
       const MN = __METHOD_NAME__
@@ -431,48 +376,43 @@ module MultiFactor {
         { self.log.trc(__FILE__, __LINE__, MN, 'writing the new BuiltObj to disk db because it changed') },
         { self.db_man.insert(_) },
         { self.log.trc(__FILE__, __LINE__, MN, "ok, running factor!") },
-        # { self.destroy( false, :() ) },
         { self._detach_factor_thread(_.vm_fullname) }
       )
     }
 
-    -> _tombstone_entry (BuiltObj bo, Array TARGETS) {
+    -> _tombstone_entry (BuiltObj bo, Hash targets) {
       const tombstoning = (bo |> :dclone |> :unlock)
       del bo
       tombstoning.timespec.tombstoned(Time.now)
 
       self.db_man.insert(tombstoning)
-      self.capture_write_disk(__METHOD_NAME__, { TARGETS.each{ tombstoning.method(_ + :_fullname)().remove } } )
+      self.capture_write_disk(__METHOD_NAME__, { targets.keys.each{ tombstoning.method(_ + :_fullname)().remove } } )
     }
 
     # multifactor's actual entry point
-    # TODO: make this asynchronous, so that with_directory stuff is
+    # FAR AWAY TODO: make this asynchronous, so that with_directory stuff is
     # done in a separate actor and awaited
 
-    # DONE: dynamic hash algo selection
+    # TODO: dynamic hash algo selection
     # TODO: read mtimes
     # TODO: test whether the images are older than the file mtimes?!
     # TODO: write mtime/atimes
     # TODO: testability
-    # DONE: if branches
-    # DONE: make use of git information
-    # DONE: compare OS, ARCH, WORD SIZE information
     # TODO: image compression?
 
-    #TDOO: DON"T HASH FACTOR IMAGE
+    # still needs a rewrite
     method go (Bool is_restart = false) {
       const MN = __METHOD_NAME__
       if (self.info) { self.show_info; return nil }
 
-      self.locker.do_lock_files
       given (self.action) {
         when ('src-sums') {
           self.fbash.say_src_sums
-          return self.destroy
+          return();
         }
         when ('env-info') {
           self.fbash.say_env_info
-          return self.destroy
+          return();
         }
       }
 
@@ -517,100 +457,109 @@ module MultiFactor {
 
       self.log.vbs(__FILE__, __LINE__, MN, 'matching object in db')
 
+      -> checksum (String tgt, LazyMethod tgt_fullname) -> Maybe::Maybe_Type {
+        const String disk_sum = self.fbash.with_directory{
+          self._blob_file_contents_sum( tgt_fullname(), self._algo(match_bo) )
+        }
+
+        Maybe::MaybeStr( current_status.rescope{
+          [ .blob_algorithm        == self._algo(match_bo),
+            .blob_sums.method(tgt) == disk_sum              ].all||self.spoof_build
+        } ? disk_sum : nil )
+      }
       # if either the vm or lib are missing or out of date, recompile them
       #   if the checksums don't match after both have been recompiled, stop
       const Hash blob_stats = TARGETS.map_kv{
           |k, v|
-        # say "blob_stats 1" say "blob stats 2" &&
-        const target_fullname = match_bo.method( k + :_fullname )
-        const e = target_fullname.exists
+        const LazyMethod target_fullname = match_bo.method( k + :_fullname )
+        # say "target_fullname class: #{target_fullname.class}"
+        const Bool e = target_fullname.exists||self.spoof_build
         # const new_v =
-        # say new_v
+        # say "k: #{k} e: #{e} v: #{v}"
         ( (k) => BlobStatus(
-          exists: e,
+          exists:     e,
           recompiled: false,
-          checksum_match: Maybe::maybe(Bool, !e ? nil : (current_status.blob_algorithm==self._algo(match_bo) \
-            && current_status.blob_sums.method(k)==self._blob_file_contents_sum( target_fullname(), self._algo(match_bo) ) ) )
+          checksum:   Maybe::MaybeStr( (v && e) ? checksum( k, target_fullname ) : nil )
         ) )
       }
 
-      blob_stats.each_kv{
-          |k, v|
-        say "t: #{k} : #{dump(v)}"
+      # blob_stats.each_kv{
+      #     |k, v|
+      #   say k
+      #   say "t: #{k} : #{dump(v)}"
+      # }
+
+      -> need_recompile ( BlobStatus _ ) -> Bool { .exists || (true != Maybe::unmaybe( .checksum )) }
+
+      const Block new_vm_lib = func (String target_type { Set(:vm, :lib).has( _ ) }) -> Block {
+        { BlobStatus(
+            exists:     self.compile_vm_lib(match_bo, MN),
+            recompiled: true,
+            checksum:   checksum( target_type, match_bo.method(target_type + :_fullname) )
+        ) }
       }
-      ...
+
+      with ( blob_stats{:vm} ) {
+        if (need_recompile( _ )) { _ = new_vm_lib(:vm)() }
+      }
 
       # NOTE: compiling only the lib can be done in parallel with the next step
-      # next, if the image is missing, rebuild it
-      # don't update the database's blob sums if the blob wasn't recompiled
-
-      -> do_recompile_needed (BlobSums cur_blob_sums = nil, Hash previous_recompiled = nil) -> Hash {
-        [
-          TARGETS.map{ self.maybe_recompile_target(match_bo, cur_blob_sums, _, previous_recompiled) }...,
-          :image => (
-            (false == previous_recompiled{:image} )
-              ? false
-              : self.fbash.with_directory{ match_bo.image_fullname.exists ? false : self.compile_image(match_bo) }
-            )
-        ].to_h
+      const lib_thread = with ( blob_stats{:lib} ) {
+        (need_recompile( _ ) ? new_vm_lib(:lib) : {}) -> ffork
       }
 
-      self.log.vbs(__FILE__, __LINE__, MN, "NOTE: no checksums in main path yet")
-      # ...
-      var (
-        new_recompiled = do_recompile_needed(),
-        current_blob_sums = self._make_disk_blob_sums(match_bo, TARGETS)
-      )
-      # self.log.vbs(__FILE__, __LINE__, MN, "NOTE: ONCE: #{new_recompiled}")
+      # next, if the image is missing, rebuild it
+      with ( blob_stats{:image} ) {
+        if (!.exists || self.spoof_build) {
+          _ = BlobStatus(
+            exists:     self.compile_image(match_bo),
+            recompiled: true
+          )
+        }
+      }
+      # don't update the database's blob sums if the blob wasn't recompiled
 
-      new_recompiled = do_recompile_needed(cur_blob_sums: current_blob_sums, previous_recompiled: new_recompiled)
-      current_blob_sums = (new_recompiled.values.all{ !_ }
-        ? current_blob_sums
-        : self._make_disk_blob_sums(match_bo, TARGETS))
+      blob_stats{:lib} = lib_thread.wait
+      const disk_blob_sums = BlobSums(
+        algo: self._algo(match_bo),
+        blob_stats-Set(:image) -> pairs.map{
+          .first ⫶ Maybe::unmaybe(.second.checksum)
+        }...
+      )
 
       # self.log.vbs(__FILE__, __LINE__, MN, "NOTE: TWICE: #{new_recompiled}")
       self.log.trc(__FILE__, __LINE__, MN, "done calculating checksums / rebuilding")
 
       # if they STILL don't match, delete the files + tombstone the entry and quit
-      if ( ! (current_blob_sums =~ match_bo.blob_sums) ) {
+      if ( (match_bo.blob_sums !~ disk_blob_sums) && (!self.spoof_build) ) {
         self.log.trc(__FILE__, __LINE__, MN, 'blob sums still mismatched!')
-        if (is_restart) {
-          self.log.trc(__FILE__, __LINE__, MN, "i give up (already in a restart)")
-          return self.destroy
+        return if (is_restart) {
+          self.log.wrn(__FILE__, __LINE__, MN, "i give up (already in a restart)")
+          false
+        } else {
+          self.log.wrn(__FILE__, __LINE__, MN, "starting over...")
+          self._tombstone_entry(match_bo, TARGETS)
+          self.go(is_restart: true)
         }
-        self.log.trc(__FILE__, __LINE__, MN, "starting over...")
-        self._tombstone_entry(match_bo, TARGETS)
-        return self.go(is_restart: true)
       }
 
-      # OK, going to update the DB and run Factor
-
-      # only updating the blob sums IFF the blob was newly compiled
-      # otherwise, just update the mod/access times and run count
-      const new_match_bo = match_bo.cleave( { .lock }, { .dclone } ).last
-      if ( [ new_recompiled{ TARGETS... } ].any{ _ == true } ) {
-        self.log.vbs(__FILE__, __LINE__, MN, 'writing memory BuiltObj because of the newly compiled VM')
-        new_match_bo.blob_sums(current_blob_sums)
-        new_match_bo.time_modified(Time.now)
+      # going to make a new updated BuiltObj from match_bo
+      const new_match_bo = match_bo.cleave( { .lock }, { .dclone.unlock } ).last
+      if ( blob_stats.values.any{ .recompiled } ) {
+        self.log.vbs(__FILE__, __LINE__, MN, 'writing memory BuiltObj because of recompiled objects')
+        new_match_bo.blob_sums(disk_blob_sums)
+        new_match_bo.timespec.modified(Time.now)
       }
-
       new_match_bo.lock
-
-      # ?????
-      const changed_db = if (match_bo != new_match_bo) {
-        self.log.trc(__FILE__, __LINE__, MN, 'writing the new BuiltObj to disk db because it changed')
-        self.db_insert(new_match_bo)
-        true
+      if (new_match_bo != match_bo) {
+        self.log.trc(__FILE__, __LINE__, MN, 'committing changed BuiltObj')
+        self.db_man.change( new_match_bo.id(self.uuid) )
       }
 
-      # say "Eventual successful configuration!"
-      # say "\tmatching_vm_name:\t'#{matching_vm_name}' # #{disk_vm_sum[0..10]}...\tmatching_image_name:\t'#{matching_image_name}' #{disk_image_sum[0..10]}..."
-      # say "\tvm_sums_match:\t\t#{vm_blob_sums_match}/#{new_vm_blob_sums_match}"
-      # say "\timage_sums_match:\t#{image_blob_sums_match}/#{new_image_blob_sums_match}"
-      # say "\tchanged_db:\t\t#{changed_db}\t\t\tnewly_compiled: #{newly_compiled.to_s.chars.grep{|p|![\"\n\",' '].any{p==_} }.join}"
+      # and then run Factor
+
       self.log.trc(__FILE__, __LINE__, MN, "ok, running factor!")
-      self.destroy
-      self._detach_factor_thread(match_bo.vm_fullname)
+      self._detach_factor_thread(new_match_bo.vm_fullname)
     }
 
     -> _detach_factor_thread (String vm_name) {
@@ -694,7 +643,7 @@ func main {
    if (!.success) {
      Combi::rescope( lib::msg_classes::classify( .{:exc_info}{:msg} ) )({
          |type, fields|
-       Factor::say_stderr('red', "~MFRuntime called due to runtime error: #{type} :: #{fields.grep_kv{ .!= :block_tried_invoke }}\n")
+       Factor::say_stderr('red', "~MFRuntime called due to runtime error: #{type} :: #{fields.grep_kv{ .!~ /_tried_invoke/ }}\n") #
      })
      # #{Combi::dump(_)}
    }

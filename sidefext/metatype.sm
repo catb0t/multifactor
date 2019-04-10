@@ -7,28 +7,41 @@ subset ExtantArrStr < Array, String { .len && (.~~ Array ? .all{ .len } : true) 
 module Maybe {
   subset Val < Object, null, nil
 
+  # Maybe is a value / constructor of type Define, Maybe_Type is a typename
   define Maybe = struct Maybe_Type {
     Object just_type
     Object just = Object.new
     Bool nothing = false
   }
 
-  define Block maybe = func (Object type, a ) -> Maybe_Type {
-    (a==null || !defined(a)) ? Maybe(just_type: type, nothing: true) : Maybe( just_type: type, just: a )
-  }
-
-  # func unmaybe (Maybe a) { # < MaybeVal
-  #   a.nothing ? null : a.just_type(a.just)
-  # }
-
-  # a is a Maybe, but actually is a Define
-  define Block unmaybe = func (Maybe_Type a, Block b = Block.list_identity) { # < MaybeVal
-    a.nothing ? b(a) : a.just_type(a.just)
-  }
-
   func dump (Maybe_Type a) {
-    ['Maybe(', a.nothing ? 'nil' : a.just_type(a.just).to_s, ')'].join
+    ['Maybe( ', a.nothing ? 'nil' : (a.just_type()(a.just).dump), ' )'].join
   }
+
+  define Block maybe = func _maybe (Object type { .is_typename }, a) -> Maybe_Type {
+    func inner (Maybe_Type _) { _ }
+    func inner (_) {
+      (!defined(_) || _==null) ? Maybe(just_type: type, nothing: true) : Maybe( just_type: type, just: _ )
+    }
+
+    inner(a)
+  }
+
+  # a is a Maybe, but actually Maybe is a Define
+  define Block unmaybe = func _unmaybe (Maybe_Type a, Block b = Block.list_identity) -> Object { # < MaybeVal
+    # say "a: #{dump(a)}"
+    a.nothing ? b(a) : a.just_type()(a.just)
+  }
+
+  func is_just ( Maybe_Type _ )    { ! .nothing }
+  subset Just  < Maybe_Type        { ! .nothing }
+  func is_nothing ( Maybe_Type _ ) { .nothing }
+  subset Nothing  < Maybe_Type     { .nothing }
+
+  define Block CurryMaybe = func (type { .is_typename }) -> Block { { Maybe::maybe( type, _ ) } }
+  define Block MaybeBool = CurryMaybe(Bool)
+  define Block MaybeStr  = CurryMaybe(Str)
+  define Block MaybeDir  = CurryMaybe(Dir)
 }
 
 

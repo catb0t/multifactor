@@ -93,6 +93,7 @@ func dispatches_cleanup (String ds, type < MsgTypes::DNM_KIND) -> Hash {
 }
 
 func msg_fields (m) is cached -> Hash {
+  # say "msg_fields: #{m.named_captures}"
   m.named_captures.change_extant_keys(
     MsgTypes::_DOES_NOT_MATCH_KINDS.values.map{ (
       (.+:_dispatches) =>
@@ -103,7 +104,8 @@ func msg_fields (m) is cached -> Hash {
 
 func classify (String msg) is cached -> (String, Object) {
   with ( MsgTypes::MSG_REGEXES.find{ .value ~~ msg } ) {
-    (.key, msg_fields(msg =~ .value) )
+    # say "classify: #{fs.named_captures}"
+    ( .key, msg_fields( (msg =~ .value) ) )
   } else {
     die "#{__FUNC_NAME__}: can't classify THAT!\n\t#{msg.dump}"
   }

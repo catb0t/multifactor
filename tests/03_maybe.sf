@@ -1,0 +1,9 @@
+#! ruby
+include sidefext::metatype
+
+const Maybe::MaybeStr s = Maybe::MaybeStr(:s)
+assert_eq( 'Maybe( "s" )', Maybe::dump(s) )
+const Maybe::MaybeStr ms = Maybe::MaybeStr(s)
+assert_eq( 'Maybe( "s" )', Maybe::dump(ms) )
+
+# assert_eq(  )

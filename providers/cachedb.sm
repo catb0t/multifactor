@@ -143,6 +143,7 @@ class CacheDB < lib::withdirectory::CapturedWriter {
       }
     }
 
+
     [:change, :insert, :delete].each{
         |action|
       const ab = (action + :_by)

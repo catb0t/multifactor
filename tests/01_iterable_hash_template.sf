@@ -27,6 +27,11 @@ include sidefext::iterable
       :something => false
     )
   )
+
+  assert_eq(
+    :( :extant_key => Bool ).template_transform( :() )
+    :( :extant_key => false )
+  )
 }
 
 200.times {
