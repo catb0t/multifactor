@@ -1,4 +1,28 @@
 #! ruby
+
 class Summary {
-  method summary () -> String { ... }
+  method summarizable () is cached -> Bool { true }
+  method summary (Bool _x = false) -> String { ... }
+
+  method _cchoice (Block is_obj, Block is_tn) {
+    self.is_object ? is_obj() : is_tn()+' (typename)'
+  }
+}
+
+class Object { # < Summary
+  method summary (Bool _x = false) -> String {
+    self._cchoice(
+      { 'an ' + __CLASS__ }
+      { __CLASS__ }
+    )
+  }
+}
+
+class String { # < Summary
+  method summary (Bool _x = false) -> String {
+    self._cchoice(
+      { __CLASS__+' with '+self.len+' characters' }
+      { __CLASS__ }
+    )
+  }
 }

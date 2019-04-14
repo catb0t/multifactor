@@ -77,6 +77,9 @@ module Factor {
     }
     # else, not a TTY and quiet-pipe is true
   }
+
+  define Hash  TARGETS = :( :vm => true, :lib => true, :image => false )
+  define Array CHECKSUMMED_TARGETS = [:vm, :lib]
 }
 
 module MultiFactor {
@@ -134,8 +137,94 @@ module MultiFactor {
     die "Absent config!\n\t'#{rc_name}' or '#{param_name \\ rc_name}' must be set in either the RC file ('! multifactor:#{rc_name} ...') or command line argument ('--#{param_name \\ rc_name}=...')!"
   }
 
+  define Set _mfr_known_actions = Set('run-factor', 'env-info', 'src-sums', 'spoof-exists')
+
+  define Array _mfr_spgr = [ {
+    .field_groups.map{
+      const tn =
+      .second.map{ |k| ((k) => .first) }.to_h
+    }.reduce('merge')
+  } ]
+
+  define Array _mfr_fg = [
+    (Bool    ¦ [:force, :debug, :info, :dry_run, :spoof_build, :clean, :basis_dev]),
+    (String  ¦ [:action, :uuid, :sum_algo]),
+    (Dir     ¦ [:wd]),
+  ]
+
+  define Array _mfr_init = [ {
+      |self|
+    self.uuid( GuardIO::make_uuid(words: true) )
+    say "MFRuntime: #{self.uuid}"
+    self.wd( Dir.cwd )
+    # need to use field_groups here
+    Hash(
+      :action => Block.identity,
+      :sum_algo => String
+    ).merge(
+      [:force, :dry_run, :info, :clean, :basis_dev, :spoof_build] \
+        .map{ ( (_) => Bool ) }.to_h # all these parentheses are important
+    ).each_kv{
+        |name, convert|
+      self.method( name )( convert( self.options(){ name.replace_all("_", "-") } ) )
+    }
+
+    with (self.sum_algo || Maybe::unmaybe(Factor::DEFAULT_CHECKSUM, { absent_config('default-checksum', :sum_algo) }) ) {
+      self.algos = AlgoBox( [ _ ]*2 ... )
+    }
+
+    const Dir factor_dir = Dir( with ( 'factor-dir' ) {
+        self.options(){_} || Maybe::unmaybe(Factor::FACTOR_DIR, { absent_config(_) } )
+    } )
+
+    const Bool is_trace = ( [:trace, :verbose, 'dry-run'].any{ self.options(){_} } )
+    const Bool is_verbose = ( [:verbose, 'dry-run'].any{ self.options(){_} } )
+    const Bool subcommand_output = Bool( with ( self.options ) {
+      .{'no-quiet-subcom'} || ( .{'quiet-subcom'} \\ Maybe::unmaybe(
+        Factor::QUIET_PIPE,
+        { absent_config('quiet-pipe', '[no-]quiet-subcom') }
+      ) )
+    } )
+    # need a way for the consumer ofthe ArgParse API to know the exact syntax of the command line
+    self.known_actions.contains(self.action) \
+      || die "[FATAL] #{__FILE__, __LINE__}: init_steps_mfruntime: don\'t know action '#{self.action}' [--action | -a]"
+
+    # initialise helper objects
+    self.log = GuardIO::SLog( is_trace: is_trace, is_verbose: is_verbose, logger: Factor::say_stderr )
+
+    self.fbash = providers::factorbash::FactorBash(
+      factor_dir,
+      self.algos.src,
+      self.basis_dev,
+      subcommand_output: subcommand_output,
+      spoof_build: self.spoof_build
+    )
+
+    self.db_man = providers::cachedb::CacheDB().setup( :(
+        :dir =>              self.options(){'db-dir'},
+        :filename_base =>    self.options(){'db-name'},
+        :dry_run =>          self.dry_run,
+        :verbose =>          is_verbose,
+        :trace =>            is_trace,
+        :replace_existing => self.options(){'from-scratch'},
+        :element_type =>     BuiltObj,
+        # :logger => self.log # separate or same loggers?
+    ) )
+
+    self.locker = GuardIO::GlobLocker().setup( :(
+      :uuid => self.uuid,
+      :remove_old_lock => self.options(){'remove-old-lock'},
+      :lock_ext => '.multifactor_lock',
+      :locked_fods => [ self.db_man.db_name, self.fbash.wd ],
+      :verbose => is_verbose,
+      :trace => is_trace
+    ) )
+
+    self.log.trc(__FILE__, __LINE__, :init_steps_10_mfruntime, "finished configuration") #, wd now: '#{self.db_dir}'")
+    self.locker.do_lock_files
+  } ]
+
   class MFRuntime (Hash options, Array factor_arguments) << lib::ABCs::SeriallyAccessible, lib::withdirectory::CapturedWriter {
-    has Set known_actions = ['env-info', 'src-sums', 'run-factor', 'spoof-exists']
 
     has GuardIO::SLog                      log
     has providers::cachedb::CacheDB        db_man
@@ -144,128 +233,11 @@ module MultiFactor {
     has AlgoBox                            algos
 
     # todo: collect generated methods that don't appear in .methods
-    has Array field_groups = [
-      (Bool    ¦ [:force, :debug, :info, :dry_run, :spoof_build, :clean, :basis_dev]),
-      (String  ¦ [:action, :uuid, :sum_algo]),
-      (Dir     ¦ [:wd]),
-    ]
 
-    has Array serial_property_generator_mfruntime = [ {
-      .field_groups.map{
-        const tn =
-        .second.map{ |k| ((k) => .first) }.to_h
-      }.reduce('merge')
-    } ]
-
-    # has Bool _force
-    # has Bool _debug = false
-    # has Bool _info
-    # has Bool _dry_run
-    # has Bool _clean
-    # has Bool _sums
-    # has Bool _basis_dev
-    # has Str _action
-    # has String _sum_blob_algo = :sha256
-    # has String _sum_src_algo = :sha256
-    # set in config file etc, not a cmdline option
-    # has Number uuid_len
-    # where the process started before any chdir
-    # has Dir initial_wd
-    # -> UUID ()         { self._UUID }
-    # -> action          { self._action }
-    # -> force           { self._force }
-    # -> debug           { self._debug }
-    # -> info            { self._info }
-    # -> dry_run         { self._dry_run }
-    # -> clean           { self._clean }
-    # -> sums            { self._sums }
-    # -> basis_dev       { self._basis_dev }
-    # -> sum_src_algo    { self._sum_src_algo }
-    # -> sum_blob_algo   { self._sum_blob_algo }
-    # -> wd { self.initial_wd }
-    # -> UUID (Str u)             { self._UUID = u; self }
-    # -> action (Str a)           { self._action = a; self }
-    # -> force (Bool b)           { self._force = b; self }
-    # -> debug (Bool b)           { self._debug = b; self }
-    # -> info (Bool b)            { self._info = b; self }
-    # -> dry_run (Bool b)         { self._dry_run = b; self }
-    # -> clean (Bool b)           { self._clean = b; self }
-    # -> sums (Bool b)            { self._sums = b; self }
-    # -> basis_dev (Bool b)       { self._basis_dev = b; self }
-    # -> sum_src_algo (Str a)     { self._sum_src_algo = a; self }
-    # -> sum_blob_algo (Str a)    { self._sum_blob_algo = a; self }
-
-    has Array init_steps_10_mfruntime = [ {
-        |self|
-      self.uuid( GuardIO::make_uuid(words: true) )
-      say "MFRuntime: #{self.uuid}"
-      self.wd( Dir.cwd )
-      # need to use field_groups here
-      Hash(
-        :action => Block.identity,
-        :sum_algo => String
-      ).merge(
-        [:force, :dry_run, :info, :clean, :basis_dev, :spoof_build] \
-          .map{ ( (_) => Bool ) }.to_h # all these parentheses are important
-      ).each_kv{
-          |name, convert|
-        self.method( name )( convert( self.options(){ name.replace_all("_", "-") } ) )
-      }
-
-      with (self.sum_algo || Maybe::unmaybe(Factor::DEFAULT_CHECKSUM, { absent_config('default-checksum', :sum_algo) }) ) {
-        self.algos = AlgoBox( [ _ ]*2 ... )
-      }
-
-      const Dir factor_dir = Dir( with ( 'factor-dir' ) {
-          self.options(){_} || Maybe::unmaybe(Factor::FACTOR_DIR, { absent_config(_) } )
-      } )
-
-      const Bool is_trace = ( [:trace, :verbose, 'dry-run'].any{ self.options(){_} } )
-      const Bool is_verbose = ( [:verbose, 'dry-run'].any{ self.options(){_} } )
-      const Bool subcommand_output = Bool( with ( self.options ) {
-        .{'no-quiet-subcom'} || ( .{'quiet-subcom'} \\ Maybe::unmaybe(
-          Factor::QUIET_PIPE,
-          { absent_config('quiet-pipe', '[no-]quiet-subcom') }
-        ) )
-      } )
-      # need a way for the consumer ofthe ArgParse API to know the exact syntax of the command line
-      self.known_actions.contains(self.action) \
-        || die "[FATAL] #{__FILE__, __LINE__}: init_steps_mfruntime: don\'t know action '#{self.action}' [--action | -a]"
-
-      # initialise helper objects
-      self.log = GuardIO::SLog( is_trace: is_trace, is_verbose: is_verbose, logger: Factor::say_stderr )
-
-      self.fbash = providers::factorbash::FactorBash(
-        factor_dir,
-        self.algos.src,
-        self.basis_dev,
-        subcommand_output: subcommand_output,
-        spoof_build: self.spoof_build
-      )
-
-      self.db_man = providers::cachedb::CacheDB().setup( :(
-          :dir =>              self.options(){'db-dir'},
-          :filename_base =>    self.options(){'db-name'},
-          :dry_run =>          self.dry_run,
-          :verbose =>          is_verbose,
-          :trace =>            is_trace,
-          :replace_existing => self.options(){'from-scratch'},
-          :element_type =>     BuiltObj,
-          # :logger => self.log # separate or same loggers?
-      ) )
-
-      self.locker = GuardIO::GlobLocker().setup( :(
-        :uuid => self.uuid,
-        :remove_old_lock => self.options(){'remove-old-lock'},
-        :lock_ext => '.multifactor_lock',
-        :locked_fods => [ self.db_man.db_name, self.fbash.wd ],
-        :verbose => is_verbose,
-        :trace => is_trace
-      ) )
-
-      self.log.trc(__FILE__, __LINE__, :init_steps_10_mfruntime, "finished configuration") #, wd now: '#{self.db_dir}'")
-      self.locker.do_lock_files
-    } ]
+    has Array known_actions = _mfr_known_actions
+    has Array field_groups = _mfr_fg
+    has Array serial_property_generator_mfruntime = _mfr_spgr
+    has Array init_steps_10_mfruntime = _mfr_init
 
     method destroy (Bool is_exc, Hash exc_info, *rest) {
       say "~MFRuntime entry"
@@ -278,7 +250,7 @@ module MultiFactor {
       type
     }
 
-     method show_info { ... }
+    method show_info { ... }
 
     -> _blob_file_contents_sum (File f, Str algo) -> String {
       # self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, "checksumming #{f} with algorithm '#{algo}'")
@@ -311,7 +283,7 @@ module MultiFactor {
         true
       } else { self._compile_vm_lib(bo) }
     }
-    -> compile_vm (o, c)  { self.compile_vm_lib(o, caller_name: c) }
+    -> compile_vm  (o, c) { self.compile_vm_lib(o, caller_name: c) }
     -> compile_lib (o, c) { self.compile_vm_lib(o, caller_name: c) }
 
     # TODO:REWRITE
@@ -354,12 +326,24 @@ module MultiFactor {
 
     # TODO:REWRITE
     # complex check for vm and lib
-    -> maybe_recompile_target (BuiltObj match_bo, BlobSums cur_blob_sums, String target, Hash previous_recompiled) { }
+    # -> maybe_recompile_target (BuiltObj match_bo, BlobSums cur_blob_sums, String target, Hash previous_recompiled) { }
 
     -> _algo (BuiltObj prefer) is cached -> String { prefer.blob_algorithm || self.algos.blob }
 
-    # TODO:REWRITE (obsolete)
-    -> _make_disk_blob_sums (BuiltObj bo, Hash targets) -> BlobSums { }
+    # TODO:REWRITE
+    -> _make_disk_blob_sums (BuiltObj bo) -> BlobSums {
+      BlobSums(
+        # TODO: algo
+        algo: self._algo(bo),
+        self.fbash.with_directory{
+          Factor::TARGETS.pairs.map{
+            const name = _[0]
+            const test = _[1]
+            ( name ⫶ test && self._blob_file_contents_sum( bo.method(name + :_fullname)(), self._algo(bo) ) )
+          }
+        }...
+      )
+    }
 
     -> build_new_factor (BuiltObj current_status) {
       const MN = __METHOD_NAME__
@@ -370,7 +354,7 @@ module MultiFactor {
       current_status.dclone.unlock.id(self.uuid).timespec( TimeSpec().created(Time.now) ).cleave(
         { |n| self.compile_vm_lib(n) },
         { |n| self.compile_image(n)  },
-        { |n| n.blob_sums( self._make_disk_blob_sums(n, [:vm, :lib, :boot]) ) },
+        { |n| n.blob_sums( self._make_disk_blob_sums(n) ) },
         { |n| self.sum_save_boot_image(n) }, # modifies n
         { .lock },
         { self.log.trc(__FILE__, __LINE__, MN, 'writing the new BuiltObj to disk db because it changed') },
@@ -380,15 +364,117 @@ module MultiFactor {
       )
     }
 
-    -> _tombstone_entry (BuiltObj bo, Hash targets) {
+
+    -> _tombstone_entry (BuiltObj bo) {
       const tombstoning = (bo |> :dclone |> :unlock)
       del bo
       tombstoning.timespec.tombstoned(Time.now)
 
       self.db_man.insert(tombstoning)
-      self.capture_write_disk(__METHOD_NAME__, { targets.keys.each{ tombstoning.method(_ + :_fullname)().remove } } )
+      self.capture_write_disk(__METHOD_NAME__, { Factor::TARGETS.keys.each{ tombstoning.method(_ + :_fullname)().remove } } )
     }
 
+    -> update_existing_factor (BuiltObj bo, BuiltObj current_status, Bool is_restart: true) {
+      const MN = __METHOD_NAME__
+
+      func checksum (String tgt, LazyMethod tgt_fullname) -> Maybe::Maybe_Type {
+        self.fbash.with_directory{
+          self._blob_file_contents_sum( tgt_fullname(), self._algo(bo) )
+        }.rescope{
+            |disk_sum|
+          Maybe::MaybeStr( current_status.rescope{
+            [ ::eq( .blob_algorithm        self._algo(bo) )
+              ::eq( .blob_sums.method(tgt) disk_sum       ) ].all||self.spoof_build
+          } ? disk_sum : nil )
+        }
+      }
+      func new_vm_lib () -> Block {
+        func () -> (BlobStatus, BlobStatus) {
+          self.compile_vm_lib(bo, MN).rescope{
+              |s|
+            Factor::CHECKSUMMED_TARGETS.map{ BlobStatus( exists: s, recompiled: s,
+                checksum: checksum( _, bo.method(_ + :_fullname) )
+            ) }...
+          }
+        }
+      }
+      func need_recompile ( BlobStatus _ ) -> Bool { .exists || (true != Maybe::unmaybe( .checksum )) }
+
+      # if either the vm or lib are missing or out of date, recompile them
+      #   if the checksums don't match after both have been recompiled, stop
+      const Hash blob_stats = Factor::TARGETS.map_kv{
+          |k, v|
+        const LazyMethod target_fullname = bo.method( k + :_fullname )
+        # say "target_fullname class: #{target_fullname.class}"
+        (target_fullname.exists || self.spoof_build).rescope{
+          # const new_v =
+          # say "k: #{k} e: #{e} v: #{v}"
+          ( (k) => BlobStatus(
+            exists:     _,
+            recompiled: false,
+            checksum:   Maybe::MaybeStr( (v && _) ? checksum( k, target_fullname ) : nil )
+          ) )
+        }
+      }
+
+      if (need_recompile( blob_stats{:vm} )) {
+        blob_stats{Factor::CHECKSUMMED_TARGETS...} = (new_vm_lib()())
+      }
+
+      # NOTE: compiling only the lib can be done in parallel with the next step
+      const lib_thread = (need_recompile(blob_stats{:lib}) ? new_vm_lib() : {}).ffork
+
+      # next, if the image is missing, rebuild it
+      if (blob_stats{:image}.exists.neg || self.spoof_build) {
+        blob_stats{:image} = BlobStatus(
+          exists:     self.compile_image(bo),
+          recompiled: true
+        )
+      }
+
+      # don't update the database's blob sums if the blob wasn't recompiled
+
+      blob_stats{Factor::CHECKSUMMED_TARGETS...} = (lib_thread.wait)
+      const disk_blob_sums = BlobSums(
+        algo: self._algo(bo),
+        blob_stats-:(:image) -> pairs.map{
+          .first ⫶ Maybe::unmaybe( .second.checksum )
+        }...
+      )
+
+      # self.log.vbs(__FILE__, __LINE__, MN, "NOTE: TWICE: #{new_recompiled}")
+      self.log.trc(__FILE__, __LINE__, MN, "done calculating checksums / rebuilding")
+
+      # if they STILL don't match, delete the files + tombstone the entry and quit
+      if ( (bo.blob_sums !~ disk_blob_sums) && (!self.spoof_build) ) {
+        self.log.trc(__FILE__, __LINE__, MN, 'blob sums still mismatched!')
+        return if (is_restart) {
+          self.log.wrn(__FILE__, __LINE__, MN, "i give up (already in a restart)")
+          false
+        } else {
+          self.log.wrn(__FILE__, __LINE__, MN, "starting over...")
+          self._tombstone_entry(bo)
+          __METHOD__(is_restart: true)
+        }
+      }
+
+      # TODO: audit this logic
+      # going to make a new updated BuiltObj from match_bo
+      const new_bo = bo.cleave( { .lock }, { .dclone.unlock } ).last
+      if ( blob_stats.values.any{ .recompiled } ) {
+        self.log.vbs(__FILE__, __LINE__, MN, 'writing memory BuiltObj because of recompiled objects')
+        new_bo.blob_sums(disk_blob_sums)
+        new_bo.timespec.modified(Time.now)
+      }
+      new_bo.lock
+      if (new_bo != bo) {
+        self.log.trc(__FILE__, __LINE__, MN, 'committing changed BuiltObj')
+        self.db_man.change( new_bo.id(self.uuid) )
+      }
+      # and then run Factor
+      self.log.trc(__FILE__, __LINE__, MN, "ok, running factor!")
+      self._detach_factor_thread( new_bo.vm_fullname )
+    }
     # multifactor's actual entry point
     # FAR AWAY TODO: make this asynchronous, so that with_directory stuff is
     # done in a separate actor and awaited
@@ -401,20 +487,18 @@ module MultiFactor {
     # TODO: image compression?
 
     # still needs a rewrite
-    method go (Bool is_restart = false) {
+    method go {
       const MN = __METHOD_NAME__
-      if (self.info) { self.show_info; return nil }
-
-      given (self.action) {
-        when ('src-sums') {
-          self.fbash.say_src_sums
-          return();
+      if (! Set('run-factor', 'spoof-exists').has(self.action)) {
+        given (self.action) {
+          when ('src-sums') { self.fbash.say_src_sums }
+          when ('env-info') { self.fbash.say_env_info }
+          when ('class-info') { self.show_info }
         }
-        when ('env-info') {
-          self.fbash.say_env_info
-          return();
-        }
+        return ()
       }
+
+      const spoof_exists = self.action=='spoof-exists'
 
       # property names in BuiltObj, used to create current_status
       # BuildSh and FactorBash implement these through FactorBash.delegate
@@ -428,138 +512,28 @@ module MultiFactor {
       status_properties.each{
         with ( self.fbash.delegate( _ ) ) { |v| current_status.method( _ )( v ) }
       }
-      const ImmutableHash db_data = self.db_man.data
-      if (self.debug) {
-        #say current_status.dump
-        #say db_data.dump
-      }
+      current_status.lock
+      # if (self.debug) { #say current_status.dump #say db_data.dump }
 
-      self.log.wrn(__FILE__, __LINE__, MN, 'make this const again')
-      var match_bo = db_data.values.find{
+      const match_bo = (self.db_man.data.values.find{
           |b|
         # remember, we're not testing *all* properties like .lock or tombstoned
         current_status._serial_eq(b, incl: status_properties)
+      } \\> :lock)
+
+      with (match_bo \\ ( spoof_exists ? current_status : nil )) {
+          |mb|
+        self.cleave(
+          ( (!Set(:never, 0, nil).has( mb.timespec.tombstoned ) && !spoof_exists)
+            ? ( { ._tombstone_entry(mb) }
+                { .build_new_factor(current_status) } )
+            : ( { .log.vbs(__FILE__, __LINE__, MN, 'matching object in db') }
+                { .update_existing_factor(mb, current_status) } ) )
+        ).last
+      } else {
+        say '!!! build new factor!'
+        self.build_new_factor(current_status)
       }
-      # need to generate new ID and compile
-      if (!match_bo && (self.action != 'spoof-exists')) { return self.build_new_factor(current_status) }
-      match_bo = current_status.dclone
-      # ...
-      # now this is definitely defined
-      match_bo.lock
-      define TARGETS = :( :vm => true, :lib => true, :image => false )
-
-      if ( ! Set(:never, 0, nil).has(match_bo.timespec.tombstoned) ) {
-        say '!!! matching entry is tombstoned!'
-        # need to trash the old entry
-        self._tombstone_entry(match_bo, TARGETS.grep{ .[1] }.keys)
-        return self.build_new_factor(current_status)
-      }
-
-      self.log.vbs(__FILE__, __LINE__, MN, 'matching object in db')
-
-      -> checksum (String tgt, LazyMethod tgt_fullname) -> Maybe::Maybe_Type {
-        const String disk_sum = self.fbash.with_directory{
-          self._blob_file_contents_sum( tgt_fullname(), self._algo(match_bo) )
-        }
-
-        Maybe::MaybeStr( current_status.rescope{
-          [ .blob_algorithm        == self._algo(match_bo),
-            .blob_sums.method(tgt) == disk_sum              ].all||self.spoof_build
-        } ? disk_sum : nil )
-      }
-      # if either the vm or lib are missing or out of date, recompile them
-      #   if the checksums don't match after both have been recompiled, stop
-      const Hash blob_stats = TARGETS.map_kv{
-          |k, v|
-        const LazyMethod target_fullname = match_bo.method( k + :_fullname )
-        # say "target_fullname class: #{target_fullname.class}"
-        const Bool e = target_fullname.exists||self.spoof_build
-        # const new_v =
-        # say "k: #{k} e: #{e} v: #{v}"
-        ( (k) => BlobStatus(
-          exists:     e,
-          recompiled: false,
-          checksum:   Maybe::MaybeStr( (v && e) ? checksum( k, target_fullname ) : nil )
-        ) )
-      }
-
-      # blob_stats.each_kv{
-      #     |k, v|
-      #   say k
-      #   say "t: #{k} : #{dump(v)}"
-      # }
-
-      -> need_recompile ( BlobStatus _ ) -> Bool { .exists || (true != Maybe::unmaybe( .checksum )) }
-
-      const Block new_vm_lib = func (String target_type { Set(:vm, :lib).has( _ ) }) -> Block {
-        { BlobStatus(
-            exists:     self.compile_vm_lib(match_bo, MN),
-            recompiled: true,
-            checksum:   checksum( target_type, match_bo.method(target_type + :_fullname) )
-        ) }
-      }
-
-      with ( blob_stats{:vm} ) {
-        if (need_recompile( _ )) { _ = new_vm_lib(:vm)() }
-      }
-
-      # NOTE: compiling only the lib can be done in parallel with the next step
-      const lib_thread = with ( blob_stats{:lib} ) {
-        (need_recompile( _ ) ? new_vm_lib(:lib) : {}) -> ffork
-      }
-
-      # next, if the image is missing, rebuild it
-      with ( blob_stats{:image} ) {
-        if (!.exists || self.spoof_build) {
-          _ = BlobStatus(
-            exists:     self.compile_image(match_bo),
-            recompiled: true
-          )
-        }
-      }
-      # don't update the database's blob sums if the blob wasn't recompiled
-
-      blob_stats{:lib} = lib_thread.wait
-      const disk_blob_sums = BlobSums(
-        algo: self._algo(match_bo),
-        blob_stats-Set(:image) -> pairs.map{
-          .first ⫶ Maybe::unmaybe(.second.checksum)
-        }...
-      )
-
-      # self.log.vbs(__FILE__, __LINE__, MN, "NOTE: TWICE: #{new_recompiled}")
-      self.log.trc(__FILE__, __LINE__, MN, "done calculating checksums / rebuilding")
-
-      # if they STILL don't match, delete the files + tombstone the entry and quit
-      if ( (match_bo.blob_sums !~ disk_blob_sums) && (!self.spoof_build) ) {
-        self.log.trc(__FILE__, __LINE__, MN, 'blob sums still mismatched!')
-        return if (is_restart) {
-          self.log.wrn(__FILE__, __LINE__, MN, "i give up (already in a restart)")
-          false
-        } else {
-          self.log.wrn(__FILE__, __LINE__, MN, "starting over...")
-          self._tombstone_entry(match_bo, TARGETS)
-          self.go(is_restart: true)
-        }
-      }
-
-      # going to make a new updated BuiltObj from match_bo
-      const new_match_bo = match_bo.cleave( { .lock }, { .dclone.unlock } ).last
-      if ( blob_stats.values.any{ .recompiled } ) {
-        self.log.vbs(__FILE__, __LINE__, MN, 'writing memory BuiltObj because of recompiled objects')
-        new_match_bo.blob_sums(disk_blob_sums)
-        new_match_bo.timespec.modified(Time.now)
-      }
-      new_match_bo.lock
-      if (new_match_bo != match_bo) {
-        self.log.trc(__FILE__, __LINE__, MN, 'committing changed BuiltObj')
-        self.db_man.change( new_match_bo.id(self.uuid) )
-      }
-
-      # and then run Factor
-
-      self.log.trc(__FILE__, __LINE__, MN, "ok, running factor!")
-      self._detach_factor_thread(new_match_bo.vm_fullname)
     }
 
     -> _detach_factor_thread (String vm_name) {
@@ -567,7 +541,7 @@ module MultiFactor {
       {
         self.log.inf(__FILE__, __LINE__, MN, 'Launching Factor: ', "'", vm_name, self.factor_arguments..., "'")
         if ( self.fbash.with_directory{
-            [Command::spawn_se('./' + vm_name, self.factor_arguments..., output: false)]
+            Command::spawn_se('./' + vm_name, self.factor_arguments..., output: false)
         } ) {
           self.log.wrn(__FILE__, __LINE__, MN, "Failed!")
         }

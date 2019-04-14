@@ -31,6 +31,9 @@ module MsgTypes {
   define BLOCK_DOES_NOT_MATCH  = :BLOCK_DOES_NOT_MATCH
   define STRUCT_DOES_NOT_MATCH = :STRUCT_DOES_NOT_MATCH
 
+  define RETURN_TYPE = :RETURN_TYPE
+  define RETURN_COUNT = :RETURN_COUNT
+
   define Set _DOES_NOT_MATCH_KINDS = Set(:class, :block, :struct)
   subset DNM_KIND < String { _DOES_NOT_MATCH_KINDS.has( _ ) }
 
@@ -39,14 +42,15 @@ module MsgTypes {
   define Set METHOD_EXISTS    = Set(MsgTypes::NO_ERROR, MsgTypes::BLOCK_DOES_NOT_MATCH, MsgTypes::BAD_ENCODING)
   define Set OVERLOAD_EXISTS  = Set(MsgTypes::NO_ERROR, MsgTypes::BAD_ENCODING)
   define Set NOT_PROPERTY     = Set(MsgTypes::NO_METHOD, MsgTypes::BLOCK_DOES_NOT_MATCH, MsgTypes::BAD_ENCODING)
+  define Set INVALID_RETURN   = Set(MsgTypes::RETURN_TYPE MsgTypes::RETURN_COUNT)
 
-  define Hash _DNM_TYPE_REGEX = :( :block => 'func|method' )
+  define Hash _DNM_TYPE_REGEX = :( :block => 'func|method|block' )
 
   define Array MSG_REGEXES = [
     MsgTypes::NO_ERROR ： /^$/
     MsgTypes::NO_ERROR ： /^The operation completed successfully\.$/i,
     MsgTypes::NO_METHOD ：
-      /^(?:\[AUTOLOAD\] )?Undefined method `(?<method_name>.*)' called from (?<method_invoked_from>.*)/,
+      /^(?:\[AUTOLOAD\] )?Undefined method `(?<method_name>.*)' called from (?<method_invoked_from>.+\(\))/,
 
     MsgTypes::_DOES_NOT_MATCH_KINDS.map{
       DOES_NOT_MATCH{_} ： Regex( [
@@ -70,6 +74,8 @@ module MsgTypes {
       ].join, 'm' )
     }...,
 
+    MsgTypes::RETURN_COUNT ： /^(?:\[ERROR\] )?Wrong number of return values from (?<block_type>func|method|block) (?<block_name>.+)\(\): got (?<return_got_count>\d+), but expected (?<return_expect_count>\d+) at (?<file>.+) line (?<line>[-\d]+)\.$/,
+    MsgTypes::RETURN_TYPE ： /^(?:\[ERROR\] )?Invalid return-type from (?<block_type>func|method|block) (?<block_name>.+)\(\): got `(?<return_got_type>.+)`, but expected `(?<return_expect_type>.+)` at (?<file>.+) line (?<line>[-\d]+)\.$/,
     MsgTypes::BAD_ENCODING ： /^Unknown encoding '(?<encoding>.*)'/,
     MsgTypes::PERL_RUNTIME ：
       /^(?:Not an? (?<tried_ref>.*) reference|Can't use (?<tried_ref_type>.*) \((?<tried_ref_with>"[^"]+")\) as an? (?<tried_ref>.*) ref while.*) at .*/,
@@ -111,18 +117,11 @@ func classify (String msg) is cached -> (String, Object) {
   }
 }
 
-if (__FILE__ == __MAIN__) {
-  DATA.slurp.split("\n%\n").each{
-    Combi::apply( classify(.apply_escapes) )(
-      { assert_ne(_, MsgTypes::OTHER_UNCLASSIFIED); _+' => ' },
-      Block.identity,
-    ).join.say
-  }
-  say "*** Test passed!"
-}
-
-
-__DATA__
+# comptime -- don't use __DATA__ in library code because it will be appended to the user code
+define x = if (__FILE__ == __MAIN__) {
+  say 'building the tests...'
+  {
+    define TEST_MSGS = <<EOT
 [ERROR] func `MaybeArr` does not match MaybeArr(Number), invoked as MaybeArr(2)
 
 Possible candidates are:
@@ -169,3 +168,22 @@ Possible candidates are:
     BlobStatus(Bool exists, Define checksum_match, Bool recompiled)
 %
 Unimplemented at multifactor.sm line 541
+%
+[ERROR] Wrong number of return values from func __FUNC__(): got 0, but expected 1 at /home/cat/perl5/lib/perl5/Sidef/Types/Block/Block.pm line 299.
+%
+[ERROR] Invalid return-type from func __FUNC__(): got `Number`, but expected `Block` at /home/cat/perl5/lib/perl5/Sidef/Types/Block/Block.pm line 309.
+EOT
+
+    TEST_MSGS.split("\n%\n").each{
+      Combi::apply( classify(.apply_escapes) )(
+        { assert_ne(_, MsgTypes::OTHER_UNCLASSIFIED); _+' => ' },
+        Block.identity,
+      ).join.say
+    }
+    say "*** Test passed!"
+  }
+}
+
+if (__FILE__ == __MAIN__) {
+  x()
+}
