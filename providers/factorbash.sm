@@ -148,10 +148,11 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
     say "factor_version=#{self.delegate(:factor_version)}"
   }
 
-  -> build_factor (builtobj::BuiltObj bo_target) -> Bool {
+  -> build_factor (builtobj::BuiltObj bo_target, Bool clean_would_race) -> Bool {
     ( self.spoof_build ? _spoof(__METHOD_NAME__) : self.with_directory{
       bo_target.cleave(
-        { .lock }, { Combi::first( lib::shell_words::BuildSh.make_clean_factor(_, output: self.subcommand_output) ) },
+        { .lock },
+        { Combi::first( lib::shell_words::BuildSh.make_clean_factor(_, no_clean: clean_would_race, output: self.subcommand_output) ) },
         { .vm_fullname.exists }, { .lib_fullname.exists }, { .unlock }
       ).all
     } )

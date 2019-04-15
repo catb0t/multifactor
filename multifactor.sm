@@ -261,30 +261,15 @@ module MultiFactor {
       }
     }
 
-    -> _compile_vm_lib (BuiltObj bo) {
-      if ( ! self.fbash.build_factor(bo) ) {
+    -> compile_vm_lib (BuiltObj bo, Bool clean_would_race) -> Bool {
+      if ( ! self.fbash.build_factor(bo, clean_would_race) ) {
         die "vm compilation failed!"
       }
-      self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, "vm/lib compiled")
+      self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, "vm and/or lib compiled")
       true
     }
-
-    # TODO:REWRITE
-    -> compile_vm_lib (BuiltObj bo, String caller_name = "") -> Bool {
-      if (caller_name == :maybe_recompile_target) {
-        static var have_compiled = false
-        if (! have_compiled) {
-          self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, "vm/lib compiling for 1st time")
-          self._compile_vm_lib(bo)
-          have_compiled = true
-        } else {
-          self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, "vm/lib not recompiled: #{caller_name}: no double jeopardy")
-        }
-        true
-      } else { self._compile_vm_lib(bo) }
-    }
-    -> compile_vm  (o, c) { self.compile_vm_lib(o, caller_name: c) }
-    -> compile_lib (o, c) { self.compile_vm_lib(o, caller_name: c) }
+    # -> compile_vm  (o, c) { self.compile_vm_lib(o, caller_name: c) }
+    # -> compile_lib (o, c) { self.compile_vm_lib(o, caller_name: c) }
 
     # TODO:REWRITE
     -> compile_image (BuiltObj bo) -> Bool {
@@ -389,10 +374,11 @@ module MultiFactor {
         }
       }
       func new_vm_lib () -> Block {
-        func () -> (BlobStatus, BlobStatus) {
-          self.compile_vm_lib(bo, MN).rescope{
+        func (Bool clean_would_race) -> (BlobStatus, BlobStatus) {
+          self.compile_vm_lib(bo, clean_would_race).rescope{
               |s|
-            Factor::CHECKSUMMED_TARGETS.map{ BlobStatus( exists: s, recompiled: s,
+            Factor::CHECKSUMMED_TARGETS.map{ BlobStatus(
+                exists: s, recompiled: s,
                 checksum: checksum( _, bo.method(_ + :_fullname) )
             ) }...
           }
@@ -418,11 +404,11 @@ module MultiFactor {
       }
 
       if (need_recompile( blob_stats{:vm} )) {
-        blob_stats{Factor::CHECKSUMMED_TARGETS...} = (new_vm_lib()())
+        blob_stats{Factor::CHECKSUMMED_TARGETS...} = ( new_vm_lib()(false) )
       }
 
       # NOTE: compiling only the lib can be done in parallel with the next step
-      const lib_thread = (need_recompile(blob_stats{:lib}) ? new_vm_lib() : {}).ffork
+      const lib_thread = (need_recompile(blob_stats{:lib}) ? new_vm_lib() : {}).ffork(true)
 
       # next, if the image is missing, rebuild it
       if (blob_stats{:image}.exists.neg || self.spoof_build) {

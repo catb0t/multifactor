@@ -261,8 +261,8 @@ class BuildSh {
     )
   }
 
-  -> make_clean_factor (/* BuiltObj */ bo_target, Bool output = false) {
-    BuildSh.make_clean(output: output) && BuildSh.make_factor(bo_target, output: output)
+  -> make_clean_factor (/* BuiltObj */ bo_target, Bool no_clean = false, Bool output = false) {
+    ( no_clean ? true : BuildSh.make_clean(output: output) ) && BuildSh.make_factor(bo_target, output: output)
   }
 
   # aka set_boot_image_vars
