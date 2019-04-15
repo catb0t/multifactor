@@ -1,0 +1,28 @@
+var xs = []
+var sub_xs = []
+
+class X {
+  method init {
+    [:a, :b, :c].map{
+        |action|
+      func sub_x (__CLASS__ self) -> __CLASS__ {
+        say "sub_x: #{action} #{__FUNC__.refaddr}"
+        self
+      }
+      func x (__CLASS__ self) -> __CLASS__ {
+        say "x: #{action}; sub_x: #{sub_x.refaddr}"
+        sub_x(self)
+      }
+      xs << x
+      sub_xs << sub_x
+      __CLASS__.def_method(action, x)
+    }
+  }
+}
+
+const x = X()
+say xs
+say sub_xs
+x.a
+x.b
+x.c

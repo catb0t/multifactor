@@ -147,17 +147,14 @@ class CacheDB < lib::withdirectory::CapturedWriter {
       }
     }
 
-
-
     [:change, :insert, :delete].each{
         |action|
-      # NOTE: sidef bug found!!
       const ab = (action + :_by)
 
-      #  func ts (__CLASS__ self, String k, Block b) -> __CLASS__ {
-      const ts = {
-          |self, k, b|
-        self.log.wrn(__FILE__, __LINE__, 'ts', ab, k)
+      # NOTE: sidef bug found!!
+      # if this is func ts, it will be permanently bound to the last iteration
+      const ts = func _ts (__CLASS__ self, String k, Block b) -> __CLASS__ {
+        self.log.wrn(__FILE__, __LINE__, __FUNC_NAME__, ab, k)
         self.transform( DBTransform::new_transformation(ab, k, b) )
         self
       }
