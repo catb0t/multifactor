@@ -52,6 +52,7 @@ module Feature {
   }
 
   define ANSIColor = 'Term::ANSIColor'.frequire
+  define ReadKey   = 'Term::ReadKey'.frequire
 
   define DEFAULT_CHECKSUM = :sha256 # TODO: stop using sha256 in most places; allow xxHash & FNV etc
   # other non-dependent code goes here ...

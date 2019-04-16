@@ -54,19 +54,20 @@ func _spoof (String m) -> Bool {
   true
 }
 
+define DIR_REGEXES = Hash(
+  :core => /^core\//,
+  :basis => /^basis\//,
+  :vm => /^vm\//
+)
+
 class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_output = false, Bool spoof_build = false) < lib::withdirectory::WithDirectory { # < CapturedWriter??
 
-  const DIR_REGEXES = Hash(
-    :core => /^core\//,
-    :basis => /^basis\//,
-    :vm => /^vm\//
-  )
 
   # TODO: compare egrep with PCRE to figure out which files are being matched differently
   -> git_files_matching (Dir d) is cached -> Array {
     const Array files = `git ls-files`.lines.grep{ _ ~~ DIR_REGEXES{d} }
     files || die "[FATAL] #{__METHOD_NAME__}: no files matched #{DIR_REGEXES{d}} in #{Dir.cwd}"
-    # say "git listing #{files.len} files: #{r}"
+    # say "git listing #{files.len} files: #{d}"
     files
   }
 
@@ -74,10 +75,9 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
   -> sum_git_names_matching (Dir d, Str algo) is cached -> String {
     die "#{__METHOD_NAME__}: empty 'algo'! dir: #{d}" if (algo.is_empty)
     # allow utf-8 with SHA
-    self.git_files_matching(d).join("\n") |> :encode_utf8 |> algo
+    self.git_files_matching(d).join(10.chr) |> :encode_utf8 |> algo
   }
 
-  # TODO: make this not so slow so we don't have to use shell syntax directly
   # aka hash_directory_contents
   -> sum_git_contents_matching (Dir d, Str algo) is cached -> String {
     die "#{__METHOD_NAME__}: empty 'algo'! dir: #{d}" if (algo.is_empty)
@@ -90,8 +90,8 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
     -> single_dirsum (String dir, Bool skip = false) is cached -> NamedParam {
       dir ⫶ builtobj::DirSum(
         algo: self.sum_src_algo,
-        names: skip ? '' : self.sum_git_names_matching(Dir(dir), self.sum_src_algo),
-        contents: skip ? '' : self.sum_git_contents_matching(Dir(dir), self.sum_src_algo)
+        names: (skip ? '' : self.sum_git_names_matching(Dir(dir), self.sum_src_algo)),
+        contents: (skip ? '' : self.sum_git_contents_matching(Dir(dir), self.sum_src_algo))
       )
     }
 
@@ -110,7 +110,7 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
     const MN = __METHOD_NAME__
     # say "#{name} #{[@|args]}"
     if ( self.has_public_concrete_method([MN, :V_self_method, :V_ + name], name) ) {
-      self.method(name)()
+      self.method( name )()
     } elsif ( lib::shell_words::BuildSh.has_public_concrete_method([MN, :V_buildsh_method, :V_ + name], name) ) {
       # with ( Feature::ANSIColor ) {
       #   say( .color('bold blue'), "[CALL] #{__METHOD_NAME__}: BuildSh staticmethod #{name} FIXME???", .RESET )
@@ -132,20 +132,26 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
 
   -> say_env_info {
     const l = lib::shell_words::BuildSh.platform_lib_name
-    var cc = lib::shell_words::BuildSh.cc
-    var cxx = lib::shell_words::BuildSh.cxx
-    say "cc=#{cc}"
-    say "cxx=#{cxx}"
+    const c = lib::shell_words::BuildSh.cc
+    const xx = lib::shell_words::BuildSh.cxx
+    say()
+    say "cc=#{c}"
+    say "cxx=#{xx}"
     say "os_name=#{self.delegate(:os_name)}"
     say "os_type=#{self.delegate(:os_type)}"
     say "arch_name=#{self.delegate(:arch_name)}"
     say "word_size=#{self.delegate(:word_size)}"
+    say()
     say "is_git=#{self.delegate(:is_git)}"
     say "git_branch=#{self.delegate(:git_branch)}"
     say "git_hash=#{self.delegate(:git_hash)}"
+    say()
     say "platform_vm_ext=factor#{lib::shell_words::BuildSh.platform_vm_ext}"
     say "platform_lib_name=#{l.first}factor#{l.second}"
+    say "platform_makefile=#{self.delegate(:platform_makefile)}"
+    say()
     say "factor_version=#{self.delegate(:factor_version)}"
+    say "feature_reproducible=#{self.delegate(:feature_reproducible)}"
   }
 
   -> build_factor (builtobj::BuiltObj bo_target, Bool clean_would_race) -> Bool {

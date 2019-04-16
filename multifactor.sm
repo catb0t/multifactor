@@ -84,16 +84,19 @@ module Factor {
 
 module MultiFactor {
 
+  include sidefext::iterable
+  import sidefext::iterable::ImmutableHash
+
   include lib::shell_words
 
   include Factor
   include FactorBashStateless
   include GuardIO
-
-  include sidefext::iterable
-  import sidefext::iterable::ImmutableHash
-
   import lib::shell_words::BuildSh
+
+  include lib::breakpoint
+  include Breakpoint
+  import Breakpoint::bp
 
   import builtobj::DirSum
   import builtobj::SrcSums
@@ -139,15 +142,16 @@ module MultiFactor {
 
   define Set _mfr_known_actions = Set('run-factor', 'env-info', 'src-sums', 'spoof-exists')
 
-  define Array _mfr_spgr = [ {
+  define Array _mfr_sprop_gen = [ {
     .field_groups.map{
       const tn =
       .second.map{ |k| ((k) => .first) }.to_h
     }.reduce('merge')
   } ]
 
+  # these are all command-line options except uuid
   define Array _mfr_fg = [
-    (Bool    ¦ [:force, :debug, :info, :dry_run, :spoof_build, :clean, :basis_dev]),
+    (Bool    ¦ [:force, :debug, :info, :dry_run, :spoof_build, :clean, :basis_dev, :commit_db]),
     (String  ¦ [:action, :uuid, :sum_algo]),
     (Dir     ¦ [:wd]),
   ]
@@ -185,9 +189,12 @@ module MultiFactor {
         { absent_config('quiet-pipe', '[no-]quiet-subcom') }
       ) )
     } )
+
     # need a way for the consumer ofthe ArgParse API to know the exact syntax of the command line
-    self.known_actions.contains(self.action) \
+    self.known_actions.has(self.action) \
       || die "[FATAL] #{__FILE__, __LINE__}: init_steps_mfruntime: don\'t know action '#{self.action}' [--action | -a]"
+
+    self.commit_db( Set('run-factor', 'spoof-exists').has(self.action) )
 
     # initialise helper objects
     self.log = GuardIO::SLog( is_trace: is_trace, is_verbose: is_verbose, logger: Factor::say_stderr )
@@ -236,7 +243,7 @@ module MultiFactor {
 
     has Array known_actions = _mfr_known_actions
     has Array field_groups = _mfr_fg
-    has Array serial_property_generator_mfruntime = _mfr_spgr
+    has Array serial_property_generator_mfruntime = _mfr_sprop_gen
     has Array init_steps_10_mfruntime = _mfr_init
 
     method destroy (Bool is_exc, Hash exc_info, *rest) {
@@ -246,7 +253,7 @@ module MultiFactor {
         self.log.wrn(__FILE__, __LINE__, __METHOD_NAME__, "#{__CLASS_NAME__}: destructor called!\n\t#{type} :: #{fields}\n") # .grep_kv{ .!= :block_tried_invoke }
         type
       }))
-      [self.db_man, self.locker].map{ .destroy(is_exc, exc_info) }
+      [ [self.db_man, write: self.commit_db], [self.locker]].map{ .[0].destroy(is_exc, exc_info, @|.slice(1) ) }
       type
     }
 
@@ -479,7 +486,7 @@ module MultiFactor {
         given (self.action) {
           when ('src-sums') { self.fbash.say_src_sums }
           when ('env-info') { self.fbash.say_env_info }
-          when ('class-info') { self.show_info }
+          # when ('class-info') { self.show_info }
         }
         return ()
       }
@@ -494,11 +501,14 @@ module MultiFactor {
         :vm_format, :image_format, :lib_format, :boot_format,
         :blob_algorithm, :src_sums
       )
-      var BuiltObj current_status = BuiltObj().blob_algorithm( self.algos.blob )
-      status_properties.each{
-        with ( self.fbash.delegate( _ ) ) { |v| current_status.method( _ )( v ) }
-      }
-      current_status.lock
+
+      const BuiltObj current_status = BuiltObj().cleave(
+        { .blob_algorithm( self.algos.blob ) }
+        { status_properties.each{ |m|
+            with ( self.fbash.delegate( m ) ) { |v| .method( m )( v ) }
+        } }
+        { .lock }
+      ).last
       # if (self.debug) { #say current_status.dump #say db_data.dump }
 
       const match_bo = (self.db_man.data.values.find{
@@ -507,10 +517,12 @@ module MultiFactor {
         current_status._serial_eq(b, incl: status_properties)
       } \\> :lock)
 
+      bp(__FILE__, __LINE__, __NAMESPACE__, self.class, __METHOD_NAME__, match_bo => match_bo)
+
       with (match_bo \\ ( spoof_exists ? current_status : nil )) {
           |mb|
         self.cleave(
-          ( (!Set(:never, 0, nil).has( mb.timespec.tombstoned ) && !spoof_exists)
+          ( !(Set(:never, 0, nil).has( mb.timespec.tombstoned ) || spoof_exists)
             ? ( { ._tombstone_entry(mb) }
                 { .build_new_factor(current_status) } )
             : ( { .log.vbs(__FILE__, __LINE__, MN, 'matching object in db') }

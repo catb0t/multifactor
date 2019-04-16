@@ -1,0 +1,19 @@
+#! ruby
+include lib::feature
+module Breakpoint {
+  func _bn (Str f) { File(f).basename.split('.').first }
+
+  func bp ( Str f, Num l, Str n, Str c, Str fm, :args) {
+    with ( Feature::ANSIColor ) {
+      # #{callers? ' < '+callers.join(' < ') : ''}
+      say "\n#{.YELLOW}[BREAK]\t#{_bn(f)}:#{l}: #{n}::#{c}::#{fm}: #{args.dump}#{.RESET}"
+      Feature::ReadKey.ReadMode(4)
+      say "Press any key to continue..."
+      while (!defined( Feature::ReadKey.ReadKey )) {
+        Sys.sleep(1)
+      }
+      say "Continuing!"
+      Feature::ReadKey.ReadMode(0)
+    }
+  }
+}

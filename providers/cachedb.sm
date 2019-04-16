@@ -219,10 +219,10 @@ class CacheDB < lib::withdirectory::CapturedWriter {
     self.with_directory{ CacheDBIO::_read_disk_db(self.filename_base, self.element_type) }
   }
 
-  method destroy (Bool is_exc, Hash _exc_info) {
+  method destroy (Bool is_exc, Hash _exc_info, Bool write = true) {
     self.log.wrn(__FILE__, __LINE__, __METHOD_NAME__, 'shutting down!!!')
-    ( is_exc
-      ? self.log.wrn(__FILE__, __LINE__, __METHOD_NAME__, 'not writing disk because of an exception')
+    ( (is_exc || !write)
+      ? self.log.wrn(__FILE__, __LINE__, __METHOD_NAME__, 'not writing disk because of an exception or because `write` was set false')
       : self._write_disk_db )
   }
 

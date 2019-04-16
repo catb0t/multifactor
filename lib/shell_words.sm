@@ -290,7 +290,7 @@ class BuildSh {
     }
   }
 
-  -> get_boot_image {
+  -> _get_boot_image {
     const File boot_image_file = BuildSh.generate_make_targets(){:boot_image}
     say (__METHOD_NAME__ + ': Downloading boot image file ' + boot_image_file)
 
@@ -347,7 +347,7 @@ class BuildSh {
       true
     } else {
       say "#{__METHOD_NAME__}: no local #{boot_image_file}, need to get"
-      BuildSh.get_boot_image
+      BuildSh._get_boot_image
     }
   }
 
