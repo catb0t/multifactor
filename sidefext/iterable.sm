@@ -240,8 +240,10 @@ class ImmutableHash ( Hash _data = :(), *_unpacked_data) {
   method init {
     if (!self._data && self._unpacked_data) { self._data = self._unpacked_data.to_h }
 
-    [:values, :item, :grep, :grep_kv, :item, :items, :map_kv, :dclone].each{
-      assert( self._data.respond_to( _ ) )
+    [:values, :item, :grep, :grep_kv, :item, :items, :map_kv, :dclone,
+      :difference, :symmetric_difference, :concat, :union, :intersection, :linear_selection,
+      '-', '+', '|', '^', '&'].each{
+      assert( self._data.respond_to( _ ), _ )
       __CLASS__.def_method( _, func generated_forwarder (__CLASS__ _s, *args) {
         self._data.method( _ )( args... )
       } )

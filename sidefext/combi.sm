@@ -233,7 +233,11 @@ EOT
   }
 
   func with_finalizers (FinalizerSpec fs) -> Block {
-    const obj_class = fs.obj.class
+    const THREW_ERROR = [
+      [10.chr, 10.chr, 9.chr].join+'The preceding exception was thrown by a finalizer when executing'+__NAMESPACE__+'::'+__FUNC_NAME__+'.',
+      'Finalizers may not have completed; your program and the disk were probably left in an invalid state.',
+      'Please prevent your finalizers from throwing exceptions.'
+    ].join([10.chr, 9.chr].join)
     # say "\tFinalizer #{_indent_by(dump(fs), 9.chr)}\tregistered; calling it on exceptions only: #{fs.exc_only}"
     func _finalizer (*_obj_blocks) -> Finalized {
 
@@ -246,16 +250,15 @@ EOT
 
       -> fin (Bool is_exc) -> F7rsReturned {
         const caller = { [ fs.obj.method( .[0] )( is_exc, exc_info, @|.slice(1) ) ] }
-        F7rsReturned(
-          shared: (fs.shared_f7rs.map(caller)),
-          exc: (is_exc ? fs.exc_f7rs.map(caller) : []),
-          ok: ((!is_exc && !fs.exc_only) ? fs.ok_f7rs.map(caller) : [])
-        )
+        try { F7rsReturned(
+            shared: (fs.shared_f7rs.map(caller)),
+            exc: (is_exc ? fs.exc_f7rs.map(caller) : []),
+            ok: ((!is_exc && !fs.exc_only) ? fs.ok_f7rs.map(caller) : [])
+        ) } catch { |_m, _| die .+THREW_ERROR }
       }
 
       const Set params_rest = Set(_obj_blocks: _obj_blocks, fs: fs, exc_info: exc_info)
-      # due to a sidef bug, this can't be const
-      var finalized = try {
+      const finalized = try {
         Finalized(
           success: true,
           blocks_ret: obj_blocks.map{ [ .[0].run( fs.obj, .slice(1)... ) ] },

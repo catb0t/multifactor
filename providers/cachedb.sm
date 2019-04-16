@@ -30,6 +30,8 @@ module CacheDBIO {
 
   include Atomic
 
+  define JSON = Feature::JSON.new
+
   # look for the database file
   func _read_disk_db (File name, lib::ABCs::Serializable element_type) is cached -> ImmutableHash {
 
@@ -57,44 +59,70 @@ module CacheDBIO {
     # if it doesn't exist, stop
     # otherwise, open it
     # fixup this use of .serialize on a Hash<Serializable>
-    say new_data.dump
-    Atomic::awrite( name, Feature::JSON.new.pretty.encode( new_data.map_kv{ |_, v| ((_) => v.serialize) } ) )
+    const h = JSON.pretty.encode( new_data.map_kv{ |_, v| ((_) => v.serialize) } )
+    say h
+    Atomic::awrite( name, h )
   }
 }
 
 module DBTransform {
   import sidefext::iterable::ImmutableHash
+  # const ImmHash = ImmutableHash
 
-  define Array ACTIONS = [:insert, :insert_by, :change, :change_by, :delete, :delete_by, ]
+  define Regex ACTION_IS_BY = /_by$/
+  define Regex ACTION_NOT_BY = /(?!_by).{3}$/
 
-  subset Action < String { ACTIONS.contains(_) }
+  define Regex ACTION_IS_CHANGE = /^change/
+  define Regex ACTION_IS_INSERT = /^insert/
+  define Regex ACTION_IS_DELETE = /^delete/
 
+  define Set ACTIONS = Set(:insert, :insert_by, :change, :change_by, :delete, :delete_by)
+
+  define _a = assert_eq( ACTIONS.grep{ .~~ ACTION_IS_BY}.len, ACTIONS.grep{ .~~ ACTION_NOT_BY}.len )
+
+  subset Action < String { ACTIONS.has(_) }
+
+  # Good afternoon, gentleman, I'm a C compiler
   struct Transformation {
     action < Action,
     String key,
     Block action_by,
+    object,
     String uuid,
     Time generated_at
   }
 
-  # Good afternoon, gentleman, I'm a C compiler
-  func new_transformation ( a < Action, Str k, Block b ) -> Transformation {
-    Transformation(a, k, b, GuardIO::make_uuid(len: 10), Time() )
+  func _chk (Transformation _ { .action ~~ ACTION_IS_BY }) is cached -> Bool {
+    !defined(.object) && defined(.action_by)
+  }
+  func _chk (Transformation _ { .action ~~ ACTION_NOT_BY }) is cached -> Bool {
+    defined(.object) && .action_by.refaddr==Block.list_identity.refaddr
   }
 
-  func apply_transformation ( ImmutableHash data, Transformation tf ) -> ImmutableHash {
-    say "in data: #{data.dump} action: #{tf.action}"
-    ImmutableHash( given (tf.action) {
-      when (:delete) { data - tf.key }
-      when (:delete_by) { data.grep_kv{ |k, v| ! tf.action_by.run(k, v) } }
-      default { die "Unimplemented Transformation action: #{_}; fix your code or implement it" }
-    } )
+  subset Change   < Transformation { .action ~~ ACTION_IS_CHANGE && _chk(_) }
+  subset ChangeBy < Transformation { .action ~~ ACTION_IS_CHANGE && _chk(_) }
+  subset Insert   < Transformation { .action ~~ ACTION_IS_INSERT && _chk(_) }
+  subset InsertBy < Transformation { .action ~~ ACTION_IS_INSERT && _chk(_) }
+  subset Delete   < Transformation { .action ~~ ACTION_IS_DELETE && _chk(_) }
+  subset DeleteBy < Transformation { .action ~~ ACTION_IS_DELETE && _chk(_) }
+
+  func new ( a < Action { .~~ ACTION_IS_BY }, Str k, Block b) -> Transformation {
+    Transformation( a, k, b, nil, GuardIO::make_uuid(len: 10), Time() )
+  }
+  # negative lookahead with EOS anchor https://stackoverflow.com/questions/31683167/regex-with-anchor-and-look-ahead
+  func new ( a < Action { .~~ ACTION_NOT_BY }, Str k, obj) -> Transformation {
+    Transformation( a, k, Block.list_identity, obj, GuardIO::make_uuid(len: 10), Time() )
   }
 
-  func apply_transformations ( ImmutableHash data, Set tfs ) -> ImmutableHash {
-    # tfs.values.reduce( { |data, tf| apply_transformation(data, tf) }, data )
-    # TODO: Set.reduce
-    tfs.values.reduce( apply_transformation, data )
+  -> apply (ImmutableHash _, tf < Insert)   -> ImmutableHash { ImmutableHash(. + :(tf.key tf.object)) }
+  -> apply (ImmutableHash _, tf < InsertBy) -> ImmutableHash { ImmutableHash(. + :(tf.key tf.action_by.run(tf.key, .item(tf.key)))) }
+  -> apply (ImmutableHash _, tf < Change)   -> ImmutableHash { ImmutableHash(.-tf.key + :(tf.key tf.object)) }
+  -> apply (ImmutableHash _, tf < ChangeBy) -> ImmutableHash { ImmutableHash(.-tf.key + :(tf.key tf.action_by.run(tf.key, .item(tf.key)))) }
+  -> apply (ImmutableHash _, tf < Delete)   -> ImmutableHash { ImmutableHash(.  - tf.key) }
+  -> apply (ImmutableHash _, tf < DeleteBy) -> ImmutableHash { ImmutableHash(.grep_kv{ |k, v| ! tf.action_by.run(k, v) }) }
+
+  func apply ( ImmutableHash data, Set tfs ) -> ImmutableHash {
+    tfs.values.reduce( apply, data )
   }
 }
 
@@ -149,24 +177,22 @@ class CacheDB < lib::withdirectory::CapturedWriter {
 
     [:change, :insert, :delete].each{
         |action|
-      const ab = (action + :_by)
+      const action_by = (action + :_by)
 
-      # NOTE: sidef bug found!!
-      # if this is func ts, it will be permanently bound to the last iteration
-      const ts = func _ts (__CLASS__ self, String k, Block b) -> __CLASS__ {
-        self.log.wrn(__FILE__, __LINE__, __FUNC_NAME__, ab, k)
-        self.transform( DBTransform::new_transformation(ab, k, b) )
-        self
+      func generated_action (__CLASS__ self, String k, Object o) -> __CLASS__ {
+        # self.log.wrn(__FILE__, __LINE__, __FUNC_NAME__, ab, o.id, o.dump.first(50))
+        self.transform( DBTransform::new(action, k, o) )
+      }
+      func generated_action (__CLASS__ self, Object o) -> __CLASS__ {
+        self.transform( DBTransform::new(action, o.id, o) )
       }
 
-      func generated_action_by (__CLASS__ self, String k, Block b) -> __CLASS__ { ts(self, k, b) }
-      func generated_action_by (__CLASS__ self, Object o) -> __CLASS__ {
-        self.log.wrn(__FILE__, __LINE__, __FUNC_NAME__, ab, o.id, o.dump.first(50))
-        (action ~~ /^delete/) ? ts(self, o.id, { .== o.id } ) : ts(self, o.id, { o } )
+      func generated_action_by (__CLASS__ self, String k, Block b) -> __CLASS__ {
+        self.transform( DBTransform::new(action_by, k, b) )
       }
 
-      __CLASS__.def_method( ab, generated_action_by )
-      __CLASS__.alias_method( ab, action )
+      __CLASS__.def_method( action, generated_action )
+      __CLASS__.def_method( action_by, generated_action_by )
     }
 
     self.orig_data = self._read_disk_db
@@ -181,10 +207,7 @@ class CacheDB < lib::withdirectory::CapturedWriter {
 
     self.capture_write_disk(
       __METHOD_NAME__,
-      { CacheDBIO::_write_disk_db(
-        self.filename_base,
-        DBTransform::apply_transformations( self.orig_data, self.change_sequence )
-      ) }
+      { CacheDBIO::_write_disk_db( self.filename_base, DBTransform::apply(self.orig_data, self.change_sequence) ) }
     )
   }
 

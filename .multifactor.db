@@ -1,0 +1,63 @@
+{
+   "wankel_emma_napier_sample_jeanine_nationalizations_golding" : {
+      "is_git" : 1,
+      "stored_boot_image" : {
+         "_serial_value" : {
+            "algo" : "",
+            "sum" : "",
+            "data" : ""
+         }
+      },
+      "os_type" : "unix",
+      "git_hash" : "9d06dcb67effb8cd0e549eced9895be51bcff3f0",
+      "blob_algorithm" : "sha256",
+      "blob_sums" : {
+         "_serial_value" : {
+            "lib" : "(empty checksum)",
+            "boot" : "",
+            "algo" : "sha256",
+            "vm" : "(empty checksum)"
+         }
+      },
+      "timespec" : {
+         "_serial_value" : {
+            "modified" : "1555384808",
+            "accessed" : "0",
+            "tombstoned" : "0",
+            "created" : "0"
+         }
+      },
+      "arch_name" : "x86",
+      "factor_version" : "0.99",
+      "git_branch" : "master",
+      "id" : "wankel_emma_napier_sample_jeanine_nationalizations_golding",
+      "word_size" : "64",
+      "src_sums" : {
+         "_serial_value" : {
+            "vm" : {
+               "_serial_value" : {
+                  "contents" : "",
+                  "names" : "",
+                  "algo" : "sha256"
+               }
+            },
+            "core" : {
+               "_serial_value" : {
+                  "names" : "",
+                  "algo" : "sha256",
+                  "contents" : ""
+               }
+            },
+            "basis_ignored" : 0,
+            "basis" : {
+               "_serial_value" : {
+                  "contents" : "",
+                  "names" : "",
+                  "algo" : "sha256"
+               }
+            }
+         }
+      },
+      "os_name" : "linux"
+   }
+}
