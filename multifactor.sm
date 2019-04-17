@@ -79,7 +79,7 @@ module Factor {
   }
 
   define Hash  TARGETS = :( :vm => true, :lib => true, :image => false )
-  define Array CHECKSUMMED_TARGETS = [:vm, :lib]
+  define Array CHECKSUMMED_TARGETS = TARGETS.grep_kv{ |_k, _| _ }.keys.to_set
 }
 
 module MultiFactor {
@@ -295,12 +295,12 @@ module MultiFactor {
 
       if ( disk_sum_toplevel != bo.blob_sums.boot ) {
         bo.blob_sums( BlobSums(
-          algo: bo.blob_algorithm || self.algos.blob,
+          algo: (bo.blob_algorithm || self.algos.blob),
           boot: disk_sum_toplevel,
           # set the rest of the properties to their old values
-          [:vm, :lib].map{
+          Factor::CHECKSUMMED_TARGETS.map{
               |n|
-            n ¦ bo.blob_sums.method(n)
+            n ⫶ bo.blob_sums.method(n)()
           }...
         ))
       }

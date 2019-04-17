@@ -341,7 +341,7 @@ class BuildSh {
       if (remote_md5 != local_md5) {
         say "\t#{__METHOD_NAME__}: !!! local / remote checksum mismatch !!! "
         boot_image_file.remove
-        return BuildSh.get_boot_image
+        return BuildSh._get_boot_image
       }
       say "#{__METHOD_NAME__}: Local boot image matched remote sum"
       true
