@@ -80,5 +80,6 @@ module Feature {
 }
 
 with ( Feature::ANSIColor ) {
+  # say Feature::JSON.new.decode('{}')
   say( .color('bright_green'), 'Feature : ContentLoaded', .RESET)
 }

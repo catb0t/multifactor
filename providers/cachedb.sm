@@ -40,7 +40,7 @@ module CacheDBIO {
     # otherwise, open it
     if ( Atomic::aread(name) ) {
         |contents|
-      ImmutableHash( Feature::JSON.decode(contents) ) \
+      ImmutableHash( JSON.decode(contents) ) \
         # TODO: fixup this use of unserialize on Hash<Serializable>
         .map_kv{
             |_, v|
@@ -60,7 +60,7 @@ module CacheDBIO {
     # otherwise, open it
     # fixup this use of .serialize on a Hash<Serializable>
     const h = JSON.pretty.encode( new_data.map_kv{ |_, v| ((_) => v.serialize) } )
-    say h
+    # say h
     Atomic::awrite( name, h )
   }
 }
@@ -69,14 +69,19 @@ module DBTransform {
   import sidefext::iterable::ImmutableHash
   # const ImmHash = ImmutableHash
 
-  define Regex ACTION_IS_BY = /_by$/
-  define Regex ACTION_NOT_BY = /(?!_by).{3}$/
+  define String BY_EXT = :_by
+  define Regex ACTION_IS_BY = Regex(BY_EXT + '$')
+  define Regex ACTION_NOT_BY = Regex('(?!' + BY_EXT + ').{3}$')
 
+  define Regex ACTION_CHANGE = :change
   define Regex ACTION_IS_CHANGE = /^change/
+  define Regex ACTION_INSERT = :insert
   define Regex ACTION_IS_INSERT = /^insert/
+  define Regex ACTION_DELETE = :delete
   define Regex ACTION_IS_DELETE = /^delete/
 
-  define Set ACTIONS = Set(:insert, :insert_by, :change, :change_by, :delete, :delete_by)
+  define Set ACTIONS_BASE = Set(ACTION_CHANGE, ACTION_INSERT, ACTION_DELETE)
+  define Set ACTIONS = ACTIONS_BASE.to_a.map{ (_, _+:_by) }.to_set # sidef bug: Set.map list behaviour
 
   define _a = assert_eq( ACTIONS.grep{ .~~ ACTION_IS_BY}.len, ACTIONS.grep{ .~~ ACTION_NOT_BY}.len )
 
@@ -99,12 +104,12 @@ module DBTransform {
     defined(.object) && .action_by.refaddr==Block.list_identity.refaddr
   }
 
-  subset Change   < Transformation { .action ~~ ACTION_IS_CHANGE && _chk(_) }
-  subset ChangeBy < Transformation { .action ~~ ACTION_IS_CHANGE && _chk(_) }
-  subset Insert   < Transformation { .action ~~ ACTION_IS_INSERT && _chk(_) }
-  subset InsertBy < Transformation { .action ~~ ACTION_IS_INSERT && _chk(_) }
-  subset Delete   < Transformation { .action ~~ ACTION_IS_DELETE && _chk(_) }
-  subset DeleteBy < Transformation { .action ~~ ACTION_IS_DELETE && _chk(_) }
+  subset Change   < Transformation { .action==ACTION_CHANGE    && _chk(_) }
+  subset ChangeBy < Transformation { .action~~ACTION_IS_CHANGE && _chk(_) }
+  subset Insert   < Transformation { .action==ACTION_INSERT    && _chk(_) }
+  subset InsertBy < Transformation { .action~~ACTION_IS_INSERT && _chk(_) }
+  subset Delete   < Transformation { .action==ACTION_DELETE    && _chk(_) }
+  subset DeleteBy < Transformation { .action~~ACTION_IS_DELETE && _chk(_) }
 
   func new ( a < Action { .~~ ACTION_IS_BY }, Str k, Block b) -> Transformation {
     Transformation( a, k, b, nil, GuardIO::make_uuid(len: 10), Time() )
@@ -175,7 +180,7 @@ class CacheDB < lib::withdirectory::CapturedWriter {
       }
     }
 
-    [:change, :insert, :delete].each{
+    DBTransform::ACTIONS_BASE.each{
         |action|
       const action_by = (action + :_by)
 

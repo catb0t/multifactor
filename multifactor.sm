@@ -163,7 +163,7 @@ module MultiFactor {
     self.wd( Dir.cwd )
     # need to use field_groups here
     Hash(
-      :action => Block.identity,
+      :action => Block.identity, # identity constructor
       :sum_algo => String
     ).merge(
       [:force, :dry_run, :info, :clean, :basis_dev, :spoof_build] \
@@ -207,9 +207,22 @@ module MultiFactor {
       spoof_build: self.spoof_build
     )
 
+    const File db_name = File(self.options(){'db-name'})
+
+    self.locker = GuardIO::GlobLocker().setup( :(
+      :uuid => self.uuid,
+      :remove_old_lock => self.options(){'remove-old-lock'},
+      :lock_ext => '.multifactor_lock',
+      :locked_fods => [ db_name, self.fbash.wd ],
+      :verbose => is_verbose,
+      :trace => is_trace
+    ) )
+
+    self.locker.do_lock_files
+
     self.db_man = providers::cachedb::CacheDB().setup( :(
         :dir =>              self.options(){'db-dir'},
-        :filename_base =>    self.options(){'db-name'},
+        :filename_base =>    db_name,
         :dry_run =>          self.dry_run,
         :verbose =>          is_verbose,
         :trace =>            is_trace,
@@ -218,17 +231,7 @@ module MultiFactor {
         # :logger => self.log # separate or same loggers?
     ) )
 
-    self.locker = GuardIO::GlobLocker().setup( :(
-      :uuid => self.uuid,
-      :remove_old_lock => self.options(){'remove-old-lock'},
-      :lock_ext => '.multifactor_lock',
-      :locked_fods => [ self.db_man.db_name, self.fbash.wd ],
-      :verbose => is_verbose,
-      :trace => is_trace
-    ) )
-
     self.log.trc(__FILE__, __LINE__, :init_steps_10_mfruntime, "finished configuration") #, wd now: '#{self.db_dir}'")
-    self.locker.do_lock_files
   } ]
 
   class MFRuntime (Hash options, Array factor_arguments) << lib::ABCs::SeriallyAccessible, lib::withdirectory::CapturedWriter {

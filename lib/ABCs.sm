@@ -179,7 +179,7 @@ class Serializable {
     } else {
       sidefext::construct::maybe_init( props{:default_val} ) \
         .unserialize( entry{self._k_svalue}, @|recur_kwargs, callers: [@|callers, __METHOD_NAME__, :V_else_branch] )
-    } \\ props{:default_val}) # this defined-or technically isn't necessary but why isn't it?
+    } \\ props{:default_val}) # this defined-or technically isn't necessary but why isn't it necessary?
   }
 
   -> _find_setter (Array callers, String field_name, Object new_val) -> Bool {
@@ -188,10 +188,12 @@ class Serializable {
       *(sidefext::checked::checkedref([@|callers, MN, :V_is_prop], self, field_name, { die callers }).ref) = new_val
       true
     } else {
+      say "#{MN} else branch '#{field_name}' #{new_val.dump}"
       self.has_overload( Hash(
         :callers => [@|callers, MN, :V_else_branch],
         :name => field_name,
-        :args => [new_val]
+        :args => [new_val],
+        :debug => true
       ) ){:state}
     }
   }

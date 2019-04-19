@@ -1,0 +1,46 @@
+include lib::feature
+
+func is_explicit (val) -> Bool {
+  defined(val) && val.is_a(Hash) && val.is_object && val.keys.to_set==Set(:__expl_t, :__expl_v) # && (val{:__expl_t}!!).is_typename
+}
+
+func to_explicit (Hash data) -> Hash {
+  data.map_kv{
+      |k, v|
+    ( (k) => if (v.is_a(String)) {
+      v
+    } else {
+      :( __expl_t => v.ref, _expl_v => to_explicit(v) )
+    } )
+  }
+}
+
+func from_explicit (Hash data) -> Hash {
+  data.map_kv{
+      |k, v|
+    # TODO: optimization: don't need to convert strings
+    ( (k) => is_explicit(v) ? (( v{:__expl_t}!! )( v{:__expl_v} )) : from_explicit(v) )
+  }
+}
+
+const h_orig = :( 1 => :2, 3 => false, 4 => [:3, :4], 5 => :(6 => :7),  )
+const h = to_explicit(h_orig)
+# var h_coded = :( 1, :( _type => String, _value => :2), 3, :(_type => Bool, _value => false ) )
+assert_eq(from_explicit( h{1} ), :2)
+assert_eq(from_explicit( h{3} ), false)
+
+say h
+
+const JSON = Feature::JSON.new.pretty.boolean_values.utf8
+
+const j = JSON.encode(h)
+
+say j.dump
+
+const d_raw = JSON.decode(j)
+
+say d_raw.dump
+
+const d = from_explicit(d_raw)
+assert_eq(d{1}, :2)
+assert_eq(d{3}, false)

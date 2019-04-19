@@ -1,0 +1,41 @@
+define EXPL_TYPE  = :__expl_t
+define EXPL_VALUE = :__expl_v
+
+class MyClass (x) {}
+
+const in_data = :(
+  a => :5,
+  b => [:3, :4],
+  c => :( a => :88 ),
+  d => false,
+  e => [true, false]
+  f => [3, 4],
+  g => 4,
+  m => MyClass(1)
+)
+
+const want_data = :(
+  a => :( (EXPL_TYPE) => String.ref, (EXPL_VALUE) => :5 )
+  b => :( (EXPL_TYPE) => Array.ref, (EXPL_VALUE) => [
+    :( (EXPL_TYPE) => String.ref, (EXPL_VALUE) => :3 )
+    :( (EXPL_TYPE) => String.ref, (EXPL_VALUE) => :4 )
+  ] )
+  c => :( (EXPL_TYPE) => Hash.ref, (EXPL_VALUE) => :(
+    a => :( (EXPL_TYPE) => String.ref, (EXPL_VALUE) => :88 )
+  ) )
+  d => :( (EXPL_TYPE) => Bool.ref, (EXPL_VALUE) => false )
+  e => :( (EXPL_TYPE) => Array.ref, (EXPL_VALUE) => [
+    :( (EXPL_TYPE) => Bool.ref, (EXPL_VALUE) => true )
+    :( (EXPL_TYPE) => Bool.ref, (EXPL_VALUE) => false )
+  ] )
+  f => :( (EXPL_TYPE) => Array.ref, (EXPL_VALUE) => [
+    :( (EXPL_TYPE) => Number.ref, (EXPL_VALUE) => 3 )
+    :( (EXPL_TYPE) => Number.ref, (EXPL_VALUE) => 4 )
+  ] )
+  g => :( (EXPL_TYPE) => Number.ref, (EXPL_VALUE) => 4 )
+  m => :( (EXPL_TYPE) => MyClass.ref, (EXPL_VALUE) => :( x => 1 ) )
+)
+
+const JSON = 'JSON::XS'.require.new.pretty.utf8
+say want_data
+say JSON.encode(want_data)
