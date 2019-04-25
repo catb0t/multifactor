@@ -7,10 +7,9 @@ include sidefext::combi
 # i would include Enumerator but I don't think they actually are meaninfully constructable
 # Match is not constructible so not listed
 # Glob is iterable but can't be constructed with an iterable
-define ITER_TYPES = Set(Array, String, Set, Bag, Matrix, Hash, Set, Pair, Range, RangeNum, RangeString)
 define CONSTRUCT1 = { |_, v| _(v) }
 func is_iterable_object (Object o) {
-  o.is_object && ITER_TYPES.any{ o.is_a(_) }
+  o.is_object && sidefext::metatype::ITER_TYPES.any{ o.is_a(_) }
 }
 
 func complex_typecheck (Object obj, Object basetp, cdids, subtps) -> (Bool, Object) { # /
@@ -100,7 +99,7 @@ class Hash {
     func _do_ewise_construct ( Object typename, Object source ) {
       if (! defined(source)) {
         typename()
-      } elsif (ITER_TYPES.exists(typename) && is_iterable_object(source) ) {
+      } elsif (sidefext::metatype::ITER_TYPES.exists(typename) && is_iterable_object(source) ) {
         # say "branch a #{source.dump}"
         typename( @|(source ~~ String ? source.chars : source) )
       } else {

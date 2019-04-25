@@ -1,0 +1,31 @@
+#! ruby
+include sidefext::xchg
+
+assert_eq( Explicit::make( nil, 0 ), :( Explicit::EXPL_VAL 0 ) )
+assert_eq( Explicit::make( '', 0 ), :( Explicit::EXPL_VAL 0 ) )
+assert_eq( Explicit::make( Str.ref, :0 ), :( Explicit::EXPL_TYP Str.ref Explicit::EXPL_VAL, :0 ) )
+assert_eq( Explicit::make( Num.ref, 0 ), :( Explicit::EXPL_TYP Num.ref Explicit::EXPL_VAL 0 ) )
+assert_eq( Explicit::make( Arr.ref, [] ), :( Explicit::EXPL_TYP Arr.ref Explicit::EXPL_VAL [] ) )
+
+assert_eq( Explicit::make( Str.ref, 0, Num.ref ), :( Explicit::EXPL_TYP Str.ref Explicit::EXPL_VAL 0 Explicit::EXPL_STP Num.ref ) )
+assert_eq( Explicit::make( Str.ref, 0, Num.ref ), :( Explicit::EXPL_TYP Str.ref Explicit::EXPL_VAL 0 Explicit::EXPL_STP Num.ref ) )
+assert_eq( Explicit::make( Arr.ref, [0 1]*7, Num.ref ), :( Explicit::EXPL_TYP Arr.ref Explicit::EXPL_VAL [0 1]*7 Explicit::EXPL_STP Num.ref ) )
+
+assert_eq( Explicit::to(2),  :( Explicit::EXPL_TYP   Num.ref Explicit::EXPL_VAL 2 ) )
+assert_eq( Explicit::to(2),  Explicit::make( Num.ref  2 ) )
+assert_eq( Explicit::to(:2), :( Explicit::EXPL_TYP Str.ref  Explicit::EXPL_VAL, :2 ) )
+assert_eq( Explicit::to(:2), Explicit::make( Str.ref, :2 ) )
+assert_eq( Explicit::to(:2), Explicit::make( Str.ref, :2 ) )
+
+assert_eq( Explicit::to([]), :( Explicit::EXPL_TYP Arr.ref Explicit::EXPL_VAL [] ) )
+assert_eq( Explicit::to([0 1]), :(
+    Explicit::EXPL_TYP Arr.ref
+    Explicit::EXPL_VAL [ :(Explicit::EXPL_VAL 0) :(Explicit::EXPL_VAL 1) ]
+    Explicit::EXPL_STP Num.ref
+  )
+)
+assert_eq( Explicit::to([0, :1]), :(
+    Explicit::EXPL_TYP Arr.ref
+    Explicit::EXPL_VAL [ :(Explicit::EXPL_TYP Num.ref Explicit::EXPL_VAL 0) :(Explicit::EXPL_TYP Str.ref Explicit::EXPL_VAL, :1) ]
+  )
+)

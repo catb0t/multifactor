@@ -1,0 +1,48 @@
+#! ruby
+include sidefext::xchg
+define EXPL_TYP = :__1XPL_T
+define EXPL_STP = :__1XPL_S # homogenous iterable subtypes
+define EXPL_VAL = :__1XPL_V
+
+class MyClass (x) { -> FREEZE (_x) {}; -> THAW (_x) {} } # method TO_JSON {} }
+
+const in_data = :(
+  a => :5,
+  b => [:3, :4],
+  c => :( a => :88 ),
+  d => false,
+  e => [true, false]
+  f => [3, 4],
+  g => 4,
+  m => MyClass(1)
+)
+
+const want_data = :(
+  a => :( (EXPL_TYP) => String.ref, (EXPL_VAL) => :5 )
+  b => :( (EXPL_TYP) => Array.ref, (EXPL_STP) => String.ref, (EXPL_VAL) => [
+    :( (EXPL_VAL) => :3 )
+    :( (EXPL_VAL) => :4 )
+  ] )
+  c => :( (EXPL_TYP) => Hash.ref, (EXPL_VAL) => :(
+    a => :( (EXPL_TYP) => String.ref, (EXPL_VAL) => :88 )
+  ) )
+  d => :( (EXPL_TYP) => Bool.ref, (EXPL_VAL) => false )
+  e => :( (EXPL_TYP) => Array.ref, (EXPL_VAL) => [
+    :( (EXPL_TYP) => Bool.ref, (EXPL_VAL) => true )
+    :( (EXPL_TYP) => Bool.ref, (EXPL_VAL) => false )
+  ] )
+  f => :( (EXPL_TYP) => Array.ref, (EXPL_STP) => Number.ref, (EXPL_VAL) => [
+    :( (EXPL_VAL) => 3 )
+    :( (EXPL_VAL) => 4 )
+  ] )
+  g => :( (EXPL_TYP) => Number.ref, (EXPL_VAL) => 4 )
+  m => :( (EXPL_TYP) => MyClass.ref, (EXPL_VAL) => :( x => 1 ) )
+)
+
+const JSON = 'JSON::XS'.require.new.pretty.utf8.allow_blessed
+say in_data
+say want_data
+say JSON.encode(want_data)
+
+const expl_data_in = Explicit::to(in_data)
+assert_eq(want_data, expl_data_in)

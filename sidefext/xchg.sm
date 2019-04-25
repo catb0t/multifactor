@@ -1,0 +1,97 @@
+#! ruby
+# reliable data export / exchange / interchange for Sidef builtins
+#   primarily for JSON
+include sidefext::metatype
+
+class Array {
+  method values { self }
+  method all_eq { self.to_set == self[0] }
+}
+class Matrix { method values { self.flatten } }
+# class Set { method lacks (*_) { !self.has(_...) } }
+
+module Explicit {
+  define EXPL_TYP = :__1XPL_T
+  define EXPL_STP = :__1XPL_S # homogenous iterable subtypes
+  define EXPL_VAL = :__1XPL_V
+
+  func make (type, val, stp = nil) -> Hash {
+    :( EXPL_VAL val )+(
+      type ? :( EXPL_TYP type ) : :()
+    )+(
+      defined(stp) ? :( EXPL_STP stp ) : :()
+    )
+  }
+
+  func _major_subtype_heuristic (val) {
+    return nil
+    if (val.respond_to(:len) && val.respond_to(:all)) {
+      # the heuristic is an future optimization
+      # const maj_len = val.len/2 + 1
+      if (
+        sidefext::metatype::ITER_TYPES.has(val.ref.lookup_ref.to_type) \
+          && val.values.map{ .ref }.all_eq
+      ) {
+        val.values[0]
+      } else {
+        nil # currently not supported
+      }
+
+    # elsif ????
+    } else {
+      nil
+    }
+  }
+
+  func to (obj) -> Hash {
+    if ( ! defined(obj) ) {
+      :( EXPL_TYP, :nil )
+    } else { # defined
+      const value = given (obj) {
+        case ( .is_a(Set) )    { .map{ Explicit::to(_) } }
+        case ( .is_a(Hash) )   { .map_kv{ |k, v| ( (k) => Explicit::to(v) ) } }
+        case ( .is_an(Array) ) { .map{ Explicit::to(_) } }
+        default                { _ }
+      }
+
+      Explicit::make( obj.ref, value, _major_subtype_heuristic(obj) )
+    }
+  }
+
+  func to_hash (Hash data) -> Hash {
+    data.map_kv{
+        |k, v|
+      ( (k) => to(v) )
+    }
+  }
+
+  func from (Hash obj, String subtype = '') {
+    # (???) String, probably
+    if (! ::exists( obj, EXPL_TYP )) {
+      obj{:EXPL_VAL}
+    } elsif (obj{:EXPL_TYP} == 'nil') {
+      nil
+    } else {
+      const curried_from = (defined( obj{:EXPL_STP} ) ? { Explicit::from(_, subtype: obj{:EXPL_STP}) } : from)
+
+      const iter_type = (subtype || obj{:EXPL_TYP} -> lookup_ref.to_type)
+
+      const pre_val = obj{:EXPL_VAL}
+
+      iter_type( given ( iter_type ) {
+        case ( .is_a(Set) )    { pre_val.map{ curried_from(_) } }
+        case ( .is_a(Hash) )   { pre_val.map_kv{ |k, v| ( (k) => curried_from(_) ) } }
+        case ( .is_an(Array) ) { pre_val.map{ curried_from(_) } }
+        default                { pre_val }
+      } )
+    }
+  }
+
+  func from_hash (Hash data) -> Hash {
+    data.map_kv{
+        |k, v|
+      ( (k) => from(v) )
+    }
+  }
+}
+# module Xchg {}
