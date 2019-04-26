@@ -86,30 +86,24 @@ module Explicit {
   }
 
   func from (Hash obj, String subtype = '') {
-    # (???) String, probably
-    if (! ::exists( obj, EXPL_TYP )) {
-      obj{:EXPL_VAL}
-    } elsif (obj{:EXPL_TYP} == 'nil') {
-      nil
-    } else {
-      const curried_from = (defined( obj{:EXPL_STP} ) ? { Explicit::from(_, subtype: obj{:EXPL_STP}) } : from)
-
-      const iter_type = (subtype || obj{:EXPL_TYP} -> lookup_ref.to_type)
-
-      const pre_val = obj{:EXPL_VAL}
-
-      iter_type( given ( iter_type ) {
-        case ( .is_a(Set) )    { pre_val.map{ curried_from(_) } }
-        case ( .is_a(Hash) )   { pre_val.map_kv{ |k, v| ( (k) => curried_from(_) ) } }
-        case ( .is_an(Array) ) { pre_val.map{ curried_from(_) } }
-        default                { pre_val }
-      } )
-    }
+    # if (obj{:EXPL_TYP} == 'nil') {
+    #   nil
+    # } else {
+    #   const curried_from = (defined( obj{:EXPL_STP} ) ? { Explicit::from(_, subtype: obj{:EXPL_STP} \\ '') } : from)
+    #   const iter_type = (subtype||obj{:EXPL_TYP} -> lookup_ref.to_type)
+    #   const pre_val = obj{:EXPL_VAL}
+    #   iter_type( given ( iter_type ) {
+    #     case ( .is_a(Set) )    { pre_val.map{ curried_from(_) } }
+    #     case ( .is_a(Hash) )   { pre_val.map_kv{ |k, v| ( (k) => curried_from(_) ) } }
+    #     case ( .is_an(Array) ) { pre_val.map{ curried_from(_) } }
+    #     default                { pre_val }
+    #   } )
+    # }
   }
 
   func untag (Hash obj) { Explicit::from(obj) }
 
-  func from_hash (Hash data) -> Hash {
+  func hash_from (Hash data) -> Hash {
     data.map_kv{
         |k, v|
       ( (k) => from(v) )

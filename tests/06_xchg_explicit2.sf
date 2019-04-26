@@ -5,6 +5,7 @@ import Explicit::EXPL_VAL
 import Explicit::EXPL_TYP
 import Explicit::EXPL_STP
 import Explicit::hash_to
+import Explicit::hash_from
 
 class MyClass (x) { -> FREEZE (_x) {}; -> THAW (_x) {} } # method TO_JSON {} }
 
@@ -58,3 +59,7 @@ const rt_expl = JSON.decode(j_expl)
 assert_eq(rt_want, rt_expl)
 assert_ne(JSON.decode(JSON.encode(in_data)), rt_expl)
 assert_ne(JSON.decode(JSON.encode(in_data)), rt_want)
+
+assert_eq(hash_from(rt_want), hash_from(rt_expl))
+assert_eq(hash_from(rt_want), in_data)
+assert_eq(hash_from(rt_expl), in_data)
