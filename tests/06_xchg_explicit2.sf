@@ -1,8 +1,10 @@
 #! ruby
 include sidefext::xchg
-define EXPL_TYP = :__1XPL_T
-define EXPL_STP = :__1XPL_S # homogenous iterable subtypes
-define EXPL_VAL = :__1XPL_V
+include Explicit
+import Explicit::EXPL_VAL
+import Explicit::EXPL_TYP
+import Explicit::EXPL_STP
+import Explicit::hash_to
 
 class MyClass (x) { -> FREEZE (_x) {}; -> THAW (_x) {} } # method TO_JSON {} }
 
@@ -14,7 +16,7 @@ const in_data = :(
   e => [true, false]
   f => [3, 4],
   g => 4,
-  m => MyClass(1)
+  m => (MyClass ¦ :(x => 1))
 )
 
 const want_data = :(
@@ -27,22 +29,32 @@ const want_data = :(
     a => :( (EXPL_TYP) => String.ref, (EXPL_VAL) => :88 )
   ) )
   d => :( (EXPL_TYP) => Bool.ref, (EXPL_VAL) => false )
-  e => :( (EXPL_TYP) => Array.ref, (EXPL_VAL) => [
-    :( (EXPL_TYP) => Bool.ref, (EXPL_VAL) => true )
-    :( (EXPL_TYP) => Bool.ref, (EXPL_VAL) => false )
+  e => :( (EXPL_STP) => Bool.ref, (EXPL_TYP) => Array.ref, (EXPL_VAL) => [
+    :( (EXPL_VAL) => true )
+    :( (EXPL_VAL) => false )
   ] )
   f => :( (EXPL_TYP) => Array.ref, (EXPL_STP) => Number.ref, (EXPL_VAL) => [
     :( (EXPL_VAL) => 3 )
     :( (EXPL_VAL) => 4 )
   ] )
   g => :( (EXPL_TYP) => Number.ref, (EXPL_VAL) => 4 )
-  m => :( (EXPL_TYP) => MyClass.ref, (EXPL_VAL) => :( x => 1 ) )
+  m => :( (EXPL_TYP) => MyClass.ref.mref, (EXPL_VAL) => :( x => :( EXPL_TYP Num.ref EXPL_VAL 1 ) ) )
 )
 
-const JSON = 'JSON::XS'.require.new.pretty.utf8.allow_blessed
-say in_data
-say want_data
-say JSON.encode(want_data)
+const JSON = 'JSON::XS'.require.new.pretty.utf8 # .allow_blessed
+# say in_data
+# say want_data
+const j_want = JSON.encode(want_data)
+const rt_want = JSON.decode(j_want)
 
-const expl_data_in = Explicit::to(in_data)
+const expl_data_in = hash_to(in_data)
+# say want_data.dump
+# say expl_data_in.dump
 assert_eq(want_data, expl_data_in)
+
+const j_expl = JSON.encode(expl_data_in)
+const rt_expl = JSON.decode(j_expl)
+
+assert_eq(rt_want, rt_expl)
+assert_ne(JSON.decode(JSON.encode(in_data)), rt_expl)
+assert_ne(JSON.decode(JSON.encode(in_data)), rt_want)

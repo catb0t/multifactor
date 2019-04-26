@@ -5,63 +5,83 @@ include sidefext::metatype
 
 class Array {
   method values { self }
-  method all_eq { self.to_set == self[0] }
+  method all_eq { self.to_set.to_a == [self[0]] }
 }
 class Matrix { method values { self.flatten } }
 # class Set { method lacks (*_) { !self.has(_...) } }
 
 module Explicit {
-  define EXPL_TYP = :__1XPL_T
-  define EXPL_STP = :__1XPL_S # homogenous iterable subtypes
-  define EXPL_VAL = :__1XPL_V
+  define EXPL_TYP = :__1XPT
+  define EXPL_STP = :__1XPS # homogenous iterable subtypes
+  define EXPL_VAL = :__1XPV
 
-  func make (type, val, stp = nil) -> Hash {
-    :( EXPL_VAL val )+(
-      type ? :( EXPL_TYP type ) : :()
-    )+(
-      defined(stp) ? :( EXPL_STP stp ) : :()
-    )
+  func make (type, val, stp = false) -> Hash {
+    gather {
+      take( EXPL_VAL val )
+      take( EXPL_TYP type ) if type
+      take( EXPL_STP stp )  if stp
+    }.to_h
   }
 
   func _major_subtype_heuristic (val) {
-    return nil
     if (val.respond_to(:len) && val.respond_to(:all)) {
       # the heuristic is an future optimization
       # const maj_len = val.len/2 + 1
-      if (
-        sidefext::metatype::ITER_TYPES.has(val.ref.lookup_ref.to_type) \
-          && val.values.map{ .ref }.all_eq
-      ) {
-        val.values[0]
-      } else {
-        nil # currently not supported
-      }
-
-    # elsif ????
-    } else {
-      nil
-    }
+      if ( sidefext::metatype::ITER_TYPES.has(val.ref.lookup_ref.to_type) ) {
+        with ( val.values.map{ .ref } ) {
+          # say _
+          .all_eq && .[0]
+        }
+      } # else {}
+    } # else?
   }
 
-  func to (obj) -> Hash {
+  # TODO: FUTURE
+  func _major_subtype_heuristic_v2 (val) -> Array {
+    ...
+    var subtype = _major_subtype_heuristic(val)
+    !subtype ? [] : [subtype, _major_subtype_heuristic_v2(val.values)...]
+  }
+
+  func to (obj { defined(_) ? .is_object : true }, subtype = false) -> Hash {
     if ( ! defined(obj) ) {
       :( EXPL_TYP, :nil )
     } else { # defined
-      const value = given (obj) {
-        case ( .is_a(Set) )    { .map{ Explicit::to(_) } }
-        case ( .is_a(Hash) )   { .map_kv{ |k, v| ( (k) => Explicit::to(v) ) } }
-        case ( .is_an(Array) ) { .map{ Explicit::to(_) } }
-        default                { _ }
-      }
 
-      Explicit::make( obj.ref, value, _major_subtype_heuristic(obj) )
+      # NOTE: if either of these are `const`, the code fails on the next iteration
+      var st  = _major_subtype_heuristic(obj)
+      var bst = !!st
+      func curried_to (obj) { Explicit::to(obj, subtype: bst) }
+
+      var (like_user_pair, ref) = with (obj) {
+        var r = (.is_a(Pair) ? .[0].ref : '')
+        var lup = (r.starts_with('Sidef::Runtime') && with (.[1]) { .is_a(Hash) && .is_object })
+        (lup, lup ? r.mref : .ref )
+      }
+      say "obj: #{obj} ref: #{ref} st: '#{st}' last st: #{subtype} like_user_pair: #{like_user_pair}"
+
+      Explicit::make(
+        !subtype && ref,
+        given (obj) {
+          # case ( like_user_pair ) { curried_to(.[1]) } ?????
+          case ( like_user_pair ) { .[1].map_kv{ |k, v| ( (k) => curried_to(v) ) } }
+          case ( .is_a(Pair) )    { curried_to(.values) }
+          case ( .is_a(Set) )     { .map{ curried_to(_) } }
+          case ( .is_a(Hash) )    { .map_kv{ |k, v| ( (k) => curried_to(v) ) } }
+          case ( .is_an(Array) )  { .map{ curried_to(_) } }
+          default                 { _ }
+        },
+        st
+      )
     }
   }
 
-  func to_hash (Hash data) -> Hash {
+  func tag (obj) { Explicit::to(obj) }
+
+  func hash_to (Hash data) -> Hash {
     data.map_kv{
         |k, v|
-      ( (k) => to(v) )
+      ( (k) => Explicit::to(v) )
     }
   }
 
@@ -86,6 +106,8 @@ module Explicit {
       } )
     }
   }
+
+  func untag (Hash obj) { Explicit::from(obj) }
 
   func from_hash (Hash data) -> Hash {
     data.map_kv{
