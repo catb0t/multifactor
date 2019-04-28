@@ -12,9 +12,10 @@ class Pair   { method values { self.to_a } }
 # class Set { method lacks (*_) { !self.has(_...) } }
 
 module Explicit {
-  define EXPL_TYP = :__1XPT
-  define EXPL_STP = :__1XPS # homogenous subtypes of iterables
-  define EXPL_VAL = :__1XPV
+  define EXPL_TYP = :__XT
+  define EXPL_STP = :__XS # homogenous subtypes of iterables
+  define EXPL_VAL = :__XV
+  define USER_TYPE_MAGIC = 'U!!!'
 
   func make (type, val, stp = false) -> Hash {
     gather {
@@ -43,53 +44,60 @@ module Explicit {
   # }
   # TODO: type coding
 
-  func to (obj, subtype = false) -> Hash {
+  func like_user_pair (Object obj) -> Bool {
+    obj.is_a(Pair) && obj[0].ref.is_non_builtin_type && obj[0].is_typename && obj[1].is_a(Hash) && obj[1].is_object
+  }
+  func like_user_pair (Pair p, String ref_0) -> Bool {
+    ref_0.is_non_builtin_type && p[0].is_typename && p[1].is_a(Hash) && p[1].is_object
+  }
+  func like_user_pair (Object obj, String ref_0) -> Bool {
+    obj.is_a(Pair) && ref_0.is_non_builtin_type && obj[0].is_typename && obj[1].is_a(Hash) && obj[1].is_object
+  }
+
+  func to (obj, subtype = false, Block user_type_hook = Block.identity) -> Hash {
     if ( ! defined(obj) ) {
       :( EXPL_TYP, :nil )
     } elsif (obj.is_typename) {
       :( EXPL_TYP, :typename, EXPL_VAL, obj.ref.mref )
     } else { # defined
 
-      # NOTE: Sidef bug found! if either of these are `const`, the code fails
-      var st  = _major_subtype_heuristic(obj)
-      var bst = st.to_bool
-      var curried_to = (bst ? func (_) -> Hash { Explicit::to(_, subtype: st) } : Explicit::to)
-
-      var (like_user_pair, ref) = with (obj) {
-        var r = (.is_a(Pair) ? .[0].ref : '')
-        var lup = (r.starts_with('Sidef::Runtime') && with (.[1]) { .is_a(Hash) && .is_object })
-        (lup, lup ? 'U!!!'+r.mref : .ref )
+      var (st, curried_to) = with ( _major_subtype_heuristic(obj) ) {
+        (_, .? func (o) -> Hash { Explicit::to(o, subtype: _) } : Explicit::to)
       }
-      # say "obj: #{obj} ref: #{ref} st: '#{st}' last st: #{subtype} like_user_pair: #{like_user_pair}"
+
+      var (user_pair, ref) = if ( obj.is_a(Pair) && like_user_pair(obj, obj[0].ref) && obj[0].ref ) {
+          |_|
+        (true, USER_TYPE_MAGIC + .mref)
+      } else { (false, obj.ref) }
 
       Explicit::make(
         !subtype && ref,
         given (obj) {
-          case ( like_user_pair ) { .[1].map_kv{ |k, v| ( (k) => curried_to(v) ) } }
-          case ( .is_a(Pair) )    { continue }
-          case ( .is_a(Set) )     { continue }
-          case ( .is_an(Array) )  { .map{ curried_to(_) } }
-          case ( .is_a(Hash) )    { .map_kv{ |k, v| ( (k) => curried_to(v) ) } }
-          default                 { _ }
+          case ( user_pair )     { .[1].map_kv{ |k, v| ( (k) => curried_to(v) ) } }
+          case ( .is_a(Pair) )   { continue }
+          case ( .is_a(Set) )    { continue }
+          case ( .is_an(Array) ) { .to_a.map{ curried_to(_) } }
+          case ( .is_a(Hash) )   { .map_kv{ |k, v| ( (k) => curried_to(v) ) } }
+          default                { _ }
         },
         st
       )
     }
   }
 
-  func tag (obj) { Explicit::to(obj) }
-
-  var _hash_from
-
-  func hash_to (Hash data) -> Hash {
+  func tag_hash (Hash data, Block user_type_hook = Block.identity) -> Hash {
     data.map_kv{
         |k, v|
-      ( (k) => Explicit::to(v) )
+      ( (k) => Explicit::to(v, user_type_hook: user_type_hook) )
     }
   }
 
+  const tag     = to
+  const hash_to = tag_hash
 
-  func from (Hash obj, subtype = false) {
+  var _hash_from
+
+  func from (Hash obj, subtype = false, Block user_type_hook = Block.identity) {
     if (obj{EXPL_TYP} == :nil) {
       nil
     } elsif (obj{EXPL_TYP} == :typename) {
@@ -100,33 +108,39 @@ module Explicit {
         : Explicit::from
       )
 
-      var type_s = (subtype || obj{EXPL_TYP})
-      var is_user_type = type_s.starts_with('U!!!')
-      var type   = ( is_user_type ? (type_s =~ /^U!!!(.*)$/ -> caps[0]) : type_s ).lookup_ref.to_type
+      var (user_type, type) = with (subtype || obj{EXPL_TYP}) {
+        (.starts_with(USER_TYPE_MAGIC), .=~ Regex("^(?:#{USER_TYPE_MAGIC})?(.*)$") -> caps[0].lookup_ref.to_type)
+      } else { die '???' }
 
       var pre_val = obj{EXPL_VAL}
 
       # say "obj: #{obj.dump.lines.map{ 9.chr+_ }.join(10.chr)}\n\tref: '#{obj{EXPL_TYP}}' last subtype: #{subtype} type_s: #{type_s} type; #{type} is_user_type: #{is_user_type}\n"
 
       given ( type ) {
-        case ( is_user_type ) { ( _ ¦ Explicit::_hash_from(pre_val) ) }
+        case ( user_type )    {
+          with ( user_type_hook.is_identity ? Pair : user_type_hook ) {
+              |ctor|
+            ctor( _, Explicit::_hash_from(pre_val) )
+          }
+        }
         case ( .is_a(Pair) )  { continue }
         case ( .is_a(Set) )   { continue }
         case ( .is_a(Array) ) { type( pre_val.map{ curried_from(_) }... ) }
         case ( .is_a(Hash) )  { type( pre_val.map_kv{ |k, v| ( (k) => curried_from(v) ) }... ) }
-        default { type( pre_val ) }
+        default               { type( pre_val ) }
       }
     }
   }
 
-  func untag (Hash obj) { Explicit::from(obj) }
-
-  func hash_from (Hash data) -> Hash {
+  func untag_hash (Hash data, Block user_type_hook = Block.identity) -> Hash {
     data.map_kv{
         |k, v|
-      ( (k) => from(v) )
+      ( (k) => from(v, user_type_hook: user_type_hook) )
     }
   }
-  _hash_from = hash_from
+
+  const untag     = from
+  _hash_from      = untag_hash
+  const hash_from = untag_hash
 }
 # module Xchg {}

@@ -17,6 +17,7 @@
 
 include sidefext::construct
 include sidefext::iterable
+include sidefext::xchg
 
 include lib::guardio
 include lib::feature
@@ -33,20 +34,22 @@ module CacheDBIO {
   define JSON = Feature::JSON.new
 
   # look for the database file
-  func _read_disk_db (File name, lib::ABCs::Serializable element_type) is cached -> ImmutableHash {
+  # lib::ABCs::Serializable element_type
+  func _read_disk_db (File name) is cached -> ImmutableHash {
 
     # look for the database file
     # if it doesn't exist, stop
     # otherwise, open it
     if ( Atomic::aread(name) ) {
         |contents|
-      ImmutableHash( JSON.decode(contents) ) \
-        # TODO: fixup this use of unserialize on Hash<Serializable>
-        .map_kv{
-            |_, v|
-          ( (_) =>
-            ( sidefext::construct::maybe_init( element_type ) ) -> unserialize(v) )
-        }
+      ImmutableHash( Explicit::untag_hash(
+          JSON.decode(contents),
+          user_type_hook: func (typename, data) {
+            # TODO: fixup this use of unserialize on Hash<Serializable>
+            sidefext::construct::maybe_init( typename ).unserialize( data )
+          }
+      ) )
+
     } else {
       # if it's empty, get a new one
       ImmutableHash()
@@ -59,7 +62,14 @@ module CacheDBIO {
     # if it doesn't exist, stop
     # otherwise, open it
     # fixup this use of .serialize on a Hash<Serializable>
-    const h = JSON.pretty.encode( new_data.map_kv{ |_, v| ((_) => v.serialize) } )
+    const h = JSON.pretty.encode( Explicit::tag_hash(
+
+      # can we get tag to do this automatically?
+      new_data.map_kv{
+          |k, _|
+        ((k) => .is_serializable ? (k.ref.to_type ¦ .serialize) : _)
+      }
+    ) )
     # say h
     Atomic::awrite( name, h )
   }
@@ -132,6 +142,7 @@ module DBTransform {
 }
 
 define Hash TEMPLATE_SETUP_CACHEDB = :(
+  :version => String,
   :dir => Dir,
   :filename_base => File,
   :dry_run => Bool,
@@ -140,10 +151,12 @@ define Hash TEMPLATE_SETUP_CACHEDB = :(
   :replace_existing => Bool,
   :debug => :( :type => Bool, :default => true ),
   :logger => :( :type => GuardIO::SLog, :deferred => { GuardIO::SLog( is_verbose: .{:verbose}, is_trace: .{:trace} ) } ),
-  :element_type => :( :type => lib::ABCs::Serializable, :val_is_typename => true )
+  # :element_type => :( :type => lib::ABCs::Serializable, :val_is_typename => true )
 )
 
 class CacheDB < lib::withdirectory::CapturedWriter {
+
+  has String version
 
   has Set change_sequence = Set()
   has ImmutableHash orig_data = ImmutableHash()
@@ -171,6 +184,8 @@ class CacheDB < lib::withdirectory::CapturedWriter {
       self.filename_base = .{:filename_base}
 
       self.element_type = .{:element_type}
+
+      self.version = .{:version}
 
       if (.{:replace_existing} && self.db_name.exists) {
         self.log.wrn(__FILE__, __LINE__, __METHOD_NAME__, "!!! removing old DB !!!")
@@ -205,7 +220,7 @@ class CacheDB < lib::withdirectory::CapturedWriter {
   }
 
   method _write_disk_db {
-    if ( self._write_called ) { die "bug found: you can't call #{__METHOD_NAME__} more than once" }
+    if ( !__OPTIMIZED__ && self._write_called ) { die "bug found: you can't call #{__METHOD_NAME__} more than once" }
     self._write_called = true
 
     self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, 'writing', self.db_name)
@@ -217,7 +232,7 @@ class CacheDB < lib::withdirectory::CapturedWriter {
   }
 
   method _read_disk_db () is cached -> ImmutableHash {
-    if ( self._read_called) { die "bug found: you can't call #{__METHOD_NAME__} more than once" }
+    if ( !__OPTIMIZED__ && self._read_called) { die "bug found: you can't call #{__METHOD_NAME__} more than once" }
     self._read_called = true
     self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, 'reading', self.filename_base)
 
