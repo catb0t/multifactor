@@ -39,7 +39,7 @@ module FRExt {
 
   class Object {
     # test if it can be called with the specific number and type of arguments
-    method has_overload (Hash overload_spec) -> Hash {
+    method has_overload (:overload_spec) -> Hash {
       TEMPLATE_SPEC_HAS_OVERLOAD.template_transform( overload_spec ).rescope{
           |spec|
         # say "#{spec}"
@@ -88,12 +88,12 @@ module FRExt {
       self.cleave(
         { .respond_to(name) },
         { .declares_method(name) },
-        { .has_overload( Hash(
+        { .has_overload(
             :callers => [@|callers, __METHOD_NAME__],
             :name => name,
             :clone_call => true,
             :give_err => true
-          ) ).rescope{
+          ).rescope{
             .{:state} || (MsgTypes::METHOD_EXISTS.contains( .{:why} ))
           }
         }
@@ -104,13 +104,13 @@ module FRExt {
       self.cleave(
         { .respond_to(name) },
         { .declares_method(name) },
-        { .has_overload( Hash(
+        { .has_overload(
             :callers => [@|callers, __METHOD_NAME__],
             :name => name,
             :args => args,
             :clone_call => true,
             :give_err => true
-          ) ).rescope{
+          ).rescope{
             .{:state} || (MsgTypes::OVERLOAD_EXISTS.contains( .{:why} ) )
           }
         }
@@ -121,13 +121,13 @@ module FRExt {
     method is_property (callers < ExtantArrStr, Str name, Object type_example_arg) -> Bool {
       # self-respecting explicitly declared accessors are typed, and not varargs
       # field accessors generated with "has X" are untyped varargs
-      self.has_overload( Hash(
+      self.has_overload(
           :callers => [@|callers, __METHOD_NAME__],
           :name => name,
           :args => [type_example_arg, :extra_garbage_arg],
           :clone_call => true,
           :give_err => true
-      ) ).rescope{
+      ).rescope{
         # say "is_property: #{self.class}::#{name} :: #{.{:state}}"
         .{:state} || ( ! MsgTypes::NOT_PROPERTY.exists( .{:why} ) )
       }
@@ -152,8 +152,10 @@ module FRExt {
 }
 
 -> _test_frext {
-  assert_eq( Object.has_overload(
-    :(:callers => [:main], :name => :respond_to, :give_return => true)),
+  assert_eq(
+    Object.has_overload(
+      :callers => [:main], :name => :respond_to, :give_return => true
+    ),
     :( :return => false, :state => true )
   )
 }

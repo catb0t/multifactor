@@ -162,7 +162,7 @@ class CacheDB < lib::withdirectory::CapturedWriter {
 
   -> data () is cached -> ImmutableHash { self.orig_data }
 
-  method setup (Hash cdb_opts) -> __CLASS__ {
+  method setup (:cdb_opts) -> __CLASS__ {
     TEMPLATE_SETUP_CACHEDB.template_transform(cdb_opts).rescope{
       self.log = (*.{:logger})(_)
       self.dry_run = .{:dry_run}

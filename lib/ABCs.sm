@@ -130,11 +130,11 @@ class Serializable {
       # say "\t#{field_name} is a property"
       *(sidefext::checked::checkedref([@|callers, MN, :V_is_prop], self, field_name, { die callers } ).ref)
     } else {
-      self.has_overload( Hash(
+      self.has_overload(
         :callers => [@|callers, MN, :V_else_branch],
         :give_return => true,
         :name => field_name,
-      ) ).rescope{
+      ).rescope{
         .{:state} || die ("#{__FILE__}:#{__LINE__}: #{__METHOD_NAME__}: #{field_name} (#{props{:typename}}) " + 'appears to be neither a property nor declared getter: reason: ' + .{:why})
         # say "\tvalue: #{.{:return}}"
         .{:return}
@@ -189,12 +189,12 @@ class Serializable {
       true
     } else {
       # say "#{MN} else branch '#{field_name}' #{new_val.dump}"
-      self.has_overload( Hash(
+      self.has_overload(
         :callers => [@|callers, MN, :V_else_branch],
         :name => field_name,
         :args => [new_val],
         # :debug => true
-      ) ){:state}
+      ){:state}
     }
   }
 
@@ -228,11 +228,16 @@ class Serializable {
   }
 }
 
+define SELQBL_EQ_ASSERTION = if (! __OPTIMIZED__) {
+  { assert(! .is_typename, 'assertion `! self.is_typename` failed (bug: overload invokes _serial_eq on typename LHS)') }
+} else {
+  { }
+}
 # use the serializable functionality to equate two objects
 /* abstract interface */ # /
 class SeriallyEquatable < Serializable {
   -> _serial_eq (other { .is_object }, incl = Set(), excl = Set()) -> Bool {
-    assert(! self.is_typename, 'assertion `! self.is_typename` failed (bug: overload invokes _serial_eq on typename LHS)')
+    SELQBL_EQ_ASSERTION(self)
     if ( other.is_a(Serializable) ) {
       other.serialize(incl: incl, excl: excl) == self.serialize(incl: incl, excl: excl)
 
