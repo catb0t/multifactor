@@ -8,6 +8,7 @@ class Array {
   method all_eq { self.to_set.to_a == [self[0]] }
 }
 class Matrix { method values { self.flatten } }
+class Pair   { method values { self.to_a } }
 # class Set { method lacks (*_) { !self.has(_...) } }
 
 module Explicit {
@@ -50,13 +51,13 @@ module Explicit {
 
       # NOTE: if either of these are `const`, the code fails on the next iteration
       var st  = _major_subtype_heuristic(obj)
-      var bst = !!st
-      func curried_to (obj) { Explicit::to(obj, subtype: bst) }
+      var bst = st.to_bool
+      var curried_to = (bst ? func (obj) { Explicit::to(obj, subtype: st) } : Explicit::to)
 
       var (like_user_pair, ref) = with (obj) {
         var r = (.is_a(Pair) ? .[0].ref : '')
         var lup = (r.starts_with('Sidef::Runtime') && with (.[1]) { .is_a(Hash) && .is_object })
-        (lup, lup ? r.mref : .ref )
+        (lup, lup ? 'U!!!'+r.mref : .ref )
       }
       say "obj: #{obj} ref: #{ref} st: '#{st}' last st: #{subtype} like_user_pair: #{like_user_pair}"
 
@@ -65,7 +66,7 @@ module Explicit {
         given (obj) {
           # case ( like_user_pair ) { curried_to(.[1]) } ?????
           case ( like_user_pair ) { .[1].map_kv{ |k, v| ( (k) => curried_to(v) ) } }
-          case ( .is_a(Pair) )    { curried_to(.values) }
+          case ( .is_a(Pair) )    { .to_a.map{ curried_to(_) } }
           case ( .is_a(Set) )     { .map{ curried_to(_) } }
           case ( .is_a(Hash) )    { .map_kv{ |k, v| ( (k) => curried_to(v) ) } }
           case ( .is_an(Array) )  { .map{ curried_to(_) } }
@@ -78,6 +79,8 @@ module Explicit {
 
   func tag (obj) { Explicit::to(obj) }
 
+  var _hash_from;
+
   func hash_to (Hash data) -> Hash {
     data.map_kv{
         |k, v|
@@ -85,20 +88,43 @@ module Explicit {
     }
   }
 
-  func from (Hash obj, String subtype = '') {
-    # if (obj{:EXPL_TYP} == 'nil') {
-    #   nil
-    # } else {
-    #   const curried_from = (defined( obj{:EXPL_STP} ) ? { Explicit::from(_, subtype: obj{:EXPL_STP} \\ '') } : from)
-    #   const iter_type = (subtype||obj{:EXPL_TYP} -> lookup_ref.to_type)
-    #   const pre_val = obj{:EXPL_VAL}
-    #   iter_type( given ( iter_type ) {
-    #     case ( .is_a(Set) )    { pre_val.map{ curried_from(_) } }
-    #     case ( .is_a(Hash) )   { pre_val.map_kv{ |k, v| ( (k) => curried_from(_) ) } }
-    #     case ( .is_an(Array) ) { pre_val.map{ curried_from(_) } }
-    #     default                { pre_val }
-    #   } )
-    # }
+
+  func from (Hash obj, subtype = false) {
+    if (obj{EXPL_TYP} == 'nil') {
+     nil
+    } else {
+      # say obj{EXPL_TYP}
+      var pre_val = obj{EXPL_VAL}
+      var curried_from = (defined( obj{EXPL_STP} ) ? { Explicit::from(_, subtype: obj{EXPL_STP}) } : Explicit::from)
+
+      var type_s = (subtype || obj{EXPL_TYP})
+      var is_user_type = type_s.starts_with('U!!!')
+      var type   = ( is_user_type ? (type_s =~ /^U!!!(.*)$/ -> caps[0]) : type_s ).lookup_ref.to_type
+
+      func iterable_unpacker {
+        say "iterable unpacker called: pre_val: #{pre_val}"
+
+        type( pre_val.map{ curried_from(_) }... )
+      }
+
+      say "obj: #{obj.dump.lines.map{ chr(9)+_ }.join(chr(10))}\n\tref: '#{obj{EXPL_TYP}}' last subtype: #{subtype} type_s: #{type_s} type; #{type} is_user_type: #{is_user_type}\n"
+
+      var final_val = given ( type ) {
+        case ( is_user_type ) { ( _ ¦ Explicit::_hash_from(pre_val) ) }
+        case ( .is_a(Pair) )  { continue }
+        case ( .is_a(Set) )   { continue }
+        case ( .is_a(Array) ) { iterable_unpacker() }
+        case ( .is_a(Hash) )  { type( pre_val.map_kv{ |k, v| ( (k) => curried_from(v) ) }... ) }
+        default { type( pre_val ) }
+      }
+      say "\tfinal class: #{final_val.class} val: #{final_val}"
+      final_val
+      #  case ( .is_a(Set) )    { pre_val.map{ curried_from(_) } }
+      #  case ( .is_a(Hash) )   { pre_val.map_kv{ |k, v| ( (k) => curried_from(_) ) } }
+      #  case ( .is_an(Array) ) { pre_val.map{ curried_from(_) } }
+      #  default                { pre_val }
+      # } )
+    }
   }
 
   func untag (Hash obj) { Explicit::from(obj) }
@@ -109,5 +135,6 @@ module Explicit {
       ( (k) => from(v) )
     }
   }
+  _hash_from = hash_from;
 }
 # module Xchg {}
