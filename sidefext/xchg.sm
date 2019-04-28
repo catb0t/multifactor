@@ -13,7 +13,7 @@ class Pair   { method values { self.to_a } }
 
 module Explicit {
   define EXPL_TYP = :__1XPT
-  define EXPL_STP = :__1XPS # homogenous iterable subtypes
+  define EXPL_STP = :__1XPS # homogenous subtypes of iterables
   define EXPL_VAL = :__1XPV
 
   func make (type, val, stp = false) -> Hash {
@@ -25,12 +25,10 @@ module Explicit {
   }
 
   func _major_subtype_heuristic (val) {
+    # the heuristic is an future optimization
     if (val.respond_to(:len) && val.respond_to(:all)) {
-      # the heuristic is an future optimization
-      # const maj_len = val.len/2 + 1
       if ( sidefext::metatype::ITER_TYPES.has(val.ref.lookup_ref.to_type) ) {
         with ( val.values.map{ .ref } ) {
-          # say _
           .all_eq && .[0]
         }
       } # else {}
@@ -38,11 +36,11 @@ module Explicit {
   }
 
   # TODO: FUTURE
-  func _major_subtype_heuristic_v2 (val) -> Array {
-    ...
-    var subtype = _major_subtype_heuristic(val)
-    !subtype ? [] : [subtype, _major_subtype_heuristic_v2(val.values)...]
-  }
+  # func _major_subtype_heuristic_v2 (val) -> Array {
+  #   ...
+  #   var subtype = _major_subtype_heuristic(val)
+  #   !subtype ? [] : [subtype, _major_subtype_heuristic_v2(val.values)...]
+  # }
   # TODO: type coding
 
   func to (obj, subtype = false) -> Hash {
@@ -52,10 +50,10 @@ module Explicit {
       :( EXPL_TYP, :typename, EXPL_VAL, obj.ref.mref )
     } else { # defined
 
-      # NOTE: if either of these are `const`, the code fails on the next iteration
+      # NOTE: Sidef bug found! if either of these are `const`, the code fails
       var st  = _major_subtype_heuristic(obj)
       var bst = st.to_bool
-      var curried_to = (bst ? func (obj) { Explicit::to(obj, subtype: st) } : Explicit::to)
+      var curried_to = (bst ? func (_) -> Hash { Explicit::to(_, subtype: st) } : Explicit::to)
 
       var (like_user_pair, ref) = with (obj) {
         var r = (.is_a(Pair) ? .[0].ref : '')
@@ -67,7 +65,6 @@ module Explicit {
       Explicit::make(
         !subtype && ref,
         given (obj) {
-          # case ( like_user_pair ) { curried_to(.[1]) } ?????
           case ( like_user_pair ) { .[1].map_kv{ |k, v| ( (k) => curried_to(v) ) } }
           case ( .is_a(Pair) )    { continue }
           case ( .is_a(Set) )     { continue }
@@ -82,7 +79,7 @@ module Explicit {
 
   func tag (obj) { Explicit::to(obj) }
 
-  var _hash_from;
+  var _hash_from
 
   func hash_to (Hash data) -> Hash {
     data.map_kv{
@@ -98,13 +95,16 @@ module Explicit {
     } elsif (obj{EXPL_TYP} == :typename) {
       obj{EXPL_VAL}.lookup_ref.to_type
     } else {
-      # say obj{EXPL_TYP}
-      var pre_val = obj{EXPL_VAL}
-      var curried_from = (defined( obj{EXPL_STP} ) ? { Explicit::from(_, subtype: obj{EXPL_STP}) } : Explicit::from)
+      var curried_from = (defined( obj{EXPL_STP} )
+        ? func (Hash _) { Explicit::from(_, subtype: obj{EXPL_STP}) }
+        : Explicit::from
+      )
 
       var type_s = (subtype || obj{EXPL_TYP})
       var is_user_type = type_s.starts_with('U!!!')
       var type   = ( is_user_type ? (type_s =~ /^U!!!(.*)$/ -> caps[0]) : type_s ).lookup_ref.to_type
+
+      var pre_val = obj{EXPL_VAL}
 
       # say "obj: #{obj.dump.lines.map{ 9.chr+_ }.join(10.chr)}\n\tref: '#{obj{EXPL_TYP}}' last subtype: #{subtype} type_s: #{type_s} type; #{type} is_user_type: #{is_user_type}\n"
 
@@ -116,13 +116,6 @@ module Explicit {
         case ( .is_a(Hash) )  { type( pre_val.map_kv{ |k, v| ( (k) => curried_from(v) ) }... ) }
         default { type( pre_val ) }
       }
-      # say "\tfinal class: #{final_val.class} val: #{final_val}"
-      # final_val
-      #  case ( .is_a(Set) )    { pre_val.map{ curried_from(_) } }
-      #  case ( .is_a(Hash) )   { pre_val.map_kv{ |k, v| ( (k) => curried_from(_) ) } }
-      #  case ( .is_an(Array) ) { pre_val.map{ curried_from(_) } }
-      #  default                { pre_val }
-      # } )
     }
   }
 
@@ -134,6 +127,6 @@ module Explicit {
       ( (k) => from(v) )
     }
   }
-  _hash_from = hash_from;
+  _hash_from = hash_from
 }
 # module Xchg {}

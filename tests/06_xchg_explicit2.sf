@@ -57,7 +57,7 @@ const want_data = :(
 
 const JSON = 'JSON::XS'.require.new.pretty.utf8 # .allow_blessed
 
-3.times{ 
+3.times{
   # say in_data
   # say want_data
   const j_want = JSON.encode(want_data)

@@ -1,0 +1,57 @@
+func g (x) {
+  const y = x-1
+  say "y: #{y} addr: #{y.refaddr}"
+  y && g(y)
+}
+assert_eq(0, g(4))
+
+class Array { -> all_eq { self.to_set.to_a == [self[0]] }; -> values { self } }
+
+func tag (obj, subtype = false) -> Hash {
+
+  # NOTE: Sidef bug found! if any of these are `const`, the code's output is nonsense when iterating/recursing
+  # if they are all var it works perfectly
+  const st  = ( obj.respond_to(:all_eq) && with ( obj.values.map{ .ref } ) { .all_eq && .[0] } )
+  const bst = st.to_bool
+  const curried_tag = (bst ? func (obj) -> Hash { tag(obj, subtype: st) } : tag)
+  const ref = obj.ref
+
+  say "obj: #{obj} ref: #{ref} st: '#{st}' last st: #{subtype}\n\tst addr: #{defined(st) && st.refaddr}\n\tbst addr: #{defined(bst) && st.refaddr}\n\tref addr: #{defined(ref) && ref.refaddr}\n\tcurried_tag addr: #{defined(curried_tag) && curried_tag.refaddr}"
+
+  gather {
+    take( :__value given (obj) {
+      case ( .is_an(Array) )  { .map{ curried_tag(_) } }
+      case ( .is_a(Hash) )    { .map_kv{ |k, v| ( (k) => curried_tag(v) ) } }
+      default                 { _ }
+    } )
+
+    take( :__type ref ) if (!subtype && ref)
+    take( :__subtype st ) if st
+  }.to_h
+}
+
+# when iterating the input array, the first element gives the const subs
+#  a value which is not scoped correctly and somehow infects the next iterations / recursions
+assert_eq(
+  tag( [[0, 1, 0], [:2, :3, :4]] )
+  :( __type => Arr.ref, __subtype => Arr.ref, __value => [
+    :( __subtype => Num.ref, __value => [
+      :( __value => 0 ), :( __value => 1 ), :( __value => 0 )
+    ] )
+    :( __subtype => Str.ref, __value => [
+      :( __value => :2 ), :( __value => :3 ), :( __value => :4 )
+    ] )
+  ] )
+)
+
+# crash: when recursing inside a const declaration, the const sub is attempted to be redeclared
+
+Sys.exit
+
+func f (x) {
+  # NOTE: sidef bug found: var y works, but this doesn't
+  const y = (x.is_one ? x : x*f(x-1))
+  y
+}
+say f(5)
+say f(10)

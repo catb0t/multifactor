@@ -1,0 +1,20 @@
+module A {
+  var Block _a
+
+  func b (Num n) { n && _a(n-1) }
+
+  func a (Num n) { n && b(n-1) }
+  _a = a
+}
+
+assert_eq(0, A::b(4))
+
+module B {
+  func a (Num n) {}
+
+  func b (Num n) { n && a(n-1) }
+
+  func a (Num n) { n && b(n-1) }
+}
+
+assert_eq(0, B::b(4))
