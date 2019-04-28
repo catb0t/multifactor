@@ -21,6 +21,8 @@ const in_data = :(
   g => 4,
   h => nil,
   i => Pair(:9, 1),
+  j => String,
+  k => MyClass,
   m => (MyClass ¦ :(x => 1))
 )
 
@@ -48,29 +50,33 @@ const want_data = :(
    :( (EXPL_TYP) => Str.ref, (EXPL_VAL) => :9 )
    :( (EXPL_TYP) => Num.ref, (EXPL_VAL) => 1 )
   ] )
+  j => :( EXPL_TYP, :typename EXPL_VAL, Str.ref )
+  k => :( EXPL_TYP, :typename EXPL_VAL, MyClass.ref.mref )
   m => :( (EXPL_TYP) => 'U!!!'+MyClass.ref.mref, (EXPL_VAL) => :( x => :( EXPL_TYP Num.ref EXPL_VAL 1 ) ) )
 )
 
 const JSON = 'JSON::XS'.require.new.pretty.utf8 # .allow_blessed
-# say in_data
-# say want_data
-const j_want = JSON.encode(want_data)
-const rt_want = JSON.decode(j_want)
 
-const expl_data_in = hash_to(in_data)
-# say want_data.dump
-# say expl_data_in.dump
-assert_eq(want_data, expl_data_in)
+3.times{ 
+  # say in_data
+  # say want_data
+  const j_want = JSON.encode(want_data)
+  const rt_want = JSON.decode(j_want)
 
-const j_expl = JSON.encode(expl_data_in)
-const rt_expl = JSON.decode(j_expl)
+  const expl_data_in = hash_to(in_data)
+  # say want_data.dump
+  # say expl_data_in.dump
+  assert_eq(want_data, expl_data_in)
 
-assert_eq(rt_want, rt_expl)
-assert_ne(JSON.decode(JSON.encode(in_data)), rt_expl)
-assert_ne(JSON.decode(JSON.encode(in_data)), rt_want)
+  const j_expl = JSON.encode(expl_data_in)
+  const rt_expl = JSON.decode(j_expl)
 
-# say expl_data_in
-say "========="
-assert_eq(hash_from(rt_want), in_data)
-assert_eq(hash_from(rt_expl), in_data)
-assert_eq(hash_from(rt_want), hash_from(rt_expl))
+  assert_eq(rt_want, rt_expl)
+  assert_ne(JSON.decode(JSON.encode(in_data)), rt_expl)
+  assert_ne(JSON.decode(JSON.encode(in_data)), rt_want)
+
+  # say expl_data_in
+  assert_eq(hash_from(rt_want), in_data)
+  assert_eq(hash_from(rt_expl), in_data)
+  assert_eq(hash_from(rt_want), hash_from(rt_expl))
+}

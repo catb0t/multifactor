@@ -43,10 +43,13 @@ module Explicit {
     var subtype = _major_subtype_heuristic(val)
     !subtype ? [] : [subtype, _major_subtype_heuristic_v2(val.values)...]
   }
+  # TODO: type coding
 
-  func to (obj { defined(_) ? .is_object : true }, subtype = false) -> Hash {
+  func to (obj, subtype = false) -> Hash {
     if ( ! defined(obj) ) {
       :( EXPL_TYP, :nil )
+    } elsif (obj.is_typename) {
+      :( EXPL_TYP, :typename, EXPL_VAL, obj.ref.mref )
     } else { # defined
 
       # NOTE: if either of these are `const`, the code fails on the next iteration
@@ -59,17 +62,17 @@ module Explicit {
         var lup = (r.starts_with('Sidef::Runtime') && with (.[1]) { .is_a(Hash) && .is_object })
         (lup, lup ? 'U!!!'+r.mref : .ref )
       }
-      say "obj: #{obj} ref: #{ref} st: '#{st}' last st: #{subtype} like_user_pair: #{like_user_pair}"
+      # say "obj: #{obj} ref: #{ref} st: '#{st}' last st: #{subtype} like_user_pair: #{like_user_pair}"
 
       Explicit::make(
         !subtype && ref,
         given (obj) {
           # case ( like_user_pair ) { curried_to(.[1]) } ?????
           case ( like_user_pair ) { .[1].map_kv{ |k, v| ( (k) => curried_to(v) ) } }
-          case ( .is_a(Pair) )    { .to_a.map{ curried_to(_) } }
-          case ( .is_a(Set) )     { .map{ curried_to(_) } }
-          case ( .is_a(Hash) )    { .map_kv{ |k, v| ( (k) => curried_to(v) ) } }
+          case ( .is_a(Pair) )    { continue }
+          case ( .is_a(Set) )     { continue }
           case ( .is_an(Array) )  { .map{ curried_to(_) } }
+          case ( .is_a(Hash) )    { .map_kv{ |k, v| ( (k) => curried_to(v) ) } }
           default                 { _ }
         },
         st
@@ -90,8 +93,10 @@ module Explicit {
 
 
   func from (Hash obj, subtype = false) {
-    if (obj{EXPL_TYP} == 'nil') {
-     nil
+    if (obj{EXPL_TYP} == :nil) {
+      nil
+    } elsif (obj{EXPL_TYP} == :typename) {
+      obj{EXPL_VAL}.lookup_ref.to_type
     } else {
       # say obj{EXPL_TYP}
       var pre_val = obj{EXPL_VAL}
@@ -101,24 +106,18 @@ module Explicit {
       var is_user_type = type_s.starts_with('U!!!')
       var type   = ( is_user_type ? (type_s =~ /^U!!!(.*)$/ -> caps[0]) : type_s ).lookup_ref.to_type
 
-      func iterable_unpacker {
-        say "iterable unpacker called: pre_val: #{pre_val}"
+      # say "obj: #{obj.dump.lines.map{ 9.chr+_ }.join(10.chr)}\n\tref: '#{obj{EXPL_TYP}}' last subtype: #{subtype} type_s: #{type_s} type; #{type} is_user_type: #{is_user_type}\n"
 
-        type( pre_val.map{ curried_from(_) }... )
-      }
-
-      say "obj: #{obj.dump.lines.map{ chr(9)+_ }.join(chr(10))}\n\tref: '#{obj{EXPL_TYP}}' last subtype: #{subtype} type_s: #{type_s} type; #{type} is_user_type: #{is_user_type}\n"
-
-      var final_val = given ( type ) {
+      given ( type ) {
         case ( is_user_type ) { ( _ ¦ Explicit::_hash_from(pre_val) ) }
         case ( .is_a(Pair) )  { continue }
         case ( .is_a(Set) )   { continue }
-        case ( .is_a(Array) ) { iterable_unpacker() }
+        case ( .is_a(Array) ) { type( pre_val.map{ curried_from(_) }... ) }
         case ( .is_a(Hash) )  { type( pre_val.map_kv{ |k, v| ( (k) => curried_from(v) ) }... ) }
         default { type( pre_val ) }
       }
-      say "\tfinal class: #{final_val.class} val: #{final_val}"
-      final_val
+      # say "\tfinal class: #{final_val.class} val: #{final_val}"
+      # final_val
       #  case ( .is_a(Set) )    { pre_val.map{ curried_from(_) } }
       #  case ( .is_a(Hash) )   { pre_val.map_kv{ |k, v| ( (k) => curried_from(_) ) } }
       #  case ( .is_an(Array) ) { pre_val.map{ curried_from(_) } }
