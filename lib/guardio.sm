@@ -222,10 +222,15 @@ module GuardIO {
     }
 
     # NOTE: this ensures "we are a running process and we must be the only such running process"
-    -> _do_lock_file (target, Bool cleanup) {
+    -> _do_lock_file (target, Bool cleanup, Bool promised = false) {
 
-      die "[ERROR]\t#{__METHOD_NAME__}: lock target '#{target}' does not exists" \
-        if (! target.exists)
+      # die "[ERROR]\t#{__METHOD_NAME__}: lock target '#{target}' does not exists" \
+      if (! target.exists) {
+        if (!promised) {
+          return { self._do_lock_file(target, cleanup, true) } # '
+        }
+        die "[ERROR]\t#{__METHOD_NAME__}: you promised that target '#{target}' would exist, but it still does not" # '
+      }
 
       const lock_file = self._glue_absolute(target)
 
@@ -237,15 +242,17 @@ module GuardIO {
       }
     }
 
-    method do_lock_files {
+    method do_lock_files () -> Set {
       # self._setup_done || die "#{__METHOD_NAME__}: setup not done!"
       self._do_remove_old_lock
       self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, "locking FODs: #{self.locked_fods.map{ ellipsify_absolute(_) }.join(', ')}")
-      self.locked_fods.each{
+      self.locked_fods.map{
           |target|
         self._do_lock_file( target, false )
+      }.rescope{
+        self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, "done locking FODs!")
+        _.to_set
       }
-      self.log.vbs(__FILE__, __LINE__, __METHOD_NAME__, "done locking FODs!")
     }
 
     method cleanup {

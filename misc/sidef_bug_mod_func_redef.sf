@@ -1,3 +1,4 @@
+# functions can't be redeclared interactively question mark ???
 module A {
   var Block _a
 

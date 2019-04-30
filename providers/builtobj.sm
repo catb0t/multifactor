@@ -123,6 +123,8 @@ module _exported {
       }
     } ] # _exported::BO_INIT_STEP(__CLASS__)
   }
+  assert(BuiltObj().is_a(SeriallyEquatable))
+  assert(BuiltObj().is_serializable)
 }
 if (__FILE__ == __MAIN__) {
   assert(_exported::DirSum().serial_properties)

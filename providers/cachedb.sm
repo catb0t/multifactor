@@ -42,9 +42,10 @@ module CacheDBIO {
     # otherwise, open it
     if ( Atomic::aread(name) ) {
         |contents|
-      ImmutableHash( Explicit::untag_hash(
+      ImmutableHash( Explicit::untag(
           JSON.decode(contents),
-          user_type_hook: func (typename, data) {
+          user_type_hook: func (Object typename, Hash data) {
+            # say typename
             # TODO: fixup this use of unserialize on Hash<Serializable>
             sidefext::construct::maybe_init( typename ).unserialize( data )
           }
@@ -62,16 +63,12 @@ module CacheDBIO {
     # if it doesn't exist, stop
     # otherwise, open it
     # fixup this use of .serialize on a Hash<Serializable>
-    const h = JSON.pretty.encode( Explicit::tag_hash(
-
-      # can we get tag to do this automatically?
-      new_data.map_kv{
-          |k, _|
-        ((k) => .is_serializable ? (k.ref.to_type ¦ .serialize) : _)
-      }
-    ) )
-    # say h
-    Atomic::awrite( name, h )
+    const h = Explicit::tag_hash(
+      new_data._data,
+      user_type_hook: func (key, value { .is_serializable }) -> Hash { say 'hook'; value.serialize }
+    )
+    say h
+    Atomic::awrite( name, JSON.pretty.encode( h ) )
   }
 }
 
@@ -149,6 +146,7 @@ define Hash TEMPLATE_SETUP_CACHEDB = :(
   :verbose => Bool,
   :trace => Bool,
   :replace_existing => Bool,
+  :promised_locks => Set,
   :debug => :( :type => Bool, :default => true ),
   :logger => :( :type => GuardIO::SLog, :deferred => { GuardIO::SLog( is_verbose: .{:verbose}, is_trace: .{:trace} ) } ),
   # :element_type => :( :type => lib::ABCs::Serializable, :val_is_typename => true )
@@ -156,7 +154,7 @@ define Hash TEMPLATE_SETUP_CACHEDB = :(
 
 class CacheDB < lib::withdirectory::CapturedWriter {
 
-  has String version
+  # has String version
 
   has Set change_sequence = Set()
   has ImmutableHash orig_data = ImmutableHash()
@@ -167,7 +165,7 @@ class CacheDB < lib::withdirectory::CapturedWriter {
   has Bool dry_run
   has Dir db_dir
   has File filename_base
-  has lib::ABCs::Serializable element_type
+  # has lib::ABCs::Serializable element_type
 
   -> db_name () is cached -> File { self.db_dir + self.filename_base }
   # for CapturedWriter
@@ -183,9 +181,9 @@ class CacheDB < lib::withdirectory::CapturedWriter {
       self.db_dir = .{:dir}
       self.filename_base = .{:filename_base}
 
-      self.element_type = .{:element_type}
+      # self.element_type = .{:element_type}
 
-      self.version = .{:version}
+      # self.version = .{:version}
 
       if (.{:replace_existing} && self.db_name.exists) {
         self.log.wrn(__FILE__, __LINE__, __METHOD_NAME__, "!!! removing old DB !!!")
@@ -193,6 +191,8 @@ class CacheDB < lib::withdirectory::CapturedWriter {
       } elsif ( ! self.db_name.exists ) {
         self.db_name.touch
       }
+
+      .{:promised_locks}.each{ _() }
     }
 
     DBTransform::ACTIONS_BASE.each{
@@ -236,7 +236,7 @@ class CacheDB < lib::withdirectory::CapturedWriter {
     self._read_called = true
     self.log.trc(__FILE__, __LINE__, __METHOD_NAME__, 'reading', self.filename_base)
 
-    self.with_directory{ CacheDBIO::_read_disk_db(self.filename_base, self.element_type) }
+    self.with_directory{ CacheDBIO::_read_disk_db(self.filename_base) }
   }
 
   method destroy (Bool is_exc, Hash _exc_info, Bool write = true) {

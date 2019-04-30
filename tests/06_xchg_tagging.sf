@@ -1,0 +1,88 @@
+#! ruby
+include sidefext::xchg
+include Explicit
+import Explicit::EXPL_VAL
+import Explicit::EXPL_TYP
+import Explicit::EXPL_STP
+import Explicit::tag_hash
+import Explicit::untag_hash
+
+class MyClass (x) { } # method TO_JSON {} }
+# -> FREEZE (_x) {}; -> THAW (_x) {}
+class MyClass1 (Num x, Str y) {}
+
+const in_data = :(
+  a => :5,
+  b => [:3, :4],
+  c => :( a => :88, :b => :99 ),
+  d => false,
+  e => [true, false]
+  f => [3, 4],
+  g => 4,
+  h => nil,
+  i => Pair(:9, 1),
+  j => String,
+  k => MyClass,
+  m => (MyClass ¦ :(x => 1))
+  n => (MyClass1 ¦ :(x => 1, y => :2))
+)
+
+const want_data = :(
+  a => :( (EXPL_TYP) => String.ref, (EXPL_VAL) => :5 )
+  b => :( (EXPL_TYP) => Array.ref, (EXPL_STP) => String.ref, (EXPL_VAL) => [
+    :( (EXPL_VAL) => :3 )
+    :( (EXPL_VAL) => :4 )
+  ] )
+  c => :( (EXPL_TYP) => Hash.ref, (EXPL_STP) => Str.ref, (EXPL_VAL) => :(
+    a => :( (EXPL_VAL) => :88 )
+    b => :( (EXPL_VAL) => :99 )
+  ) )
+  d => :( (EXPL_TYP) => Bool.ref, (EXPL_VAL) => false )
+  e => :( (EXPL_STP) => Bool.ref, (EXPL_TYP) => Array.ref, (EXPL_VAL) => [
+    :( (EXPL_VAL) => true )
+    :( (EXPL_VAL) => false )
+  ] )
+  f => :( (EXPL_TYP) => Array.ref, (EXPL_STP) => Number.ref, (EXPL_VAL) => [
+    :( (EXPL_VAL) => 3 )
+    :( (EXPL_VAL) => 4 )
+  ] )
+  g => :( (EXPL_TYP) => Number.ref, (EXPL_VAL) => 4 )
+  h => :( (EXPL_TYP) => :nil )
+  i => :( (EXPL_TYP) => Pair.ref, (EXPL_VAL) => [
+   :( (EXPL_TYP) => Str.ref, (EXPL_VAL) => :9 )
+   :( (EXPL_TYP) => Num.ref, (EXPL_VAL) => 1 )
+  ] )
+  j => :( EXPL_TYP, :typename EXPL_VAL, Str.ref )
+  k => :( EXPL_TYP, :typename EXPL_VAL, MyClass.ref.mref )
+  m => :( (EXPL_TYP) => 'U!!!'+MyClass.ref.mref, (EXPL_STP) => Num.ref, (EXPL_VAL) => :( x => :( EXPL_VAL 1 ) ) )
+  n => :( (EXPL_TYP) => 'U!!!'+MyClass1.ref.mref, (EXPL_VAL) => :(
+    x => :( EXPL_TYP Num.ref EXPL_VAL  1 ),
+    y => :( EXPL_TYP Str.ref EXPL_VAL, :2 )
+  ) )
+)
+
+define JSON = 'JSON::XS'.require.new.pretty.utf8
+
+3.times{
+  # say in_data
+  # say want_data
+  const j_want = JSON.encode(want_data)
+  const rt_want = JSON.decode(j_want)
+
+  const expl_data_in = tag_hash(in_data)
+  # say want_data.dump
+  # say expl_data_in.dump
+  assert_eq(want_data, expl_data_in)
+
+  const j_expl = JSON.encode(expl_data_in)
+  const rt_expl = JSON.decode(j_expl)
+
+  assert_eq(rt_want, rt_expl)
+  # doesn't roundtrip, this is the problem we are solving
+  assert_ne(JSON.decode(JSON.encode(in_data)), in_data)
+
+  # say expl_data_in
+  assert_eq(untag_hash(rt_want), in_data)
+  assert_eq(untag_hash(rt_expl), in_data)
+  assert_eq(untag_hash(rt_want), untag_hash(rt_expl))
+}

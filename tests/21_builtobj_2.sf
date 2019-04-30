@@ -7,6 +7,8 @@ include providers::builtobj
 import builtobj::BuiltObj
 import builtobj::BlobSums
 
+assert(BuiltObj().is_serializable)
+
 var bo = BuiltObj().id(:1).factor_version('0.99').is_git(true).git_branch(:master).git_hash(:2349876234).word_size(:64)
 say "id: #{bo.id}"
 # say ""

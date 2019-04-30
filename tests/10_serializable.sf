@@ -89,3 +89,6 @@ say (roundtrip_ts.dump==first_ts.dump)
 assert_eq(roundtrip_ts.dump, first_ts.dump)
 say (roundtrip_ts.dump==second_ts.dump)
 assert_eq(roundtrip_ts.dump, second_ts.dump)
+
+assert(TestSerial.is_a(Serializable))
+assert(TestSerial.is_serializable)

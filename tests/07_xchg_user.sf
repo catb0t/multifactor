@@ -1,0 +1,109 @@
+#! ruby
+include sidefext::xchg
+include Explicit
+import Explicit::EXPL_VAL
+import Explicit::USER_TYPE_MAGIC
+import Explicit::EXPL_TYP
+import Explicit::EXPL_STP
+import Explicit::tag_hash
+import Explicit::untag_hash
+
+class A (
+  Num x
+  Str y
+) {
+  method == (other) { other.x==self.x && other.y==self.y }
+}
+
+class B (
+  Str z
+  Num a
+) {
+  method == (other) { other.z==self.z && other.a==self.a }
+}
+
+class C (
+  Str v1
+  Str v2
+  Str v3
+) {
+  method == (other) { (other.v1==self.v1 && other.v2==self.v2 && other.v3==self.v3) }
+}
+
+# class X (
+#   Array y
+#   A a
+#   B b
+#   C c
+#   X x
+# ) {}
+-> s7e (A a) -> Hash { :( x => a.x y => a.y ) }
+-> s7e (B b) -> Hash { :( z => b.z a => b.a ) }
+-> s7e (C c) -> Hash { :( v1 => c.v1 v2 => c.v2 v3 => c.v3 ) }
+-> s7e (A _, Hash h) -> A { A(h{:x}, h{:y}) }
+-> s7e (B _, Hash h) -> B { B(h{:z}, h{:a}) }
+-> s7e (C _, Hash h) -> C { C(h{:v1}, h{:v2}, h{:v3}) }
+# -> s7e (X x) -> Hash { :( y => x.y, x => s7e(x.x), a => s7e(x.a), b => s7e(x.b), c => s7e(x.c) ) }
+
+const in_data = :(
+  :a => A(1, :2)
+  :b => B(:3, 4)
+  :c => C(:123, :456, :789)
+  # :x1 => X([:0, :1, :2], A(9, :10), B(), C(:5, :6, :7), X([0, :1, 2]))
+)
+
+const out_data_pair = :(
+  :a => ( A ¦ :(x => 1, y => :2) )
+  :b => ( B ¦ :(z => :3, a => 4) )
+  :c => ( C ¦ :(v1 => :123, v2 => :456, v3 => :789) )
+)
+
+const want_data = :(
+  :a => :( EXPL_TYP USER_TYPE_MAGIC+A.ref.mref EXPL_VAL, :(
+    x => :( EXPL_TYP Num.ref EXPL_VAL 1 ), y => :( EXPL_TYP Str.ref EXPL_VAL, :2 ),
+  ) )
+
+  :b => :( EXPL_TYP USER_TYPE_MAGIC+B.ref.mref EXPL_VAL, :(
+    z => :( EXPL_TYP Str.ref EXPL_VAL, :3 ), a => :( EXPL_TYP Num.ref EXPL_VAL, 4 ),
+  ) )
+
+  :c => :( EXPL_TYP USER_TYPE_MAGIC+C.ref.mref EXPL_STP Str.ref EXPL_VAL, :(
+    v1 => :( EXPL_VAL, :123 ), v2 => :( EXPL_VAL, :456 ), v3 => :( EXPL_VAL, :789 )
+  ) )
+)
+
+define JSON = 'JSON::XS'.require.new.pretty.utf8 # .allow_blessed
+
+3.times{
+  # say in_data
+  # say want_data
+  const j_want = JSON.encode(want_data)
+  const rt_want = JSON.decode(j_want)
+
+  const pair_data_in = tag_hash(out_data_pair)
+  const expl_data_in = tag_hash(in_data, user_type_hook: s7e)
+  # say want_data.dump
+  # say expl_data_in.dump
+  assert_eq(want_data, expl_data_in)
+  assert_eq(want_data, pair_data_in)
+
+  const j_expl = JSON.encode(expl_data_in)
+  const j_pair = JSON.encode(pair_data_in)
+  const rt_expl = JSON.decode(j_expl)
+  const rt_pair = JSON.decode(j_pair)
+
+  assert_eq(rt_want, rt_expl)
+  assert_eq(rt_want, rt_pair)
+  assert_eq(rt_pair, rt_expl)
+  # doesn't roundtrip, this is the problem we are solving
+  assert_ne(JSON.decode(JSON.encode(want_data)), want_data)
+  # say rt_expl
+  # say expl_data_in
+  assert_eq(untag_hash(rt_want, user_type_hook: s7e), in_data)
+  assert_eq(untag_hash(rt_want), out_data_pair)
+  assert_eq(untag_hash(rt_expl, user_type_hook: s7e), in_data)
+  assert_eq(untag_hash(rt_expl), out_data_pair)
+  assert_eq(untag_hash(rt_want, user_type_hook: s7e), untag_hash(rt_expl, user_type_hook: s7e))
+
+  assert_eq(untag_hash(rt_want), untag_hash(rt_expl))
+}

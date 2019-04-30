@@ -205,7 +205,7 @@ EOS
 
     # say self.dump
     # say subject.dump
-    # we're just going to drop keys that aren't in self
+    if ( subject - self ) { |extras| die "#{__FILE__}:#{__LINE__}: #{__METHOD_NAME__}: unknown keys: #{extras.keys}"}
     self.map_kv{
         |k, self_v|
       const subj_v = subject{k}
@@ -235,9 +235,9 @@ EOS
   }
 }
 
-class ImmutableHash ( Hash _data = :(), *_unpacked_data) {
+class ImmutableHash ( Hash _data = :(), :_unpacked_data) {
   method init {
-    if (!self._data && self._unpacked_data) { self._data = self._unpacked_data.to_h }
+    if (!self._data && self._unpacked_data) { self._data = self._unpacked_data }
 
     [:values, :item, :grep, :grep_kv, :item, :items, :map_kv, :dclone,
       :difference, :symmetric_difference, :concat, :union, :intersection, :linear_selection,

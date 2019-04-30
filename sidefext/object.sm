@@ -44,6 +44,4 @@ class Object {
   method is_an_object (typename) {
     self.is_a(typename) && self.is_object
   }
-
-  -> is_serializable (*_) { false }
 }

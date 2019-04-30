@@ -418,3 +418,5 @@ class Lockable {
   -> lock (Bool b) { self._impl_locked = b; self }
   -> unlock { self._impl_locked = false; self }
 }
+
+class Object { -> is_serializable (*_) { self.is_a(Serializable) } }

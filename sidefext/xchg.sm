@@ -16,6 +16,7 @@ module Explicit {
   define EXPL_STP = :__XS # homogenous subtypes of iterables
   define EXPL_VAL = :__XV
   define USER_TYPE_MAGIC = 'U!!!'
+  define USER_TYPE_ERASER = Regex("^(?:#{USER_TYPE_MAGIC})?(.*)$")
 
   func make (type, val, stp = false) -> Hash {
     gather {
@@ -27,13 +28,17 @@ module Explicit {
 
   func _major_subtype_heuristic (val) {
     # the heuristic is an future optimization
-    if (val.respond_to(:len) && val.respond_to(:all)) {
+    if (val.respond_to(:len) && val.respond_to(:values)) {
       if ( sidefext::metatype::ITER_TYPES.has(val.ref.lookup_ref.to_type) ) {
         with ( val.values.map{ .ref } ) {
           .all_eq && .[0]
         }
       } # else {}
     } # else?
+  }
+
+  func _tag_hook_return_check (Block b) {
+    b._returns==[Hash] || die "Garbage return-type list untag user type hook #{b}; expected [Hash] but got #{b._returns}"
   }
 
   # TODO: FUTURE
@@ -54,30 +59,52 @@ module Explicit {
     obj.is_a(Pair) && ref_0.is_non_builtin_type && obj[0].is_typename && obj[1].is_a(Hash) && obj[1].is_object
   }
 
-  func to (obj, subtype = false, Block user_type_hook = Block.identity) -> Hash {
+  func _tag_base (obj, subtype, Block recurse_with, Block make_val) -> Hash {
     if ( ! defined(obj) ) {
       :( EXPL_TYP, :nil )
     } elsif (obj.is_typename) {
       :( EXPL_TYP, :typename, EXPL_VAL, obj.ref.mref )
-    } else { # defined
+    } else {
+      # var (st, curried_to) = with ( _major_subtype_heuristic(obj) ) {
+      #   (_, { |o| recurse_with(o, _) })
+      # }
 
-      var (st, curried_to) = with ( _major_subtype_heuristic(obj) ) {
-        (_, .? func (o) -> Hash { Explicit::to(o, subtype: _) } : Explicit::to)
-      }
-
-      var (user_pair, ref) = if ( obj.is_a(Pair) && like_user_pair(obj, obj[0].ref) && obj[0].ref ) {
-          |_|
-        (true, USER_TYPE_MAGIC + .mref)
+      var (user_pair, pre_ref) = if (obj.is_a(Pair)) {
+        var r = obj[0].ref
+        var l = like_user_pair(obj, r)
+        (l, l ? r : obj.ref)
       } else { (false, obj.ref) }
 
+      var (user_type, ref) = with (pre_ref) {
+        var u = ( .is_non_builtin_type && !user_pair )
+        (u, (user_pair || u) ? (USER_TYPE_MAGIC + .mref) : _)
+      }
+      # say "ref: #{ref}; want: #{ref.mref} pre_ref: #{pre_ref}; user_pair: #{user_pair}; user_type: #{user_type}"
+      # say "obj: #{obj} last subtype: #{subtype}"
+
+      var (st, made_val) = if (user_type) {
+        var ir = make_val(obj)
+        var ir_st = _major_subtype_heuristic(ir)
+        (ir_st, ir)
+      } elsif (!user_pair) {
+        (_major_subtype_heuristic(obj), nil)
+      } elsif (user_pair) {
+        (_major_subtype_heuristic(obj[1]), nil)
+      }# else { (false, nil) } # else { die '???' }
+
+      var curried_tag = { |o| recurse_with(o, st) }
       Explicit::make(
         !subtype && ref,
         given (obj) {
-          case ( user_pair )     { .[1].map_kv{ |k, v| ( (k) => curried_to(v) ) } }
+          case ( user_type )     {
+            # say "made_val: #{made_val}"
+            made_val.map_kv{ |k, v| ( (k) => curried_tag(v) ) }
+          }
+          case ( user_pair )     { .[1].map_kv{ |k, v| ( (k) => curried_tag(v) ) } }
           case ( .is_a(Pair) )   { continue }
           case ( .is_a(Set) )    { continue }
-          case ( .is_an(Array) ) { .to_a.map{ curried_to(_) } }
-          case ( .is_a(Hash) )   { .map_kv{ |k, v| ( (k) => curried_to(v) ) } }
+          case ( .is_an(Array) ) { .to_a.map{ curried_tag(_) } }
+          case ( .is_a(Hash) )   { .map_kv{ |k, v| ( (k) => curried_tag(v) ) } }
           default                { _ }
         },
         st
@@ -85,62 +112,94 @@ module Explicit {
     }
   }
 
-  func tag_hash (Hash data, Block user_type_hook = Block.identity) -> Hash {
-    data.map_kv{
-        |k, v|
-      ( (k) => Explicit::to(v, user_type_hook: user_type_hook) )
+  func _tag_user_hook (obj, Block hook, subtype = false) -> Hash {
+    _tag_base(
+      obj,
+      subtype,
+      func (o, s) -> Hash { _tag_user_hook(o, hook, s) },
+      func (_)  -> Hash { hook(_) }
+      # hook
+    )
+  }
+
+  func _tag_user_default (obj, subtype = false) -> Hash {
+    _tag_base( obj, subtype, __FUNC__, { die 'unreachable code' } )
+  }
+
+  func tag (obj, Block user_type_hook = Block.identity) -> Hash {
+    if (user_type_hook.is_identity) {
+      _tag_user_default(obj)
+    } else {
+      _tag_hook_return_check(user_type_hook)
+      _tag_user_hook(obj, user_type_hook)
     }
   }
 
-  const tag     = to
-  const hash_to = tag_hash
+  func tag_hash (Hash data, Block user_type_hook = Block.identity) -> Hash {
+    data.map_kv( if (user_type_hook.is_identity) {
+        { |k, v| ( (k) => _tag_user_default(v) ) }
+      } else {
+        _tag_hook_return_check(user_type_hook)
+        { |k, v| ( (k) => _tag_user_hook(v, user_type_hook) ) }
+      }
+    )
+  }
 
-  var _hash_from
+  subset _Callable { .is_typename || (.is_object && .is_a(Block)) }
 
-  func from (Hash obj, subtype = false, Block user_type_hook = Block.identity) {
+  var _untag_hash
+
+  func _untag_base (Hash obj, subtype, Block recurse_with, make_val < _Callable) {
     if (obj{EXPL_TYP} == :nil) {
       nil
     } elsif (obj{EXPL_TYP} == :typename) {
       obj{EXPL_VAL}.lookup_ref.to_type
     } else {
-      var curried_from = (defined( obj{EXPL_STP} )
-        ? func (Hash _) { Explicit::from(_, subtype: obj{EXPL_STP}) }
-        : Explicit::from
-      )
-
+      var curried_untag = func (Hash h) { recurse_with(h, obj{EXPL_STP} \\ false) }
       var (user_type, type) = with (subtype || obj{EXPL_TYP}) {
-        (.starts_with(USER_TYPE_MAGIC), .=~ Regex("^(?:#{USER_TYPE_MAGIC})?(.*)$") -> caps[0].lookup_ref.to_type)
-      } else { die '???' }
+        (.starts_with(USER_TYPE_MAGIC), (.=~ USER_TYPE_ERASER) -> caps[0].lookup_ref.to_type)
+      } else { die obj.dump+' wtf ??? (was the input data encoded properly?)' }
 
       var pre_val = obj{EXPL_VAL}
 
-      # say "obj: #{obj.dump.lines.map{ 9.chr+_ }.join(10.chr)}\n\tref: '#{obj{EXPL_TYP}}' last subtype: #{subtype} type_s: #{type_s} type; #{type} is_user_type: #{is_user_type}\n"
+      # say "obj: #{obj.dump.lines.map{ 9.chr+_ }.join(10.chr)}\n\tref: '#{obj{EXPL_TYP}}' last subtype: #{subtype} type: #{type} user_type: #{user_type}\n"
 
       given ( type ) {
-        case ( user_type )    {
-          with ( user_type_hook.is_identity ? Pair : user_type_hook ) {
-              |ctor|
-            ctor( _, Explicit::_hash_from(pre_val) )
-          }
-        }
-        case ( .is_a(Pair) )  { continue }
-        case ( .is_a(Set) )   { continue }
-        case ( .is_a(Array) ) { type( pre_val.map{ curried_from(_) }... ) }
-        case ( .is_a(Hash) )  { type( pre_val.map_kv{ |k, v| ( (k) => curried_from(v) ) }... ) }
-        default               { type( pre_val ) }
+        case ( user_type ) { make_val(_, pre_val.map_kv{ |k, v| ( (k) => curried_untag(v) ) } ) }
+        case ( .is_a(Pair) )   { continue }
+        case ( .is_a(Set) )    { continue }
+        case ( .is_an(Array) ) { type( pre_val.map{ curried_untag(_) }... ) }
+        case ( .is_a(Hash) )   { type( pre_val.map_kv{ |k, v| ( (k) => curried_untag(v) ) }... ) }
+        default                { type( pre_val ) }
       }
     }
   }
 
-  func untag_hash (Hash data, Block user_type_hook = Block.identity) -> Hash {
-    data.map_kv{
-        |k, v|
-      ( (k) => from(v, user_type_hook: user_type_hook) )
-    }
+  func _untag_user_hook (Hash obj, Block hook, subtype = false) {
+    _untag_base(
+      obj,
+      subtype,
+      func (o, s) { _untag_user_hook(o, hook, s) },
+      # hook
+      func (type, Hash _) { hook(type, _) }
+    )
   }
 
-  const untag     = from
-  _hash_from      = untag_hash
-  const hash_from = untag_hash
+  func _untag_user_default (Hash obj, subtype = false) {
+    _untag_base(obj, subtype, __FUNC__, Pair)
+  }
+
+  func untag (Hash obj, Block user_type_hook = Block.identity) {
+    user_type_hook.is_identity
+      ? _untag_user_default(obj)
+      : _untag_user_hook(obj, user_type_hook)
+  }
+
+  func untag_hash (Hash data, Block user_type_hook = Block.identity) -> Hash {
+    data.map_kv( user_type_hook.is_identity
+      ? { |k, v| ( (k) => _untag_user_default(v) ) }
+      : { |k, v| ( (k) => _untag_user_hook(v, user_type_hook) ) }
+    )
+  }
 }
 # module Xchg {}

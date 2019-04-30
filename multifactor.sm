@@ -218,7 +218,7 @@ module MultiFactor {
       :trace => is_trace
     )
 
-    self.locker.do_lock_files
+    const Set promised_locks = self.locker.do_lock_files
 
     self.db_man = providers::cachedb::CacheDB().setup(
         :dir =>              self.options(){'db-dir'},
@@ -227,7 +227,8 @@ module MultiFactor {
         :verbose =>          is_verbose,
         :trace =>            is_trace,
         :replace_existing => self.options(){'from-scratch'},
-        :element_type =>     BuiltObj,
+        :promised_locks =>   promised_locks
+        # :element_type =>     BuiltObj,
         # :logger => self.log # separate or same loggers?
     )
 
