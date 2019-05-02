@@ -27,6 +27,13 @@ class String {
   method third { return self.char(2) }
 }
 
+
+# long option RE allows for --h so that these are caught
+# as illegal long options           ---V
+define OPT_ANY_RE   = /^-.+/
+define OPT_LONG_RE  = /^--([^-][^:= ]*)[:= ]?(.*)$/
+define OPT_SHORT_RE = /^-([^-][^:= ]*)[:= ]?(.*)$/
+
 class ArgParse (Array argv) {
 
   class Option (long, short, req, param, doc) {
@@ -55,12 +62,6 @@ class ArgParse (Array argv) {
       self.repeatable ? "..." : ""
     }
   }
-
-  # long option RE allows for --h so that these are caught
-  # as illegal long options           ---V
-  has const opt_any_re   = /^-.+/
-  has const opt_long_re  = /^--([^-][^:= ]*)[:= ]?(.*)$/
-  has const opt_short_re = /^-([^-][^:= ]*)[:= ]?(.*)$/
 
   # mutable
   has String OPT_TERM = "--"
@@ -389,10 +390,10 @@ class ArgParse (Array argv) {
 
       # ok, read an option
       # note that this regex excludes the - STDIN file argument
-      if (reading_opts && (param ~~ self.opt_any_re) ) {
+      if (reading_opts && (param ~~ OPT_ANY_RE) ) {
         # long options
         # -- as a terminator was already handled above
-        if (param =~ self.opt_long_re) {
+        if (param =~ OPT_LONG_RE) {
             |param_parts|
 
           var (opt_name, value) = param_parts[0, 1]
@@ -417,7 +418,7 @@ class ArgParse (Array argv) {
           in_opts += (opt_name ¦ value ? value : true)
 
         # short options
-        } elsif (param =~ self.opt_short_re) {
+        } elsif (param =~ OPT_SHORT_RE) {
             |param_parts|
 
           var (opts, value) = param_parts[0, 1]

@@ -20,6 +20,7 @@ module Maybe {
   }
 
   define Block maybe = func _maybe (Object type { .is_typename }, a) -> Maybe_Type {
+    # say "maybe called with '#{type}'; object: #{a}"
     func inner (Maybe_Type _) { _ }
     func inner (_) {
       (!defined(_) || _==null) ? Maybe(just_type: type, nothing: true) : Maybe( just_type: type, just: _ )
@@ -28,8 +29,8 @@ module Maybe {
     inner(a)
   }
 
-  # a is a Maybe, but actually Maybe is a Define
-  define Block unmaybe = func _unmaybe (Maybe_Type a, Block b = Block.list_identity) -> Object { # < MaybeVal
+  # a is a Maybe, but actually Maybe is a Define, so the precise type of a at `use constant` time is Maybe_Type
+  define Block unmaybe = func _unmaybe (Maybe_Type a, Block b = Block.null_identity) { # < MaybeVal
     # say "a: #{dump(a)}"
     a.nothing ? b(a) : a.just_type()(a.just)
   }

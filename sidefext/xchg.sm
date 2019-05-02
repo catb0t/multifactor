@@ -15,8 +15,18 @@ module Explicit {
   define EXPL_TYP = :__XT
   define EXPL_STP = :__XS # homogenous subtypes of iterables
   define EXPL_VAL = :__XV
-  define USER_TYPE_MAGIC = 'U!!!'
+  define USER_TYPE_MAGIC = '!U!'
   define USER_TYPE_ERASER = Regex("^(?:#{USER_TYPE_MAGIC})?(.*)$")
+  define BUILTIN_TYPE_MAGIC_MATCH = '^(?:!B!)(\w+)\.(\w+)'
+  define BUILTIN_TYPE_MAGIC_MATCH_RE = Regex(BUILTIN_TYPE_MAGIC_MATCH)
+
+  func _bt_magic (Bool _) is cached -> Bool { _ }
+  func _bt_magic (String _) is cached -> String {
+    .nsub('^(?:Sidef::Types::)(\w+)::(\w+)', '!B!$1.$2')
+  }
+  func _bt_unmagic (String _) is cached -> String {
+    .nsub(BUILTIN_TYPE_MAGIC_MATCH, 'Sidef::Types::$1::$2')
+  }
 
   func make (type, val, stp = false) -> Hash {
     gather {
@@ -37,8 +47,9 @@ module Explicit {
     } # else?
   }
 
-  func _tag_hook_return_check (Block b) {
-    b._returns==[Hash] || die "Garbage return-type list untag user type hook #{b}; expected [Hash] but got #{b._returns}"
+  func _tag_hook_return_check (Block b) is cached {
+    b._returns==[Hash] || die "Garbage return-type for tag/untag user-type-hook #{b}; expected [Hash] but got #{b._returns}"
+    ()
   }
 
   # TODO: FUTURE
@@ -63,7 +74,7 @@ module Explicit {
     if ( ! defined(obj) ) {
       :( EXPL_TYP, :nil )
     } elsif (obj.is_typename) {
-      :( EXPL_TYP, :typename, EXPL_VAL, obj.ref.mref )
+      :( EXPL_TYP, :typename, EXPL_VAL, _bt_magic( obj.ref.mref ) )
     } else {
       # var (st, curried_to) = with ( _major_subtype_heuristic(obj) ) {
       #   (_, { |o| recurse_with(o, _) })
@@ -77,29 +88,22 @@ module Explicit {
 
       var (user_type, ref) = with (pre_ref) {
         var u = ( .is_non_builtin_type && !user_pair )
-        (u, (user_pair || u) ? (USER_TYPE_MAGIC + .mref) : _)
+        (u, (user_pair || u) ? (USER_TYPE_MAGIC + .mref) : _bt_magic(_))
       }
       # say "ref: #{ref}; want: #{ref.mref} pre_ref: #{pre_ref}; user_pair: #{user_pair}; user_type: #{user_type}"
       # say "obj: #{obj} last subtype: #{subtype}"
 
-      var (st, made_val) = if (user_type) {
-        var ir = make_val(obj)
-        var ir_st = _major_subtype_heuristic(ir)
-        (ir_st, ir)
-      } elsif (!user_pair) {
-        (_major_subtype_heuristic(obj), nil)
-      } elsif (user_pair) {
-        (_major_subtype_heuristic(obj[1]), nil)
-      }# else { (false, nil) } # else { die '???' }
+      var _st =  if ( user_type )  { make_val(obj) }
+              elsif ( !user_pair ) { obj    }
+              elsif ( user_pair )  { obj[1] }
+
+      var st = _bt_magic( _major_subtype_heuristic(_st) )
 
       var curried_tag = { |o| recurse_with(o, st) }
       Explicit::make(
         !subtype && ref,
         given (obj) {
-          case ( user_type )     {
-            # say "made_val: #{made_val}"
-            made_val.map_kv{ |k, v| ( (k) => curried_tag(v) ) }
-          }
+          case ( user_type )     { _st.map_kv{ |k, v| ( (k) => curried_tag(v) ) } }
           case ( user_pair )     { .[1].map_kv{ |k, v| ( (k) => curried_tag(v) ) } }
           case ( .is_a(Pair) )   { continue }
           case ( .is_a(Set) )    { continue }
@@ -116,14 +120,14 @@ module Explicit {
     _tag_base(
       obj,
       subtype,
-      func (o, s) -> Hash { _tag_user_hook(o, hook, s) },
-      func (_)  -> Hash { hook(_) }
+      func (o, s) -> Hash { _tag_user_hook(o, hook, s \\ ()) },
+      func (_)    -> Hash { hook(_) }
       # hook
     )
   }
 
   func _tag_user_default (obj, subtype = false) -> Hash {
-    _tag_base( obj, subtype, __FUNC__, { die 'unreachable code' } )
+    _tag_base( obj, subtype, __FUNC__, { die 'attempting to process non-pair format user-defined object types without defining user_type_hook is punishable by death' } ) # '
   }
 
   func tag (obj, Block user_type_hook = Block.identity) -> Hash {
@@ -153,19 +157,21 @@ module Explicit {
     if (obj{EXPL_TYP} == :nil) {
       nil
     } elsif (obj{EXPL_TYP} == :typename) {
-      obj{EXPL_VAL}.lookup_ref.to_type
+      _bt_unmagic( obj{EXPL_VAL} ).lookup_ref.to_type
     } else {
       var curried_untag = func (Hash h) { recurse_with(h, obj{EXPL_STP} \\ false) }
       var (user_type, type) = with (subtype || obj{EXPL_TYP}) {
-        (.starts_with(USER_TYPE_MAGIC), (.=~ USER_TYPE_ERASER) -> caps[0].lookup_ref.to_type)
-      } else { die obj.dump+' wtf ??? (was the input data encoded properly?)' }
+        ( .starts_with(USER_TYPE_MAGIC),
+          (_bt_unmagic( . =~ USER_TYPE_ERASER -> caps[0] ).lookup_ref \\> :to_type) \
+            \\ die "typename #{_.dump} not known or not in scope" )
+      } else { die obj.dump+' wtf ??? (was the input data encoded properly / did you forget to call untag_hash?)' }
 
       var pre_val = obj{EXPL_VAL}
 
       # say "obj: #{obj.dump.lines.map{ 9.chr+_ }.join(10.chr)}\n\tref: '#{obj{EXPL_TYP}}' last subtype: #{subtype} type: #{type} user_type: #{user_type}\n"
 
       given ( type ) {
-        case ( user_type ) { make_val(_, pre_val.map_kv{ |k, v| ( (k) => curried_untag(v) ) } ) }
+        case ( user_type )     { make_val(_, pre_val.map_kv{ |k, v| ( (k) => curried_untag(v) ) } ) }
         case ( .is_a(Pair) )   { continue }
         case ( .is_a(Set) )    { continue }
         case ( .is_an(Array) ) { type( pre_val.map{ curried_untag(_) }... ) }

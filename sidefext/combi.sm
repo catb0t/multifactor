@@ -51,6 +51,7 @@ module Combi {
 
   -> drop_n (Number n, *a) { Combi::rescope( a[n..a.len-1] ) }
   -> nip_n  (Number n, *a) { Combi::rescope( a[0 .. a.len-(n + 1) ] ) }
+  -> dup    (Object _)     { (_, _) }
 
   # TODO: ways to make lists from iteration without Array....
 

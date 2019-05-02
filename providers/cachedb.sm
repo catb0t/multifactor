@@ -22,7 +22,7 @@ include sidefext::xchg
 include lib::guardio
 include lib::feature
 include lib::withdirectory
-include lib::ABCs
+# include lib::ABCs
 
 import sidefext::iterable::ImmutableHash
 
@@ -42,15 +42,18 @@ module CacheDBIO {
     # otherwise, open it
     if ( Atomic::aread(name) ) {
         |contents|
-      ImmutableHash( Explicit::untag(
+      # say contents
+      const c = ImmutableHash( Explicit::untag_hash(
           JSON.decode(contents),
           user_type_hook: func (Object typename, Hash data) {
             # say typename
             # TODO: fixup this use of unserialize on Hash<Serializable>
+            # say data
             sidefext::construct::maybe_init( typename ).unserialize( data )
           }
       ) )
-
+      # say "#{__FUNC_NAME__} c: #{c.dump}"
+      c
     } else {
       # if it's empty, get a new one
       ImmutableHash()
@@ -65,9 +68,9 @@ module CacheDBIO {
     # fixup this use of .serialize on a Hash<Serializable>
     const h = Explicit::tag_hash(
       new_data._data,
-      user_type_hook: func (key, value { .is_serializable }) -> Hash { say 'hook'; value.serialize }
+      user_type_hook: func (value { .is_serializable }) -> Hash { value.serialize }
     )
-    say h
+    # say h
     Atomic::awrite( name, JSON.pretty.encode( h ) )
   }
 }
@@ -80,12 +83,12 @@ module DBTransform {
   define Regex ACTION_IS_BY = Regex(BY_EXT + '$')
   define Regex ACTION_NOT_BY = Regex('(?!' + BY_EXT + ').{3}$')
 
-  define Regex ACTION_CHANGE = :change
-  define Regex ACTION_IS_CHANGE = /^change/
-  define Regex ACTION_INSERT = :insert
-  define Regex ACTION_IS_INSERT = /^insert/
-  define Regex ACTION_DELETE = :delete
-  define Regex ACTION_IS_DELETE = /^delete/
+  define String ACTION_CHANGE = :change
+  define Regex  ACTION_IS_CHANGE = /^change/
+  define String ACTION_INSERT = :insert
+  define Regex  ACTION_IS_INSERT = /^insert/
+  define String ACTION_DELETE = :delete
+  define Regex  ACTION_IS_DELETE = /^delete/
 
   define Set ACTIONS_BASE = Set(ACTION_CHANGE, ACTION_INSERT, ACTION_DELETE)
   define Set ACTIONS = ACTIONS_BASE.to_a.map{ (_, _+:_by) }.to_set # sidef bug: Set.map list behaviour

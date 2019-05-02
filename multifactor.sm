@@ -79,7 +79,7 @@ module Factor {
   }
 
   define Hash  TARGETS = :( :vm => true, :lib => true, :image => false )
-  define Array CHECKSUMMED_TARGETS = TARGETS.grep_kv{ |_k, _| _ }.keys.to_set
+  define Array CHECKSUMMED_TARGETS = TARGETS.grep_kv{ |_k, _| _ }.keys.sort
 }
 
 module MultiFactor {
@@ -158,7 +158,7 @@ module MultiFactor {
 
   define Array _mfr_init = [ {
       |self|
-    self.uuid( GuardIO::make_uuid(words: true) )
+    self.uuid( GuardIO::make_uuid() )
     say "MFRuntime: #{self.uuid}"
     self.wd( Dir.cwd )
     # need to use field_groups here
@@ -309,15 +309,14 @@ module MultiFactor {
         ))
       }
 
-      const disk_sum_stored = self._blob_file_contents_sum(bo.boot_fullname, bo.stored_boot_image.algo)
-
-      if ( disk_sum_stored != bo.stored_boot_image.sum ) {
-        bo.stored_boot_image( VirtualBase64Blob(
-          sum: disk_sum_stored,
-          data: self.fbash.with_directory{ GuardIO::read_binary_b64(bo.boot_fullname) },
-          algo: (bo.stored_boot_image.algo || bo.blob_algorithm || self.algos.blob)
-        ) )
-      }
+      # const disk_sum_stored = self._blob_file_contents_sum(bo.boot_fullname, bo.stored_boot_image.algo)
+      # if ( disk_sum_stored != bo.stored_boot_image.sum ) {
+      #   bo.stored_boot_image( VirtualBase64Blob(
+      #     sum: disk_sum_stored,
+      #     data: self.fbash.with_directory{ GuardIO::read_binary_b64(bo.boot_fullname) },
+      #     algo: (bo.stored_boot_image.algo || bo.blob_algorithm || self.algos.blob)
+      #   ) )
+      # }
     }
 
     # TODO:REWRITE
@@ -332,10 +331,8 @@ module MultiFactor {
         # TODO: algo
         algo: self._algo(bo),
         self.fbash.with_directory{
-          Factor::TARGETS.pairs.map{
-            const name = _[0]
-            const test = _[1]
-            ( name ⫶ test && self._blob_file_contents_sum( bo.method(name + :_fullname)(), self._algo(bo) ) )
+          Factor::CHECKSUMMED_TARGETS+[:boot].map{
+            ( _ ⫶ self._blob_file_contents_sum( bo.method(. + :_fullname)(), self._algo(bo) ) )
           }
         }...
       )
@@ -374,55 +371,72 @@ module MultiFactor {
       const MN = __METHOD_NAME__
 
       func checksum (String tgt, LazyMethod tgt_fullname) -> Maybe::Maybe_Type {
-        self.fbash.with_directory{
-          self._blob_file_contents_sum( tgt_fullname(), self._algo(bo) )
-        }.rescope{
-            |disk_sum|
-          Maybe::MaybeStr( current_status.rescope{
-            [ ::eq( .blob_algorithm        self._algo(bo) )
-              ::eq( .blob_sums.method(tgt) disk_sum       ) ].all||self.spoof_build
-          } ? disk_sum : nil )
-        }
+        self._blob_file_contents_sum( tgt_fullname(), self._algo(bo) ) \
+          .rescope{
+              |disk_sum|
+            # say "current disk sum: #{disk_sum} bo disk sum: #{bo.blob_sums.method(tgt)()}"
+            Maybe::MaybeStr( bo.rescope{
+              self.spoof_build || Combi::binop_pairs(
+                .blob_algorithm          self._algo(bo)
+                .blob_sums.method(tgt)() disk_sum
+              )('==') # '
+            } ? disk_sum : nil )
+          }
       }
       func new_vm_lib () -> Block {
-        func (Bool clean_would_race) -> (BlobStatus, BlobStatus) {
+        func _new_vm_lib (Bool clean_would_race) -> (BlobStatus, BlobStatus) {
+          # say "#{__FUNC_NAME__}: clean_would_race is #{clean_would_race}"
           self.compile_vm_lib(bo, clean_would_race).rescope{
               |s|
             Factor::CHECKSUMMED_TARGETS.map{ BlobStatus(
                 exists: s, recompiled: s,
-                checksum: checksum( _, bo.method(_ + :_fullname) )
+                checksum: checksum( _, bo.method(. + :_fullname) )
             ) }...
           }
         }
       }
-      func need_recompile ( BlobStatus _ ) -> Bool { .exists || (true != Maybe::unmaybe( .checksum )) }
 
       # if either the vm or lib are missing or out of date, recompile them
       #   if the checksums don't match after both have been recompiled, stop
-      const Hash blob_stats = Factor::TARGETS.map_kv{
-          |k, v|
-        const LazyMethod target_fullname = bo.method( k + :_fullname )
-        # say "target_fullname class: #{target_fullname.class}"
-        (target_fullname.exists || self.spoof_build).rescope{
-          # const new_v =
-          # say "k: #{k} e: #{e} v: #{v}"
-          ( (k) => BlobStatus(
-            exists:     _,
-            recompiled: false,
-            checksum:   Maybe::MaybeStr( (v && _) ? checksum( k, target_fullname ) : nil )
-          ) )
+      const Hash blob_stats = self.fbash.with_directory{
+        Factor::TARGETS.map_kv{
+            |k, v|
+          const LazyMethod target_fullname = bo.method( k + :_fullname )
+          # say "target_fullname class: #{target_fullname.class}"
+          (target_fullname.exists || self.spoof_build).rescope{
+            # say "making blob_stats; #{target_fullname()} exists? or spoof #{_}"
+            ( (k) => BlobStatus(
+              exists:     _,
+              recompiled: false,
+              checksum:   Maybe::MaybeStr( (v && _) ? checksum( k, target_fullname ) : nil )
+            ) )
+          }
         }
       }
 
-      if (need_recompile( blob_stats{:vm} )) {
+      func need_recompile ( Hash _, String k ) -> Bool {
+        const bo_checksum   = bo.blob_sums.method(k)()
+        const disk_checksum = Maybe::unmaybe( .{k}.checksum )
+        const matching = (bo_checksum == disk_checksum)
+        # say "#{__FUNC_NAME__}: #{k}: checksums: #{bo_checksum} / #{disk_checksum}; #{bo.blob_sums.serialize.dump} ;; #{dump(.{k})}"
+        !(.{k}.exists && matching)
+      }
+      const recompile_vm = need_recompile( blob_stats, :vm )
+      # bp(__FILE__, __LINE__, __NAMESPACE__, self.class, __METHOD_NAME__, recompile_vm => recompile_vm)
+
+      if (recompile_vm) {
         blob_stats{Factor::CHECKSUMMED_TARGETS...} = ( new_vm_lib()(false) )
       }
 
-      # NOTE: compiling only the lib can be done in parallel with the next step
-      const lib_thread = (need_recompile(blob_stats{:lib}) ? new_vm_lib() : {}).ffork(true)
+      # say "lib needs recompile: #{lib_nrc}"
 
+      const recompile_lib = need_recompile(blob_stats, :lib)
+      # NOTE: compiling only the lib can be done in parallel with the next step
+      const lib_thread = (recompile_lib ? new_vm_lib() : {}).ffork(true)
       # next, if the image is missing, rebuild it
-      if (blob_stats{:image}.exists.neg || self.spoof_build) {
+      # bp(__FILE__, __LINE__, __NAMESPACE__, self.class, __METHOD_NAME__, blob_stats_image => dump(blob_stats{:image}))
+
+      if ((!blob_stats{:image}.exists) || self.spoof_build) {
         blob_stats{:image} = BlobStatus(
           exists:     self.compile_image(bo),
           recompiled: true
@@ -431,7 +445,7 @@ module MultiFactor {
 
       # don't update the database's blob sums if the blob wasn't recompiled
 
-      blob_stats{Factor::CHECKSUMMED_TARGETS...} = (lib_thread.wait)
+      recompile_lib && (blob_stats{Factor::CHECKSUMMED_TARGETS...} = (lib_thread.wait))
       const disk_blob_sums = BlobSums(
         algo: self._algo(bo),
         blob_stats-:(:image) -> pairs.map{
@@ -466,11 +480,11 @@ module MultiFactor {
       new_bo.lock
       if (new_bo != bo) {
         self.log.trc(__FILE__, __LINE__, MN, 'committing changed BuiltObj')
-        self.db_man.change( new_bo.id(self.uuid) )
+        self.db_man.change( new_bo )
       }
       # and then run Factor
       self.log.trc(__FILE__, __LINE__, MN, "ok, running factor!")
-      self._detach_factor_thread( new_bo.vm_fullname )
+      self._detach_factor_thread( bo.vm_fullname )
     }
     # multifactor's actual entry point
     # FAR AWAY TODO: make this asynchronous, so that with_directory stuff is
@@ -517,11 +531,12 @@ module MultiFactor {
 
       const match_bo = (self.db_man.data.values.find{
           |b|
+        # say "find b: #{b.dump}"
         # remember, we're not testing *all* properties like .lock or tombstoned
         current_status._serial_eq(b, incl: status_properties)
       } \\> :lock)
 
-      bp(__FILE__, __LINE__, __NAMESPACE__, self.class, __METHOD_NAME__, match_bo => match_bo)
+      bp(__FILE__, __LINE__, __NAMESPACE__, self.class, __METHOD_NAME__, match_bo => match_bo)#, data => self.db_man.data)
 
       with (match_bo \\ ( spoof_exists ? current_status : nil )) {
           |mb|
@@ -543,6 +558,7 @@ module MultiFactor {
       {
         self.log.inf(__FILE__, __LINE__, MN, 'Launching Factor: ', "'", vm_name, self.factor_arguments..., "'")
         if ( self.fbash.with_directory{
+            say `stat ./#{vm_name}`
             Command::spawn_se('./' + vm_name, self.factor_arguments..., output: false)
         } ) {
           self.log.wrn(__FILE__, __LINE__, MN, "Failed!")
@@ -576,7 +592,7 @@ func main {
     .option(:force, :f, doc: 'Force a rebuild in any case') \
     .option(:trace, :t, doc: 'Some debug tracing') \
     .option(:verbose, :V, doc: 'Verbose debug tracing') \
-    .option(:info, :i, doc: 'Just show configuration information') \
+    # .option(:info, :i, doc: 'Just show configuration information') \
     .option('dry-run', :n, doc: 'Change no disk files') \
     .option('from-scratch', :g, doc: 'ignore existing DB (debug)') \
     # .option('sums', :c,  negate: (:Always ¦ :Never), doc: 'use checksums') \

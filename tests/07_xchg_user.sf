@@ -7,6 +7,7 @@ import Explicit::EXPL_TYP
 import Explicit::EXPL_STP
 import Explicit::tag_hash
 import Explicit::untag_hash
+import Explicit::_bt_magic
 
 class A (
   Num x
@@ -60,14 +61,14 @@ const out_data_pair = :(
 
 const want_data = :(
   :a => :( EXPL_TYP USER_TYPE_MAGIC+A.ref.mref EXPL_VAL, :(
-    x => :( EXPL_TYP Num.ref EXPL_VAL 1 ), y => :( EXPL_TYP Str.ref EXPL_VAL, :2 ),
+    x => :( EXPL_TYP _bt_magic(Num.ref) EXPL_VAL 1 ), y => :( EXPL_TYP _bt_magic(Str.ref) EXPL_VAL, :2 ),
   ) )
 
   :b => :( EXPL_TYP USER_TYPE_MAGIC+B.ref.mref EXPL_VAL, :(
-    z => :( EXPL_TYP Str.ref EXPL_VAL, :3 ), a => :( EXPL_TYP Num.ref EXPL_VAL, 4 ),
+    z => :( EXPL_TYP _bt_magic(Str.ref) EXPL_VAL, :3 ), a => :( EXPL_TYP _bt_magic(Num.ref) EXPL_VAL, 4 ),
   ) )
 
-  :c => :( EXPL_TYP USER_TYPE_MAGIC+C.ref.mref EXPL_STP Str.ref EXPL_VAL, :(
+  :c => :( EXPL_TYP USER_TYPE_MAGIC+C.ref.mref EXPL_STP _bt_magic(Str.ref) EXPL_VAL, :(
     v1 => :( EXPL_VAL, :123 ), v2 => :( EXPL_VAL, :456 ), v3 => :( EXPL_VAL, :789 )
   ) )
 )

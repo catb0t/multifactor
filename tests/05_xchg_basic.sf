@@ -4,10 +4,26 @@ include Explicit
 import Explicit::EXPL_VAL
 import Explicit::EXPL_TYP
 import Explicit::EXPL_STP
+import Explicit::_major_subtype_heuristic
+import Explicit::_bt_magic
+import Explicit::_bt_unmagic
 import Explicit::make
 import Explicit::tag
-import Explicit::_major_subtype_heuristic
-_major_subtype_heuristic
+
+assert_eq(_bt_magic(Str.ref),  '!B!String.String') # '
+assert_eq(_bt_magic(Num.ref),  '!B!Number.Number') # '
+assert_eq(_bt_magic(Pair.ref), '!B!Array.Pair') # '
+assert_eq(_bt_magic(Hash.ref), '!B!Hash.Hash') # '
+assert_eq(_bt_magic(Set.ref),  '!B!Set.Set') # '
+assert_eq(_bt_magic(Bag.ref),  '!B!Set.Bag') # '
+assert_eq(_bt_magic('Sidef::Runtime1::213142::main::A'),  'Sidef::Runtime1::213142::main::A') # '
+
+assert_eq(_bt_unmagic('!B!String.String'), Str.ref)
+assert_eq(_bt_unmagic('!B!Array.Pair'), Pair.ref)
+assert_eq(_bt_unmagic('!B!Hash.Hash'), Hash.ref)
+assert_eq(_bt_unmagic('!B!Set.Set'), Set.ref)
+assert_eq(_bt_unmagic('!B!Set.Bag'), Bag.ref)
+assert_eq(_bt_unmagic('Sidef::Runtime1::213142::main::A'),  'Sidef::Runtime1::213142::main::A') # '
 
 assert_eq( Num.ref _major_subtype_heuristic([0 1 2 3]) )
 assert_eq( false _major_subtype_heuristic([:1 2 3 4]) )
@@ -41,32 +57,32 @@ assert_eq(
   :( EXPL_VAL [0 1]*7 )
 )
 
-assert_eq( tag(2),  :( EXPL_TYP   Num.ref EXPL_VAL 2 ) )
-assert_eq( tag(2),  make( Num.ref  2 ) )
-assert_eq( tag(:2), :( EXPL_TYP Str.ref  EXPL_VAL, :2 ) )
-assert_eq( tag(:2), make( Str.ref, :2 ) )
-assert_eq( tag(:2), make( Str.ref, :2 ) )
+assert_eq( tag(2),  :( EXPL_TYP   _bt_magic(Num.ref) EXPL_VAL 2 ) )
+assert_eq( tag(2),  make( _bt_magic(Num.ref)  2 ) )
+assert_eq( tag(:2), :( EXPL_TYP _bt_magic(Str.ref)  EXPL_VAL, :2 ) )
+assert_eq( tag(:2), make( _bt_magic(Str.ref), :2 ) )
+assert_eq( tag(:2), make( _bt_magic(Str.ref), :2 ) )
 
-assert_eq( tag([]), :( EXPL_TYP Arr.ref EXPL_VAL [] ) )
+assert_eq( tag([]), :( EXPL_TYP _bt_magic(Arr.ref) EXPL_VAL [] ) )
 assert_eq( tag([0 1]), :(
-    EXPL_TYP Arr.ref
+    EXPL_TYP _bt_magic(Arr.ref)
     EXPL_VAL [ :(EXPL_VAL 0), :(EXPL_VAL 1) ]
-    EXPL_STP Num.ref
+    EXPL_STP _bt_magic(Num.ref)
   )
 )
 
 assert_eq( tag([0, :1]), :(
-    EXPL_TYP Arr.ref
-    EXPL_VAL [ :(EXPL_TYP Num.ref EXPL_VAL 0), :(EXPL_TYP Str.ref EXPL_VAL, :1) ]
+    EXPL_TYP _bt_magic(Arr.ref)
+    EXPL_VAL [ :(EXPL_TYP _bt_magic(Num.ref) EXPL_VAL 0), :(EXPL_TYP _bt_magic(Str.ref) EXPL_VAL, :1) ]
   )
 )
 
 assert_eq( tag([[0 0], [1 1]]), :(
-    EXPL_TYP Arr.ref
-    EXPL_STP Arr.ref
+    EXPL_TYP _bt_magic(Arr.ref)
+    EXPL_STP _bt_magic(Arr.ref)
     EXPL_VAL [
-      :( EXPL_STP Num.ref EXPL_VAL [:(EXPL_VAL 0), :(EXPL_VAL 0)])
-      :( EXPL_STP Num.ref EXPL_VAL [:(EXPL_VAL 1), :(EXPL_VAL 1)])
+      :( EXPL_STP _bt_magic(Num.ref) EXPL_VAL [:(EXPL_VAL 0), :(EXPL_VAL 0)])
+      :( EXPL_STP _bt_magic(Num.ref) EXPL_VAL [:(EXPL_VAL 1), :(EXPL_VAL 1)])
     ]
   )
 )

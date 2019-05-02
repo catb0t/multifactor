@@ -129,7 +129,6 @@ module _exported {
 if (__FILE__ == __MAIN__) {
   assert(_exported::DirSum().serial_properties)
   assert(_exported::BlobSums().serial_properties)
-  say "got here"
   assert(_exported::BuiltObj().serial_properties)
 } else {
   module builtobj {

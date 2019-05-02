@@ -1,0 +1,36 @@
+#! ruby
+
+{}(); {}()
+
+func _bt_magic_if (String _) -> String {
+  if ( . =~ /^(?:Sidef::Types::)(\w+)::(\w+)/ -> caps.join('.') ) {
+      |_| .prepend('!B!')
+  } else { _ }
+}
+
+func _bt_magic_nsub (String _) -> String {
+  .nsub('^(?:Sidef::Types::)(\w+)::(\w+)', '!B!$1.$2')
+}
+
+func micro () -> Num { Time().micro * 100_000 }
+
+assert_eq(1 1)
+
+5.times{
+  const st1 = micro()
+  100_000.times{
+    assert_eq('!B!Array.Pair', _bt_magic_if('Sidef::Types::Array::Pair'))
+  }
+  const e1 = micro()-st1
+  say "e1: #{e1}"
+
+  assert_eq(1 1)
+
+  # about a tenth of a second faster in total
+  const st2 = micro()
+  100_000.times{
+    assert_eq('!B!Array.Pair', _bt_magic_nsub('Sidef::Types::Array::Pair'))
+  }
+  const e2 = micro()-st2
+  say "e2: #{e2}"
+}

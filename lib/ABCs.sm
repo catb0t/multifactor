@@ -239,8 +239,10 @@ class SeriallyEquatable < Serializable {
   -> _serial_eq (other { .is_object }, incl = Set(), excl = Set()) -> Bool {
     SELQBL_EQ_ASSERTION(self)
     if ( other.is_a(Serializable) ) {
+      # say "Serially Equate self: #{self.serialize(incl: incl)} other: #{other.serialize(incl: incl)} incl: #{incl} excl: #{excl}"
       other.serialize(incl: incl, excl: excl) == self.serialize(incl: incl, excl: excl)
-
+      # say "#{__METHOD_NAME__} o: #{o}"
+      # say "#{__METHOD_NAME__} s: #{s}"
     # somehow... maybe other is our superclass
     # TODO:
     } elsif ( self.is_a(other) ) {
@@ -396,11 +398,7 @@ class SeriallyAccessible << ModularInit, SeriallyEquatable {
     self.grep_methods{ _ ~~ serial_pg_name } \
       .map_kv{
           |_, calls|
-        # const method_name = (:serial_properties + (name =~ serial_pg_name)[0])
-        # say "createproperty #{method_name}"
-        # func new_ser_props (self) { const r = calls().map{ .run(self) }; say r; r }
         # this does not create an entry in .methods
-        # __CLASS__.def_method( method_name, new_ser_props )
         calls().each{ .run(self).each_kv( self._bound_accessor_generator ) }
       }
   }

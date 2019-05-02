@@ -74,8 +74,13 @@ module MsgTypes {
       ].join, 'm' )
     }...,
 
+    # old message
     MsgTypes::RETURN_COUNT ： /^(?:\[ERROR\] )?Wrong number of return values from (?<block_type>func|method|block) (?<block_name>.+)\(\): got (?<return_got_count>\d+), but expected (?<return_expect_count>\d+) at (?<file>.+) line (?<line>[-\d]+)\.$/,
+    # new message
+    MsgTypes::RETURN_COUNT ： /^(?:\[ERROR\] )?Wrong number of return values from (?<block_type>func|method|block) (?<block_name>.+): got (?<return_got_count>\d+), but expected (?<return_expect_count>\d+)$/,
+    # old message
     MsgTypes::RETURN_TYPE ： /^(?:\[ERROR\] )?Invalid return-type from (?<block_type>func|method|block) (?<block_name>.+)\(\): got `(?<return_got_type>.+)`, but expected `(?<return_expect_type>.+)` at (?<file>.+) line (?<line>[-\d]+)\.$/,
+    # new message
     MsgTypes::RETURN_TYPE ： /^(?:\[ERROR\] )?Invalid return-type for value\[(?<return_index>\d+)\] from (?<block_type>func|method|block) `(?<block_name>.+)`: got `(?<return_got_type>.+)`, but expected `(?<return_expect_type>.+)`$/,
     MsgTypes::BAD_ENCODING ： /^Unknown encoding '(?<encoding>.*)'/,
     MsgTypes::PERL_RUNTIME ：
@@ -175,6 +180,8 @@ Unimplemented at multifactor.sm line 541
 [ERROR] Invalid return-type from func __FUNC__(): got `Number`, but expected `Block` at /home/cat/perl5/lib/perl5/Sidef/Types/Block/Block.pm line 309.
 %
 [ERROR] Invalid return-type for value[0] from func `__FUNC__`: got `Number`, but expected `Hash`
+%
+Wrong number of return values from func `Maybe::_unmaybe`: got 0, but expected 1
 EOT
 
     TEST_MSGS.split("\n%\n").each{
