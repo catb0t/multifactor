@@ -1,6 +1,20 @@
 #! ruby
 include sidefext::object
 include sidefext::iterable
+import sidefext::iterable::ImmutableHash
+
+var a = ImmutableHash( :( a => 1, b => 2) )
+const b = ImmutableHash( :( a => 2, b => 1) )
+assert_eq( ImmutableHash(), ImmutableHash() )
+assert_eq( a, a )
+assert_eq( a._data, :( a => 1, b => 2) )
+assert_eq( a.values, [1, 2] )
+assert_ne( a, b )
+assert_ne( a, ImmutableHash() )
+assert_ne( b, ImmutableHash() )
+var ddr = ImmutableHash()
+var rdr = ImmutableHash()
+assert_eq(ddr, rdr)
 
 1000.times {
   # assert_eq([0, 3, 6, 9, 12, 15, 18], 0..6 -> join(10.chr).map_lines{ .to_n * 3 } )

@@ -1,0 +1,5 @@
+class ImmHash {
+  method start {
+
+  }
+}

@@ -34,7 +34,7 @@ module CacheDBIO {
   define JSON = Feature::JSON.new
 
   # look for the database file
-  # lib::ABCs::Serializable element_type
+  # future? lib::ABCs::Serializable element_type
   func _read_disk_db (File name) is cached -> ImmutableHash {
 
     # look for the database file
@@ -43,7 +43,7 @@ module CacheDBIO {
     if ( Atomic::aread(name) ) {
         |contents|
       # say contents
-      const c = ImmutableHash( Explicit::untag_hash(
+      ImmutableHash( Explicit::untag_hash(
           JSON.decode(contents),
           user_type_hook: func (Object typename, Hash data) {
             # say typename
@@ -53,7 +53,7 @@ module CacheDBIO {
           }
       ) )
       # say "#{__FUNC_NAME__} c: #{c.dump}"
-      c
+      # c
     } else {
       # if it's empty, get a new one
       ImmutableHash()
@@ -133,7 +133,7 @@ module DBTransform {
   -> apply (ImmutableHash _, tf < InsertBy) -> ImmutableHash { ImmutableHash(. + :(tf.key tf.action_by.run(tf.key, .item(tf.key)))) }
   -> apply (ImmutableHash _, tf < Change)   -> ImmutableHash { ImmutableHash(.-tf.key + :(tf.key tf.object)) }
   -> apply (ImmutableHash _, tf < ChangeBy) -> ImmutableHash { ImmutableHash(.-tf.key + :(tf.key tf.action_by.run(tf.key, .item(tf.key)))) }
-  -> apply (ImmutableHash _, tf < Delete)   -> ImmutableHash { ImmutableHash(.  - tf.key) }
+  -> apply (ImmutableHash _, tf < Delete)   -> ImmutableHash { ImmutableHash(. - tf.key) }
   -> apply (ImmutableHash _, tf < DeleteBy) -> ImmutableHash { ImmutableHash(.grep_kv{ |k, v| ! tf.action_by.run(k, v) }) }
 
   func apply ( ImmutableHash data, Set tfs ) -> ImmutableHash {

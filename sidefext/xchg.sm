@@ -127,7 +127,7 @@ module Explicit {
   }
 
   func _tag_user_default (obj, subtype = false) -> Hash {
-    _tag_base( obj, subtype, __FUNC__, { die 'attempting to process non-pair format user-defined object types without defining user_type_hook is punishable by death' } ) # '
+    _tag_base( obj, subtype, __FUNC__, { die 'impossible to process user-defined object types in non-pair (pre-serialized) format without defining user_type_hook' } ) # '
   }
 
   func tag (obj, Block user_type_hook = Block.identity) -> Hash {
