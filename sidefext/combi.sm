@@ -166,6 +166,7 @@ module Combi {
     # die;
   }
 
+  # TODO: with_breakpoint_handlers integration
   struct FinalizerSpec {
     obj,
     Array obj_blocks = [],
@@ -283,4 +284,6 @@ EOT
   }
 
   func with_destructors ( FinalizerSpec fs ) -> Block { with_finalizers(fs) }
+
+  # TODO: with_breakpoint_handlers
 }

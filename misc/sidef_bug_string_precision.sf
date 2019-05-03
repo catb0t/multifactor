@@ -1,22 +1,10 @@
 # run with sidef -P1
+# precison affects JSON decoding
 
-include sidefext::construct
 include sidefext::xchg
-
-include providers::builtobj
 
 define JSON = 'JSON::XS'.require.new.pretty
 
-const in_data = JSON.decode(%f(.multifactor.db).open_r.slurp)
+const in_data = JSON.decode('{"a":"0.99"}')
 say in_data
-const processed = Explicit::untag_hash(in_data,
-  user_type_hook: func (Object typename, Hash data) {
-    sidefext::construct::maybe_init( typename ).unserialize( data )
-  }
-)
-say processed.values[0].serialize( incl: Set(
-  :factor_version, :is_git, :git_branch, :git_hash,
-  :os_type, :os_name, :arch_name, :word_size,
-  :vm_format, :image_format, :lib_format, :boot_format,
-  :blob_algorithm, :src_sums
-) )
+assert_eq(in_data{:a}, '0.99')

@@ -315,6 +315,8 @@ class BuildSh {
     )
   }
 
+  # TODO: allow the checksum of local boot image to fail due to no internet, but not break the build
+  # TODO: allow the checksum of local boot image to be stored locally
   -> update_boot_image {
     const File boot_image_file = BuildSh.generate_make_targets(){:boot_image}
     say "#{__METHOD_NAME__}: Removing old data..."

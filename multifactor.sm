@@ -47,7 +47,7 @@ module Factor {
 
   define Block rc_config_lines = func () -> Hash {
     Factor::_config_lines_cache[0] \\= Factor::RC_FILE.open_r.map{
-      [ (.=~ /^! multifactor:(.+) ?(.*)/)[0, 1] ]
+      [ (.=~ /^! multifactor:(.+)\s*=?\s*(.*)/)[0, 1] ]
     }.grep.map{ _... }.to_h
   }
 
@@ -62,6 +62,7 @@ module Factor {
 
   define Maybe::Maybe FACTOR_DIR = Maybe::MaybeDir(  Factor::find_config('factor-dir', false) )
   define Maybe::Maybe QUIET_PIPE = Maybe::MaybeBool( Factor::find_config('quiet-pipe', false) )
+  define Maybe::Maybe ASSUME_LBI_OK = Maybe::MaybeBool( Factor::find_config('assume-lbi-ok', false) )
   define Maybe::Maybe DEFAULT_CHECKSUM = Maybe::MaybeStr(
     Factor::find_config('default-checksum', false) || Feature::DEFAULT_CHECKSUM
   )
@@ -105,7 +106,7 @@ module MultiFactor {
   import builtobj::TimeSpec
   import builtobj::BuiltObj
 
-  # historical interest
+  # historical interest; superseded by SeriallyEquatable
   # func compare_properties (Array properties, BuiltObj b, Object o, Bool debug = false) {
   #   if (debug) {
   #     properties.map{
@@ -125,10 +126,8 @@ module MultiFactor {
     Maybe::Maybe_Type checksum = Maybe::MaybeStr(nil)
   }
 
-  func dump (BlobStatus b) {
-    with (b) {
-      "BlobStatus( exists: #{.exists}, recompiled: #{.recompiled}, checksum: #{Maybe::dump(.checksum)} )"
-    }
+  func dump (BlobStatus _) {
+    "BlobStatus( exists: #{.exists}, recompiled: #{.recompiled}, checksum: #{Maybe::dump(.checksum)} )"
   }
 
   struct AlgoBox {
@@ -327,15 +326,17 @@ module MultiFactor {
 
     # TODO:REWRITE
     -> _make_disk_blob_sums (BuiltObj bo) -> BlobSums {
-      BlobSums(
+      const c = BlobSums(
         # TODO: algo
         algo: self._algo(bo),
         self.fbash.with_directory{
-          Factor::CHECKSUMMED_TARGETS+[:boot].map{
+          Factor::CHECKSUMMED_TARGETS+[:boot] -> map{
             ( _ ⫶ self._blob_file_contents_sum( bo.method(. + :_fullname)(), self._algo(bo) ) )
           }
         }...
       )
+      say "#{__METHOD_NAME__}: made #{c.dump}"
+      c
     }
 
     -> build_new_factor (BuiltObj current_status) {
@@ -418,12 +419,12 @@ module MultiFactor {
         const bo_checksum   = bo.blob_sums.method(k)()
         const disk_checksum = Maybe::unmaybe( .{k}.checksum )
         const matching = (bo_checksum == disk_checksum)
-        # say "#{__FUNC_NAME__}: #{k}: checksums: #{bo_checksum} / #{disk_checksum}; #{bo.blob_sums.serialize.dump} ;; #{dump(.{k})}"
+        say "#{__FUNC_NAME__}: #{k}: checksums: #{bo_checksum} / #{disk_checksum}; #{bo.blob_sums.serialize.dump} ;; #{dump(.{k})}"
         !(.{k}.exists && matching)
       }
       const recompile_vm = need_recompile( blob_stats, :vm )
-      # bp(__FILE__, __LINE__, __NAMESPACE__, self.class, __METHOD_NAME__, recompile_vm => recompile_vm)
 
+      bp(__FILE__, __LINE__, __NAMESPACE__, self.class, __METHOD_NAME__, recompile_vm => recompile_vm)
       if (recompile_vm) {
         blob_stats{Factor::CHECKSUMMED_TARGETS...} = ( new_vm_lib()(false) )
       }
@@ -431,11 +432,12 @@ module MultiFactor {
       # say "lib needs recompile: #{lib_nrc}"
 
       const recompile_lib = need_recompile(blob_stats, :lib)
+      bp(__FILE__, __LINE__, __NAMESPACE__, self.class, __METHOD_NAME__, recompile_lib => recompile_lib)
       # NOTE: compiling only the lib can be done in parallel with the next step
       const lib_thread = (recompile_lib ? new_vm_lib() : {}).ffork(true)
-      # next, if the image is missing, rebuild it
-      # bp(__FILE__, __LINE__, __NAMESPACE__, self.class, __METHOD_NAME__, blob_stats_image => dump(blob_stats{:image}))
 
+      bp(__FILE__, __LINE__, __NAMESPACE__, self.class, __METHOD_NAME__, blob_stats_image => dump(blob_stats{:image}))
+      # next, if the image is missing, rebuild it
       if ((!blob_stats{:image}.exists) || self.spoof_build) {
         blob_stats{:image} = BlobStatus(
           exists:     self.compile_image(bo),
@@ -536,7 +538,7 @@ module MultiFactor {
         current_status._serial_eq(b, incl: status_properties)
       } \\> :lock)
 
-      bp(__FILE__, __LINE__, __NAMESPACE__, self.class, __METHOD_NAME__, match_bo => match_bo)#, data => self.db_man.data)
+      bp(__FILE__, __LINE__, __NAMESPACE__, self.class, __METHOD_NAME__, match_bo => match_bo \\> :serialize)#, data => self.db_man.data)
 
       with (match_bo \\ ( spoof_exists ? current_status : nil )) {
           |mb|
@@ -558,7 +560,7 @@ module MultiFactor {
       {
         self.log.inf(__FILE__, __LINE__, MN, 'Launching Factor: ', "'", vm_name, self.factor_arguments..., "'")
         if ( self.fbash.with_directory{
-            say `stat ./#{vm_name}`
+            # say `stat ./#{vm_name}`
             Command::spawn_se('./' + vm_name, self.factor_arguments..., output: false)
         } ) {
           self.log.wrn(__FILE__, __LINE__, MN, "Failed!")
@@ -569,13 +571,12 @@ module MultiFactor {
   }
 }
 
-define MICRO_MAGNITUDE = 1_000
-func μsec { Time.micro*MICRO_MAGNITUDE }
-func μsec (Number n) { Time.micro*MICRO_MAGNITUDE - n }
+func sec { Time.now }
+func sec (Number n) { Time.now - n }
 
 func main {
-  const μs = μsec()
-  μs
+  const s = sec()
+  s
   # say Factor::RC_FILE
   # say Factor::REPO
   # say Factor::VERSION
@@ -592,11 +593,9 @@ func main {
     .option(:force, :f, doc: 'Force a rebuild in any case') \
     .option(:trace, :t, doc: 'Some debug tracing') \
     .option(:verbose, :V, doc: 'Verbose debug tracing') \
-    # .option(:info, :i, doc: 'Just show configuration information') \
     .option('dry-run', :n, doc: 'Change no disk files') \
     .option('from-scratch', :g, doc: 'ignore existing DB (debug)') \
-    # .option('sums', :c,  negate: (:Always ¦ :Never), doc: 'use checksums') \
-    # TODO
+    # !! TODO
     .option('sum-algo', :k,  param: (:algo ¦ :sha256), doc: 'Checksum algorithm to use') \
 
     .option('db-name', :D, param: (:name ¦ '.multifactor.db'), doc: 'Custom database filename') \
@@ -611,6 +610,7 @@ func main {
     ) \
     .option('basis-dev', :b, doc: "Ignore changes in basis/\n(basis development mode)") \
     .option('spoof-build', :s, doc: "Don't actually compile or build anything") \
+    .option('assume-lbi-ok', :A, doc: "Assume that a local boot image is valid\neven if its checksums can't be downloaded or found locally") \
     .use_option_terminator('Further arguments are given to Factor') \
     # .use_stdin_file_arg \
     # .use_arg_list_terminator \
@@ -641,7 +641,7 @@ func main {
    }
   }
 
-  Factor::say_stderr('bold bright_white', "\n\tΔ#{μsec(μs)} ×1,000μ")
+  Factor::say_stderr('bold bright_white', "\n\tΔ#{sec(s)}") #  ×1,000μ")
 }
 
 if (__FILE__ == __MAIN__) {

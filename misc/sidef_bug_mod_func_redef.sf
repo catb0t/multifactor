@@ -1,4 +1,5 @@
-# functions can't be redeclared interactively question mark ???
+# in the REPL
+# functions can't be redeclared interactively ???
 module A {
   var Block _a
 
