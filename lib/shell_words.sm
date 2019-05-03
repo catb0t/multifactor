@@ -291,66 +291,59 @@ class BuildSh {
   }
 
   -> _get_boot_image {
-    const File boot_image_file = BuildSh.generate_make_targets(){:boot_image}
-    say (__METHOD_NAME__ + ': Downloading boot image file ' + boot_image_file)
-
-    const boot_image_urls = BuildSh.boot_image_urls
-
-    const boot_image_data = BuildSh.make_http_request( boot_image_urls{:boot_image_url} )
-    const local_md5 = boot_image_data.md5
-
-    const remote_checksum_data = BuildSh.make_http_request( boot_image_urls{:checksum} )
-    if (! remote_checksum_data) {
-      say "#{__METHOD_NAME__}: Can't download, can't checksum"
-      return false
-    }
-    const remote_md5 = BuildSh._process_checksums_file(remote_checksum_data, boot_image_file)
-
-    say "#{__METHOD_NAME__}: boot image sums: #{remote_md5} / #{local_md5}"
-    if (remote_md5 != local_md5) { die "#{__METHOD_NAME__}: !!! downloaded checksum mismatch !!! (unrecoverable)" }
-
-    boot_image_file.touch.cleave(
-      { .binmode },
-      { .spurt( boot_image_data ) }
-    )
+    ...
+    # const File boot_image_file = BuildSh.generate_make_targets(){:boot_image}
+    # say (__METHOD_NAME__ + ': Downloading boot image file ' + boot_image_file)
+    # const boot_image_urls = BuildSh.boot_image_urls
+    # const boot_image_data = BuildSh.make_http_request( boot_image_urls{:boot_image_url} )
+    # const local_md5 = boot_image_data.md5
+    # const remote_checksum_data = BuildSh.make_http_request( boot_image_urls{:checksum} )
+    # if (! remote_checksum_data) {
+    #   say "#{__METHOD_NAME__}: Can't download, can't checksum"
+    #   return false
+    # }
+    # const remote_md5 = BuildSh._process_checksums_file(remote_checksum_data, boot_image_file)
+    # say "#{__METHOD_NAME__}: boot image sums: #{remote_md5} / #{local_md5}"
+    # if (remote_md5 != local_md5) { die "#{__METHOD_NAME__}: !!! downloaded checksum mismatch !!! (unrecoverable)" }
+    # boot_image_file.touch.cleave(
+    #   { .binmode },
+    #   { .spurt( boot_image_data ) }
+    # )
   }
 
   # TODO: allow the checksum of local boot image to fail due to no internet, but not break the build
   # TODO: allow the checksum of local boot image to be stored locally
   -> update_boot_image {
-    const File boot_image_file = BuildSh.generate_make_targets(){:boot_image}
-    say "#{__METHOD_NAME__}: Removing old data..."
-    File(BuildConst::CHECKSUM_FILENAME).remove
-    # remove all boot images with a name like BOOT_IMAGE.{?,??}
-    # File(boot_image_name + '*').glob.grep{ _ ~~ Regex("#{boot_image_name}\.(?:.|..)") }.map{ File(_).remove }
-    File("temp/staging.*.image").glob.each{ File(_).remove }
-
-    say "#{__METHOD_NAME__}: Processing #{boot_image_file}"
-
-    if ( boot_image_file.exists ) {
-      say "#{__METHOD_NAME__}: have a local #{boot_image_file}, need to checksum"
-      const boot_image_urls = BuildSh.boot_image_urls
-      const remote_checksum_data = BuildSh.make_http_request( boot_image_urls{:checksum} )
-      if (! remote_checksum_data) {
-        say "#{__METHOD_NAME__}: Can't download, can't checksum"
-        return false
-      }
-      const remote_md5 = BuildSh._process_checksums_file(remote_checksum_data, boot_image_file)
-
-      const local_md5 = boot_image_file.md5
-      say "#{__METHOD_NAME__}: boot image sums: #{remote_md5} / #{local_md5}"
-
-      if (remote_md5 != local_md5) {
-        say "\t#{__METHOD_NAME__}: !!! local / remote checksum mismatch !!! "
-        boot_image_file.remove
-        return BuildSh._get_boot_image
-      }
-      say "#{__METHOD_NAME__}: Local boot image matched remote sum"
-      true
-    } else {
-      say "#{__METHOD_NAME__}: no local #{boot_image_file}, need to get"
-      BuildSh._get_boot_image
-    }
+    ...
+    # const File boot_image_file = BuildSh.generate_make_targets(){:boot_image}
+    # say "#{__METHOD_NAME__}: Removing old data..."
+    # File(BuildConst::CHECKSUM_FILENAME).remove
+    # # remove all boot images with a name like BOOT_IMAGE.{?,??}
+    # # File(boot_image_name + '*').glob.grep{ _ ~~ Regex("#{boot_image_name}\.(?:.|..)") }.map{ File(_).remove }
+    # File("temp/staging.*.image").glob.each{ File(_).remove }
+    # say "#{__METHOD_NAME__}: Processing #{boot_image_file}"
+    # if ( boot_image_file.exists ) {
+    #   say "#{__METHOD_NAME__}: have a local #{boot_image_file}, need to checksum"
+    #   const boot_image_urls = BuildSh.boot_image_urls
+    #   const remote_checksum_data = BuildSh.make_http_request( boot_image_urls{:checksum} )
+    #   if (! remote_checksum_data) {
+    #     say "#{__METHOD_NAME__}: Can't download, can't checksum"
+    #     return false
+    #   }
+    #   const remote_md5 = BuildSh._process_checksums_file(remote_checksum_data, boot_image_file)
+    #   const local_md5 = boot_image_file.md5
+    #   say "#{__METHOD_NAME__}: boot image sums: #{remote_md5} / #{local_md5}"
+    #   if (remote_md5 != local_md5) {
+    #     say "\t#{__METHOD_NAME__}: !!! local / remote checksum mismatch !!! "
+    #     boot_image_file.remove
+    #     return BuildSh._get_boot_image
+    #   }
+    #   say "#{__METHOD_NAME__}: Local boot image matched remote sum"
+    #   true
+    # } else {
+    #   say "#{__METHOD_NAME__}: no local #{boot_image_file}, need to get"
+    #   BuildSh._get_boot_image
+    # }
   }
 
   -> blob_file_contents_sum (File f, Str algo = :sha256) { f |> :open_r |> :slurp |> :encode_utf8 |> (algo || :sha256) }
