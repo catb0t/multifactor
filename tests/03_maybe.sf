@@ -5,6 +5,8 @@ const Maybe::MaybeStr s = Maybe::MaybeStr(:s)
 assert_eq( 'Maybe( "s" )', Maybe::dump(s) )
 const Maybe::MaybeStr ms = Maybe::MaybeStr(s)
 assert_eq( 'Maybe( "s" )', Maybe::dump(ms) )
+const Maybe::MaybeArr a = Maybe::MaybeArr([1])
+assert_eq( 'Maybe( [1] )', Maybe::dump(a) )
 
 assert_eq( 1, Maybe::unmaybe( Maybe::maybe( Num, Maybe::maybe( Num, 1 ) ) ) )
 assert_eq( "1", Maybe::unmaybe( Maybe::MaybeStr( Maybe::MaybeStr( :1 ) ) ) )

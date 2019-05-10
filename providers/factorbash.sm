@@ -3,47 +3,63 @@ include lib::feature
 include lib::guardio
 include lib::shell_words
 include lib::withdirectory
-import lib::shell_words::BuildSh
+import BuildSh
 
 include providers::builtobj
 
 module FactorBashStateless {
-  -> _test_candidate_boot_image (builtobj::BuiltObj bo, File c) {
-    c.exists && (bo.blob_sums.boot == lib::shell_words::BuildSh.blob_file_contents_sum(c, bo.blob_sums.algo) )
+  import BuildSh
+  -> _test_boot_image_strict (builtobj::BuiltObj bo, File test_name) -> Bool {
+    test_name.exists && (bo.blob_sums.boot == BuildSh.blob_file_contents_sum(test_name, bo.blob_sums.algo) )
   }
 
-  -> _choose_boot_image (builtobj::BuiltObj bo_target, File boot_image_file) {
-    # Array<Pair<Block -> Bool, File>>
-    [
-      (
-        { FactorBashStateless::_test_candidate_boot_image(bo_target, bo_target.boot_fullname) } \
-          ¦ { bo_target.boot_fullname }
-      ),
-      (
-        { FactorBashStateless::_test_candidate_boot_image(bo_target, boot_image_file) \
-            || lib::shell_words::BuildSh.update_boot_image
-        } ¦ { boot_image_file }
-      ),
-      (
-        {
-          bo_target.stored_boot_image.cleave(
-            { .data.len },
-            { .data.base64_decode.method( .algo ) },
-            { .sum },
-            { GuardIO::write_binary_b64( bo_target.boot_fullname, .data ) }
-          ).cleave(
-            { .first && .last },
-            { [ .[1, 2] ]«==» },
-          ).all
-        } ¦ { bo_target.boot_fullname }
-      ),
-      (
-        { "give up" } ¦ { die "[FATAL] #{__FUNC_NAME__}: can't find or download boot image\n\tno boot image, can't compile (sorry!)" }
-      )
-    ].find{ .first.run }.cleave{ .second.run }.last.rescope{
-      say "#{__FUNC_NAME__}: !!! Chose #{_}"
-      _
+  # TODO rewrite
+  -> _test_stored_boot_image (BuiltObj bo) -> Bool {
+    false
+    # bo_target.stored_boot_image.cleave(
+    #   { Bool( .data.len ) },
+    #   { .data.base64_decode.method( .algo ) },
+    #   { .sum },
+    #   { GuardIO::write_binary_b64( bo_target.boot_fullname, .data ) } # TODO: don't overwrite old
+    # ).rescope{
+    #   .first && .last && Combi::binop(.[1, 2])('==') # '
+    # }
+  }
+
+  -> _choose_boot_image (builtobj::BuiltObj bo_target, File default_name) -> File {
+    ...
+    func curry_strict (File _) { _test_boot_image_strict(bo_target, _) }
+    # if the specific one exists use it
+    if ( curry_strict(bo_target.boot_fullname) ) {
+      return bo_target.boot_fullname
     }
+
+    const make_targets = BuildSh.generate_make_targets
+    const default_boot_image = make_targets{:boot_image}
+
+    if ( curry_strict(default_boot_image) ) {
+      return default_boot_image
+    }
+
+    if ( make_targets{:boot_image_branch}.exists ) {
+      return make_targets{:boot_image_branch}
+    }
+
+
+    # if (:master == BuildSh.try_git(:branch, __FUNC_NAME__, fatal: false)) {
+
+    # }
+    # func curried_tcbi (File c) -> Bool { .retry({ _test_candidate_boot_image(bo_target, c) }, { }) }
+    # [
+    #   bo_target.boot_fullname,
+    #   # TODO: stored_boot_image
+    #   default_name
+    # ].find{
+    #   curried_tcbi(_)
+    # } \\> ( :rescope, {
+    #   say "#{__FUNC_NAME__}: !!! Chose #{_}"
+    #   _
+    # } ) \\ die "[FATAL] #{__FUNC_NAME__}: can't find or download boot image\n\tno boot image, can't compile (sorry!)"
   }
 }
 
@@ -111,11 +127,11 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
     # say "#{name} #{[@|args]}"
     if ( self.has_public_concrete_method([MN, :V_self_method, :V_ + name], name) ) {
       self.method( name )()
-    } elsif ( lib::shell_words::BuildSh.has_public_concrete_method([MN, :V_buildsh_method, :V_ + name], name) ) {
+    } elsif ( BuildSh.has_public_concrete_method([MN, :V_buildsh_method, :V_ + name], name) ) {
       # with ( Feature::ANSIColor ) {
       #   say( .color('bold blue'), "[CALL] #{__METHOD_NAME__}: BuildSh staticmethod #{name} FIXME???", .RESET )
       # }
-      self.with_directory{ lib::shell_words::BuildSh.method(name)(BuildSh) }
+      self.with_directory{ BuildSh.method(name)(BuildSh) }
     } else {
       nil
     }
@@ -131,9 +147,9 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
   }
 
   -> say_env_info {
-    const l = lib::shell_words::BuildSh.platform_lib_name
-    const c = lib::shell_words::BuildSh.cc
-    const xx = lib::shell_words::BuildSh.cxx
+    const l = BuildSh.platform_lib_name
+    const c = BuildSh.cc
+    const xx = BuildSh.cxx
     say()
     say "cc=#{c}"
     say "cxx=#{xx}"
@@ -146,7 +162,7 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
     say "git_branch=#{self.delegate(:git_branch)}"
     say "git_hash=#{self.delegate(:git_hash)}"
     say()
-    say "platform_vm_ext=factor#{lib::shell_words::BuildSh.platform_vm_ext}"
+    say "platform_vm_ext=factor#{BuildSh.platform_vm_ext}"
     say "platform_lib_name=#{l.first}factor#{l.second}"
     say "platform_makefile=#{self.delegate(:platform_makefile)}"
     say()
@@ -158,7 +174,7 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
     ( self.spoof_build ? _spoof(__METHOD_NAME__) : self.with_directory{
       bo_target.cleave(
         { .lock },
-        { Combi::first( lib::shell_words::BuildSh.make_clean_factor(_, no_clean: clean_would_race, output: self.subcommand_output) ) },
+        { Combi::first( BuildSh.make_clean_factor(_, no_clean: clean_would_race, output: self.subcommand_output) ) },
         { .vm_fullname.exists }, { .lib_fullname.exists }, { .unlock }
       ).all
     } )
@@ -179,7 +195,7 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
         './' + bo_target.vm_fullname, '-no-user-init', "-i='#{bo_target.image_fullname}'",
         "-e='USING: system bootstrap.image memory ; \"#{target}\" make-image image-path save-image 0 exit'",
         output: self.subcommand_output
-      ) ) && lib::shell_words::BuildSh.generate_make_targets(){:boot_image}.move(want_name) )
+      ) ) && BuildSh.generate_make_targets(){:boot_image}.move(want_name) )
     } )
   }
 
@@ -188,13 +204,13 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
       define String lead = "==== "
       bo_target.lock
 
-      const make_targets = lib::shell_words::BuildSh.generate_make_targets
-      const File default_boot_image_file = make_targets{:boot_image}
+      const make_targets = BuildSh.generate_make_targets
+      # const File default_boot_image_file = make_targets{:boot_image}
 
       # try the local one with our id
-      const using_boot_image = FactorBashStateless::_choose_boot_image(bo_target, default_boot_image_file)
+      const using_boot_image = FactorBashStateless::_choose_boot_image(bo_target, make_targets{:boot_image})
       # this side-effecting code will be deferred until used, except that isn't acutally what we want
-      using_boot_image
+      # using_boot_image
 
       -> run_boot_image -> Bool {
         Combi::first( Command::spawn_se("echo \"USE: system 255 (exit)\"", '|', './' + bo_target.vm_fullname, '-no-user-init' "-i='#{using_boot_image}'", output: self.subcommand_output) )
@@ -205,7 +221,7 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
       if (! run_boot_image() ) {
         say "[WARN]\t#{__METHOD_NAME__}: First pass not OK, trying again"
 
-        const updated = lib::shell_words::BuildSh.update_boot_image
+        const updated = BuildSh.update_boot_image
 
         die "[FATAL] #{__METHOD_NAME__}: Failed to update, can't recover" \
           if (!updated)

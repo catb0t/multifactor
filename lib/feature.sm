@@ -5,12 +5,6 @@
 include sidefext::iterable
 
 module Feature {
-  define Array _INSTALLED_MODULES_THREADS = Array(
-    ::ffork({ `cpan -l 2>/dev/null`.map_lines{ .split(9.chr).first } })
-    ::ffork({ ['Module::CoreList'.require.find_modules] }) ,
-    ::ffork({ ['ExtUtils::Installed'.require.new.modules] }) ,
-  )
-
   # # WIP: doesn't work on travis for some convoluted reason
   # define File forks = File('/home/'+Sys.user+'/perl5/lib/perl5/x86_64-linux-gnu-thread-multi/forks.pm')
   # # define y = say [ forks.open_r.lines[1569, 1570] ].join("\n")
@@ -41,44 +35,56 @@ module Feature {
   #   }
   # }
 
-  define File WORD_LIST_FILE = ( (Sys.osname ~~ :windows) ? %f(misc/words) : %f(/usr/share/dict/words) )
+  # TODO: make this ondemand
+  define (
+    Array _INSTALLED_MODULES_THREADS = [
+      ::ffork({ `cpan -l 2>/dev/null`.map_lines{ .split(9.chr).first } })
+      ::ffork({ [ try { 'Module::CoreList'.require.find_modules } ] })
+      ::ffork({ [ try { 'ExtUtils::Installed'.require.new.modules } ] })
+    ]
+    # File WORD_LIST_FILE = ( (Sys.osname ~~ :windows) ? %f(misc/words) : %f(/usr/share/dict/words) )
+  )
 
-  func WORD_LIST () is cached -> Array {
-    static const x = { say "Word list loading..." }()
-    static const _ = Feature::WORD_LIST_FILE.open_r.grep{ .~~ /^[a-zA-Z]+$/ }
-    static const y = ->{ say "Loaded #{.len} words." }()
-    _
-  }
+  # func WORD_LIST () is cached -> Array {
+  #   static const w = do {
+  #     { say "Word list loading..." }() # "
+  #     const _ = Feature::WORD_LIST_FILE.open_r.grep{ .~~ /^[a-zA-Z]+$/ }
+  #     { say "Loaded #{.len} words." }()
+  #     _
+  #   }
+  # }
 
-  define ANSIColor = 'Term::ANSIColor'.frequire
-  define ReadKey   = 'Term::ReadKey'.frequire
+  define (
+    ANSIColor = 'Term::ANSIColor'.frequire # '
+    ReadKey   = 'Term::ReadKey'.frequire # '
+    DEFAULT_CHECKSUM = :sha256 # TODO: stop using sha256 in most places; allow xxHash & FNV etc
+    # other non-dependent code goes here ...
+    Set _INSTALLED_MODULES = Feature::_INSTALLED_MODULES_THREADS.map{ .wait... }.to_set
+    Hash _lookup_cache = Hash()
+    Block lookup = func ( by { .is_a(String) || .is_a(Regex) } ) -> Set {
+      Feature::_lookup_cache{by} \\= Feature::_INSTALLED_MODULES.grep{ . ~~ by }
+    }
 
-  define DEFAULT_CHECKSUM = :sha256 # TODO: stop using sha256 in most places; allow xxHash & FNV etc
-  # other non-dependent code goes here ...
+    Block lookup_n = func (Array bys) -> Array {
+      bys.reduce({ |l, r| l||lookup(r) || die "Need one of: #{bys}" }, lookup(bys[0]) ).to_a
+      # bys.map{ lookup(_).to_a[0] }.grep.first
+    }
 
-  define Set _INSTALLED_MODULES = Feature::_INSTALLED_MODULES_THREADS.map{ .wait... }.to_set
+    Block require1 = func (Array bys, Bool frequire = false) {
+      { lookup_n(bys)[0] |> (frequire ? :frequire : :require) }.ffork
+    }
 
-  define Hash _lookup_cache = Hash()
-  define Block lookup = func ( by { .is_a(String) || .is_a(Regex) } ) -> Set {
-    Feature::_lookup_cache{by} \\= Feature::_INSTALLED_MODULES.grep{ .~~ by }
-  }
+    Hash _LOADING_MODULES = :(
+      :JSON => require1([/^JSON::XS$/, /^JSON::PP$/]),
+    )
 
-  # broken due to Sidef bug
-  # define Hash _LOADING_MODULES = :(
-  #   :JSON => {
-  #     with ( (lookup( /^JSON::XS$/ ) || lookup( /^JSON::PP$/ )).dclone.pop ) {
-  #       .require
-  #     } else { die "Need one of: JSON::PP, JSON::XS" }
-  #   }.ffork
-  # )
-  # define _LOADED_MODULES = Feature::_LOADING_MODULES.map_kv{ |_, v| ((_) => v.wait) }
+    _LOADED_MODULES = Feature::_LOADING_MODULES.map_kv{ |k, _| ((k) => .wait) }
 
-  define JSON = with ( (lookup( /^JSON::XS$/ ) || lookup( /^JSON::PP$/ )).dclone.pop ) {
-    .require
-  } else { die "Need one of: JSON::PP, JSON::XS" } # Feature::_LOADED_MODULES{:JSON}
+    JSON = _LOADED_MODULES{:JSON}
+  )
 }
 
 with ( Feature::ANSIColor ) {
   # say Feature::JSON.new.decode('{}')
-  say( .color('bright_green'), 'Feature : ContentLoaded', .RESET)
+  say( .color(:bright_green), 'Feature : ContentLoaded', .RESET)
 }

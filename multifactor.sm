@@ -51,9 +51,9 @@ module Factor {
     }.grep.map{ _... }.to_h
   }
 
-  define Block _config_cache = :()
+  define Hash _config_cache = :()
 
-  define Block find_config = func find_config (name, Bool must_exist = true) {
+  define Block find_config = func find_config (name, Bool must_exist = true) -> String {
     Factor::_config_cache{name} \\= (Factor::rc_config_lines(){name} \\ do {
       must_exist && die "Required config '! multifactor:#{name}' not found in #{Factor::RC_FILE}"
       ''
@@ -365,7 +365,7 @@ module MultiFactor {
       tombstoning.timespec.tombstoned(Time.now)
 
       self.db_man.insert(tombstoning)
-      self.capture_write_disk(__METHOD_NAME__, { Factor::TARGETS.keys.each{ tombstoning.method(_ + :_fullname)().remove } } )
+      self.capture_write_disk(__METHOD_NAME__, { Factor::TARGETS.each_k{ tombstoning.method(_ + :_fullname)().remove } } )
     }
 
     -> update_existing_factor (BuiltObj bo, BuiltObj current_status, Bool is_restart: true) {
@@ -635,7 +635,7 @@ func main {
    if (!.success) {
      Combi::rescope( lib::msg_classes::classify( .{:exc_info}{:msg} ) )({
          |type, fields|
-       Factor::say_stderr('red', "~MFRuntime called due to runtime error: #{type} :: #{fields.grep_kv{ .!~ /_tried_invoke/ }}\n") #
+       Factor::say_stderr('red', "\n\tSire, something is wrong...\n\n\t#{type} :: #{fields.grep_kv{ .!~ /_tried_invoke/ }.dump.lines.cleave({ .first }, { .slice(1).map{ 10.chr + 9.chr + .  }.join }).join}\n") #
      })
      # #{Combi::dump(_)}
    }

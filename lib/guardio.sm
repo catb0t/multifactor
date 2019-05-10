@@ -35,12 +35,13 @@ module GuardIO {
     -> vbs (Str f, Num l, Str m, *args) { self.is_verbose && self.logger.run('cyan', "[VBOSE]\t", _bn(f), ':', l, ': ', m, ': ', args.join(' ')) }
   }
 
-  -> make_uuid (Bool words = false, Num len = nil) -> String {
-    with (len || (words ? 7 : 32)) {
-      ( words
-        ? Feature::WORD_LIST().sample( _ ).map{ .downcase }.join('_')
-        : .random_bytes.map{ .base(62).rescope{ (.len.is_one ? :0 : '') -> + _ } }.join )
-    }
+  -> make_uuid (Num _ = 32) -> String {
+    .random_bytes.map{ .base(62).rescope{ (.len.is_one ? :0 : '') -> + _ } }.join
+    # with (len || (words ? 7 : 32)) {
+    #   ( words
+    #     ? Feature::WORD_LIST().sample( _ ).map{ .downcase }.join('_')
+    #     : .random_bytes.map{ .base(62).rescope{ (.len.is_one ? :0 : '') -> + _ } }.join )
+    # }
   }
 
   -> read_binary_b64 (name) {
@@ -68,10 +69,10 @@ module GuardIO {
     define String temp_write_ext = "\.tmp_write_"
 
     -> _temp_read_target (File name) is cached -> File {
-      File(name + Atomic::temp_read_ext + GuardIO::make_uuid(words: false) )
+      File(name + Atomic::temp_read_ext + GuardIO::make_uuid() )
     }
     -> _temp_write_target (File name) is cached -> File {
-      File(name + Atomic::temp_write_ext + GuardIO::make_uuid(words: false) )
+      File(name + Atomic::temp_write_ext + GuardIO::make_uuid() )
     }
 
     # NOTE: NOT instance-specific, i.e doesn't use *OUR* UUID in name

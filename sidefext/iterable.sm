@@ -235,25 +235,21 @@ EOS
   }
 }
 
+define (
+  Set ALL_HASH_METHODS = Hash().methods.keys.to_set-Set(:get_value, :new, :init, :call),
+  Set MUT_HASH_METHODS = Set(:delete, :delete_if, :remove, :clear),
+  Set IMM_HASH_METHODS = (ALL_HASH_METHODS - MUT_HASH_METHODS)
+)
+
 class ImmutableHash (Hash _data = :()) { # , :_unpacked_data) {
-  # method get_value { self._data.get_value }
+  method get_value { self._data.get_value }
   method init {
     # if (!self._data && self._unpacked_data) { self._data = self._unpacked_data }
-    say "initialized with _data: #{self._data.dump}; #{self._data.values}"
-
-    [:values, :grep, :grep_kv, :item, :items, :map_kv, :dclone,
-      :difference, :symmetric_difference, :concat, :union, :intersection, :linear_selection,
-      :eq, :ne, '==', '!=',
-      '-', '+', '|', '^', '&'
-    ].each{
-      assert( self._data.respond_to( _ ), "compiler error: method #{_} does not exist on Hash" )
-      __CLASS__.def_method( _, func generated_forwarder (__CLASS__ _s, *iargs) {
-        const args = iargs.map{ .is_a(ImmutableHash) ? ._data : _ }
-        say "call method #{_}; self: #{self._data.dump}; args: #{args}"
-        const r = self._data.method( _ )( args... )
-        say "\treturned #{r.dump}"
-        r
+    IMM_HASH_METHODS.each{
+      __CLASS__.def_method( _, func generated_forwarder (__CLASS__ self, *args) {
+        self._data.method( _ )( args.map{ .is_a(ImmutableHash) ? ._data : _ }... )
       } )
     }
+    self
   }
 }

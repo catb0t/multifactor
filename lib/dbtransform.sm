@@ -1,0 +1,191 @@
+#! ruby
+module DBTransform {
+  include sidefext::metatype
+  import Maybe::maybe
+  import Maybe::unmaybe
+  import Maybe::is_just
+  import Maybe::is_nothing
+  import Maybe::dump
+  import Maybe::MaybeArr
+  import Maybe::MaybeBool
+  import Maybe::MaybeStr
+  import Maybe::Maybe_Type
+
+  include sidefext::iterable
+  import sidefext::iterable::ImmutableHash
+
+  include lib::guardio
+
+  define String BY_EXT = :_by
+  define Regex ACTION_IS_BY = Regex(BY_EXT + '$')
+  # negative lookahead with EOS anchor https://stackoverflow.com/questions/31683167/regex-with-anchor-and-look-ahead
+  define Regex ACTION_NOT_BY = Regex('(?!' + BY_EXT + ').{3}$')
+
+  define String ACTION_CHANGE = :change
+  define Regex  ACTION_IS_CHANGE = /^change/
+  define String ACTION_INSERT = :insert
+  define Regex  ACTION_IS_INSERT = /^insert/
+  define String ACTION_DELETE = :delete
+  define Regex  ACTION_IS_DELETE = /^delete/
+
+  define Set ACTIONS_BASE = Set(ACTION_CHANGE, ACTION_INSERT, ACTION_DELETE)
+  define Set ACTIONS = ACTIONS_BASE.to_a.map{ (_, _+:_by) }.to_set # sidef bug: Set.map list behaviour
+
+  define _a = assert_eq( ACTIONS.grep{ .~~ ACTION_IS_BY}.len, ACTIONS.grep{ .~~ ACTION_NOT_BY}.len )
+  func _unimpl_retcount (l, fn, n) { die "#{__FILE__}:#{l}: #{fn}: Unimplemented number of return values from action_by: #{n}" }
+
+  subset Action  < String { ACTIONS.has(_) }
+  subset KeySpec < String, Set
+  # is_kv:   MaybeBool true/false means known; Nothing means not known
+  # id_type: MaybeStr                          Nothing means not identity
+  struct ActionBy { Block b, Maybe_Type is_kv, Maybe_Type id_type }
+  subset _OptionActionBy < ActionBy, null
+  # Good afternoon, gentleman, I'm a C compiler
+  struct Transformation {
+    action < Action,
+    key < KeySpec,
+    action_by < _OptionActionBy,
+    object,
+    String uuid,
+    Time generated_at,
+  }
+  func dump (_ < _OptionActionBy) -> String { ['ActionBy( ', . == null ? 'null' : "b: #{.b.dump}, is_kv: #{dump(.is_kv)}, id_type: #{dump(.id_type)}", ' )'].join }
+  func dump (Transformation _)    -> String {
+    "Transformation(\n\taction: #{.action.dump},\n\tkey: #{.key.dump},\n\taction_by: #{dump(.action_by)},\n\tobject: #{.object \\> :dump \\ :nil},\n\tuuid: #{.uuid.dump},\n\tgenerated_at: #{.generated_at.dump}\n)"
+  }
+  # these could include an extra safety check that .action ends in _by, but since they are internal, it's not worth it
+  #   as it would be slower
+  # this one checks preset boolean
+  func  _is_by_kv (Transformation _) is cached -> Bool { true==unmaybe( .action_by.is_kv ) }
+  # this one has to fallback to the _returns array
+  func   _is_by_v (Transformation _) is cached -> Bool { .action_by.b._returns \\> :len \\> :is_one \\ false }
+  # this one is not known (UnKnown)
+  func  _is_by_uk (Transformation _) is cached -> Bool { !defined(.action_by.b._returns) && is_nothing(.action_by.is_kv)  }
+  func _is_by_vuk (Transformation _) is cached -> Bool { _is_by_v(_) || _is_by_uk(_) }
+
+  subset _By_KV  < Transformation { _is_by_kv(_) }
+  subset _By_V   < Transformation { _is_by_v(_) }
+  subset _By_UK  < Transformation { _is_by_uk(_) }
+  subset _By_VUK < Transformation { _is_by_vuk(_) }
+
+  func _actionby (Block _ { ! .is_identity }) is cached -> ActionBy { ActionBy( _
+      MaybeBool( ._returns \\> :len \\> ('==', 2) && with (._returns[0]) { .ref==Object.ref || Sys.reftype(.new)==:SCALAR }),
+      MaybeStr(  .identity_kind )
+  ) }
+  func _actionby (Block _ { .is_identity }) is cached -> ActionBy { ActionBy( _
+      Maybe::Maybe(Bool, .identity_kind == :L)
+      Maybe::Maybe(Str, .identity_kind)
+  ) }
+
+  func _chk (Transformation _ { .action ~~ ACTION_IS_BY }) is cached -> Bool {
+    !defined(.object) && defined(.action_by)
+  }
+  func _chk (Transformation _ { .action ~~ ACTION_NOT_BY }) is cached -> Bool {
+    defined(.object) && .action_by==null
+  }
+
+  subset Change   < Transformation { .action==ACTION_CHANGE    && _chk(_) }
+  subset ChangeBy < Transformation { .action~~ACTION_IS_CHANGE && _chk(_) }
+  subset ChangeByKV  < ChangeBy, _By_KV
+  subset ChangeByV   < ChangeBy, _By_V
+  subset ChangeByUK  < ChangeBy, _By_UK
+  subset ChangeByVUK < ChangeBy, _By_VUK
+
+  subset Insert   < Transformation { .action==ACTION_INSERT    && _chk(_) }
+  subset InsertBy < Transformation { .action~~ACTION_IS_INSERT && _chk(_) }
+  subset InsertByKV  < InsertBy, _By_KV
+  subset InsertByV   < InsertBy, _By_V
+  subset InsertByUK  < InsertBy, _By_UK
+  subset InsertByVUK < InsertBy, _By_VUK
+
+  subset Delete   < Transformation { .action==ACTION_DELETE    && _chk(_) }
+  subset DeleteBy < Transformation { .action~~ACTION_IS_DELETE && _chk(_) }
+  subset DeleteByKV  < DeleteBy, _By_KV
+  subset DeleteByV   < DeleteBy, _By_V
+  subset DeleteByUK  < DeleteBy, _By_UK
+  subset DeleteByVUK < DeleteBy, _By_VUK
+
+  # V vs UK should probably do something different in the future
+  # tf { (.action~~ACTION_IS_INSERT || .action~~ACTION_IS_CHANGE) && .action~~ACTION_IS_BY && _is_by_vuk(_) }
+  func _infer_uk (Transformation tf, *ret) -> Hash {
+    given (ret.len) {
+      when (0) { :(tf.key) } # ????
+      when (1) { :(tf.key ret[0]) }
+      when (2) { ret.to_h }
+      default  { _unimpl_retcount(__LINE__, __FUNC_NAME__, _) }
+    }
+  }
+
+  # putting the comma after the comment doesn't parse
+  func _infer_delete_vuk (Transformation tf, /* < DeleteByVUK */ *ret) {
+    given (ret.len) {
+      when (0) { () } # ????
+      when (1) { continue }
+      when (2) { ret[1] }
+      default  { _unimpl_retcount(__LINE__, __FUNC_NAME__, _) }
+    }
+  }
+
+  func new ( a < Action { . ~~ ACTION_IS_BY }, k < KeySpec, Block b ) -> Transformation {
+    Transformation( a, k, _actionby(b), nil, GuardIO::make_uuid(), Time() )
+  }
+  func new ( a < Action { . ~~ ACTION_NOT_BY }, k < KeySpec, obj) -> Transformation {
+    Transformation( a, k, null, obj, GuardIO::make_uuid(), Time() )
+  }
+
+  func _mk_const (Transformation tf { .action ~~ ACTION_NOT_BY }) is cached -> Hash {
+    tf.key.is_a(Set) ? tf.key.values.map{ (_, tf.object) } : :(tf.key, tf.object)
+  }
+
+  # TODO: identity handling
+  func _mk_vary (Transformation tf { .action ~~ ACTION_IS_BY }, ImmutableHash i) is cached -> Hash {
+    given (tf) {
+      case ( is_just( .action_by.id_type ) ) {
+        given ( unmaybe(.action_by.id_type) ) {
+          when (:I) { continue }
+          when (:L) { :(tf.key i.item(tf.key)) }
+          when (:A) { :(tf.key [i.item(tf.key)] ) }
+          when (:N) { :(tf.key ) }
+        }
+      }
+      case ( _is_by_uk(_) ) {
+        if (.key.is_a(Set)) {
+          func value (_) is cached { tf.action_by.b.run(_, i.item( _ )) }
+          .key.values.map{ ( _, _infer_uk( tf, value(_) ) ) }.to_h
+
+        } else {
+          _infer_uk( _, .action_by.b.run(.key, i.item( .key )) )
+        }
+      }
+      case ( _is_by_v(_) ) {
+        :( .key, .action_by.b.run( .key, i.item( .key )) )
+      }
+      case ( _is_by_kv(_) ) {
+        :( .action_by.b.run( .key, i.item( .key )) )
+      }
+      default {
+        die "#{__FILE__}:#{__LINE__}: #{__FUNC_NAME__}: fall-through in KV/V/UK switch ( tf: #{dump(tf)} )"
+      }
+    }
+  }
+
+
+  -> _apply (ImmutableHash _, tf < Insert)      { . + _mk_const(tf) }
+  -> _apply (ImmutableHash _, tf < InsertByKV)  { . + _mk_vary(tf, _) }
+  -> _apply (ImmutableHash _, tf < InsertByVUK) { . + _mk_vary(tf, _) }
+
+  -> _apply (ImmutableHash _, tf < Change)      { .-tf.key + _mk_const(tf) }
+  -> _apply (ImmutableHash _, tf < ChangeByKV)  { .-tf.key + _mk_vary(tf, _) }
+  -> _apply (ImmutableHash _, tf < ChangeByVUK) { .-tf.key + _mk_vary(tf, _) }
+
+  -> _apply (ImmutableHash _, tf < Delete)      { . - tf.key }
+  # we know this returns two things, and we're going to use the second one
+  -> _apply (ImmutableHash _, tf < DeleteByKV)  { .grep_kv{ |k, v| ! tf.action_by.run(k, v) } }
+  -> _apply (ImmutableHash _, tf < DeleteByVUK) { .grep_kv{ |k, v| ! _infer_delete_vuk( tf, tf.action_by.run(k, v) ) } }
+
+  func apply ( ImmutableHash data, Transformation tf ) -> ImmutableHash { ImmutableHash( _apply(data, tf) ) }
+    # with ( _apply(data, tf) ) { .is_a(ImmutableHash) ? _ : ImmutableHash(_) }
+  func apply ( ImmutableHash data, Set tfs ) -> ImmutableHash {
+    tfs.values.reduce( apply, data )
+  }
+}

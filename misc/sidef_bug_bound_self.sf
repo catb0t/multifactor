@@ -1,0 +1,13 @@
+class X (a = :()) {
+
+    method init {
+        say "class #{self.class} init with a = #{a}"
+        __CLASS__.def_method( :get_a, func (__CLASS__ _s) {
+            self.a
+        } )
+        self
+    }
+}
+
+var x = X(:(1 2 3 4 5 6))
+say x.get_a

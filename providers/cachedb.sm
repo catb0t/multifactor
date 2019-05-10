@@ -16,15 +16,15 @@
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 include sidefext::construct
-include sidefext::iterable
 include sidefext::xchg
+include sidefext::iterable
+import sidefext::iterable::ImmutableHash
 
 include lib::guardio
 include lib::feature
+include lib::dbtransform
 include lib::withdirectory
 # include lib::ABCs
-
-import sidefext::iterable::ImmutableHash
 
 module CacheDBIO {
   import sidefext::iterable::ImmutableHash
@@ -72,72 +72,6 @@ module CacheDBIO {
     )
     # say h
     Atomic::awrite( name, JSON.pretty.encode( h ) )
-  }
-}
-
-module DBTransform {
-  import sidefext::iterable::ImmutableHash
-  # const ImmHash = ImmutableHash
-
-  define String BY_EXT = :_by
-  define Regex ACTION_IS_BY = Regex(BY_EXT + '$')
-  define Regex ACTION_NOT_BY = Regex('(?!' + BY_EXT + ').{3}$')
-
-  define String ACTION_CHANGE = :change
-  define Regex  ACTION_IS_CHANGE = /^change/
-  define String ACTION_INSERT = :insert
-  define Regex  ACTION_IS_INSERT = /^insert/
-  define String ACTION_DELETE = :delete
-  define Regex  ACTION_IS_DELETE = /^delete/
-
-  define Set ACTIONS_BASE = Set(ACTION_CHANGE, ACTION_INSERT, ACTION_DELETE)
-  define Set ACTIONS = ACTIONS_BASE.to_a.map{ (_, _+:_by) }.to_set # sidef bug: Set.map list behaviour
-
-  define _a = assert_eq( ACTIONS.grep{ .~~ ACTION_IS_BY}.len, ACTIONS.grep{ .~~ ACTION_NOT_BY}.len )
-
-  subset Action < String { ACTIONS.has(_) }
-
-  # Good afternoon, gentleman, I'm a C compiler
-  struct Transformation {
-    action < Action,
-    String key,
-    Block action_by,
-    object,
-    String uuid,
-    Time generated_at
-  }
-
-  func _chk (Transformation _ { .action ~~ ACTION_IS_BY }) is cached -> Bool {
-    !defined(.object) && defined(.action_by)
-  }
-  func _chk (Transformation _ { .action ~~ ACTION_NOT_BY }) is cached -> Bool {
-    defined(.object) && .action_by.refaddr==Block.list_identity.refaddr
-  }
-
-  subset Change   < Transformation { .action==ACTION_CHANGE    && _chk(_) }
-  subset ChangeBy < Transformation { .action~~ACTION_IS_CHANGE && _chk(_) }
-  subset Insert   < Transformation { .action==ACTION_INSERT    && _chk(_) }
-  subset InsertBy < Transformation { .action~~ACTION_IS_INSERT && _chk(_) }
-  subset Delete   < Transformation { .action==ACTION_DELETE    && _chk(_) }
-  subset DeleteBy < Transformation { .action~~ACTION_IS_DELETE && _chk(_) }
-
-  func new ( a < Action { .~~ ACTION_IS_BY }, Str k, Block b) -> Transformation {
-    Transformation( a, k, b, nil, GuardIO::make_uuid(len: 10), Time() )
-  }
-  # negative lookahead with EOS anchor https://stackoverflow.com/questions/31683167/regex-with-anchor-and-look-ahead
-  func new ( a < Action { .~~ ACTION_NOT_BY }, Str k, obj) -> Transformation {
-    Transformation( a, k, Block.list_identity, obj, GuardIO::make_uuid(len: 10), Time() )
-  }
-
-  -> apply (ImmutableHash _, tf < Insert)   -> ImmutableHash { ImmutableHash(. + :(tf.key tf.object)) }
-  -> apply (ImmutableHash _, tf < InsertBy) -> ImmutableHash { ImmutableHash(. + :(tf.key tf.action_by.run(tf.key, .item(tf.key)))) }
-  -> apply (ImmutableHash _, tf < Change)   -> ImmutableHash { ImmutableHash(.-tf.key + :(tf.key tf.object)) }
-  -> apply (ImmutableHash _, tf < ChangeBy) -> ImmutableHash { ImmutableHash(.-tf.key + :(tf.key tf.action_by.run(tf.key, .item(tf.key)))) }
-  -> apply (ImmutableHash _, tf < Delete)   -> ImmutableHash { ImmutableHash(. - tf.key) }
-  -> apply (ImmutableHash _, tf < DeleteBy) -> ImmutableHash { ImmutableHash(.grep_kv{ |k, v| ! tf.action_by.run(k, v) }) }
-
-  func apply ( ImmutableHash data, Set tfs ) -> ImmutableHash {
-    tfs.values.reduce( apply, data )
   }
 }
 

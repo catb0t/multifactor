@@ -16,7 +16,7 @@ module Maybe {
   }
 
   func dump (Maybe_Type a) {
-    ['Maybe( ', a.nothing ? 'nil' : (a.just_type()(a.just).dump), ' )'].join
+    ['Maybe( ', a.nothing ? 'nil' : ::dump(a.just.is_a(a.just_type) ? a.just : a.just_type()(a.just)), ' )'].join
   }
 
   define Block maybe = func _maybe (Object type { .is_typename }, a) -> Maybe_Type {
@@ -31,8 +31,8 @@ module Maybe {
 
   # a is a Maybe, but actually Maybe is a Define, so the precise type of a at `use constant` time is Maybe_Type
   define Block unmaybe = func _unmaybe (Maybe_Type a, Block b = Block.null_identity) { # < MaybeVal
-    # say "a: #{dump(a)}"
-    a.nothing ? b(a) : a.just_type()(a.just)
+    # say "a: #{dump(a)}
+    a.nothing ? b(a) : (a.just.is_a(a.just_type) ? a.just : a.just_type()(a.just))
   }
 
   func is_just ( Maybe_Type _ )    { ! .nothing }
@@ -44,6 +44,7 @@ module Maybe {
   define Block MaybeBool = CurryMaybe(Bool)
   define Block MaybeStr  = CurryMaybe(Str)
   define Block MaybeDir  = CurryMaybe(Dir)
+  define Block MaybeArr  = CurryMaybe(Arr)
 }
 
 

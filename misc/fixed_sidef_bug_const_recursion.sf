@@ -1,3 +1,4 @@
+# Fixed! in https://github.com/trizen/sidef/commit/d4c617034f7cfbc164b483a8ebd024758cb0152f
 func g (x) {
   const y = x-1
   say "y: #{y} addr: #{y.refaddr}"

@@ -44,4 +44,9 @@ class Object {
   method is_an_object (typename) {
     self.is_a(typename) && self.is_object
   }
+
+  method retry (Block attempt, Block if_fails) -> Bool {
+    attempt() || (if_fails() && attempt())
+  }
+
 }

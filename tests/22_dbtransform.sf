@@ -1,0 +1,53 @@
+#! ruby
+include sidefext::iterable
+import sidefext::iterable::ImmutableHash
+
+include lib::dbtransform
+include DBTransform
+import DBTransform::new
+import DBTransform::dump
+import DBTransform::apply
+
+var D = ImmutableHash()
+
+const t1 = new( :insert, :t1, 1 )
+say dump(t1)
+D = apply( D, t1 )
+assert_eq(D, ImmutableHash( :( t1 => 1 ) ) )
+
+const t2 = new( :change, :t1, 2 )
+say dump(t2)
+D = apply( D, t2 )
+assert_eq(D, ImmutableHash( :( t1 => 2 ) ) )
+
+const t3 = new( :delete, :t1, 0 )
+say dump(t3)
+D = apply( D, t3 )
+assert_eq(D, ImmutableHash() )
+
+const t4 = new( :insert_by, :t1, { 1 } )
+say dump(t4)
+D = apply( D, t4 )
+assert_eq(D, ImmutableHash( :( t1 => 1 ) ) )
+
+D = apply( D, new( :change_by, :t1,
+  { |*_| .map{ . + 1 }... }
+) )
+assert_eq(D, ImmutableHash( :( t11 => 2 ) ) )
+
+D = apply( D, new( :change_by, :t11,
+  func (k, v) -> Object { k + v }
+) )
+assert_eq(D, ImmutableHash( :( t11 => :t112 ) ) )
+
+const t7 = new( :change_by, :t11,
+  func (k, v) -> (String, Object) { (k, v) }
+)
+say dump(t7)
+D = apply( D, t7 )
+assert_eq(D, ImmutableHash( :( t11 => :t112 ) ) )
+
+const t8 = new( :change_by, :t11, Block.list_identity )
+say dump(t8)
+D = apply( D, t8 )
+assert_eq(D, ImmutableHash( :( t11 => :t112 ) ) )
