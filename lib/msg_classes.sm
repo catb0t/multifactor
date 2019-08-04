@@ -16,7 +16,7 @@
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 include sidefext::combi
-include sidefext::iterable # Hash.change_extant_keys
+include sidefext::iterable # Hash.change_extant_by
 
 module MsgTypes {
   define NO_ERROR      = :NO_ERROR
@@ -92,7 +92,6 @@ module MsgTypes {
   ]
 }
 
-
 func dispatches_cleanup (String ds, type < MsgTypes::DNM_KIND) -> Hash {
   Regex( ['\G\s+(?<' type '_name>.+)\((?<' type '_dispatch>.*?)\)'].join, 'm') \
     .global_matches(ds, {
@@ -104,20 +103,55 @@ func dispatches_cleanup (String ds, type < MsgTypes::DNM_KIND) -> Hash {
     } ).reduce('merge') \\ Hash()
 }
 
-func msg_fields (m) is cached -> Hash {
-  # say "msg_fields: #{m.named_captures}"
-  m.named_captures.change_extant_keys(
-    MsgTypes::_DOES_NOT_MATCH_KINDS.values.map{ (
-      (.+:_dispatches) =>
-        { |s| dispatches_cleanup(s, _) }
-    ) }.to_h
-  )
+# TODO: add a metatype key so that the type prefix can be discovered (in block_type => func / struct_type => struct etc)
+func msg_fields (m, String type) is cached -> Hash {
+  with (m.named_captures) {
+      |c|
+    given (type) {
+      when (MsgTypes::RETURN_COUNT) {
+        c + (:return_count_difference ： c{:return_got_count}<=>c{:return_expect_count})
+      }
+      case (MsgTypes::DOES_NOT_MATCH.values.to_set.has(type)) {
+        c.change_extant_by(
+          MsgTypes::_DOES_NOT_MATCH_KINDS.values.map{ (
+            (.+:_dispatches) =>
+              { |s| dispatches_cleanup(s, _) }
+          ) }.to_h
+        )
+      }
+      default { c }
+    }
+  }
+
+  # Combi::cleave(Combi::cleave(m.named_captures)(
+  #   { 'named captures: '.say(_) }
+  #   {
+  #       |c|
+  #     given (type) {
+  #       when (MsgTypes::RETURN_COUNT) {
+  #         c + (:return_count_difference ： c{:return_got_count}<=>c{:return_expect_count})
+  #       }
+  #       case (MsgTypes::DOES_NOT_MATCH.values.to_set.has(type)) {
+  #         c.change_extant_by(
+  #           MsgTypes::_DOES_NOT_MATCH_KINDS.values.map{ (
+  #             (.+:_dispatches) =>
+  #               { |s| dispatches_cleanup(s, _) }
+  #           ) }.to_h
+  #         )
+  #       }
+  #       default { c }
+  #     }
+  #   }
+  # ).last)(
+  #   { 'output: '.say(_) }
+  #   { _ }
+  # ).last
 }
 
 func classify (String msg) is cached -> (String, Object) {
   with ( MsgTypes::MSG_REGEXES.find{ .value ~~ msg } ) {
     # say "classify: #{fs.named_captures}"
-    ( .key, msg_fields( (msg =~ .value) ) )
+    ( .key, msg_fields( (msg =~ .value), .key ) )
   } else {
     die "#{__FUNC_NAME__}: can't classify THAT!\n\t#{msg.dump}"
   }
