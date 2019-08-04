@@ -122,30 +122,6 @@ func msg_fields (m, String type) is cached -> Hash {
       default { c }
     }
   }
-
-  # Combi::cleave(Combi::cleave(m.named_captures)(
-  #   { 'named captures: '.say(_) }
-  #   {
-  #       |c|
-  #     given (type) {
-  #       when (MsgTypes::RETURN_COUNT) {
-  #         c + (:return_count_difference ： c{:return_got_count}<=>c{:return_expect_count})
-  #       }
-  #       case (MsgTypes::DOES_NOT_MATCH.values.to_set.has(type)) {
-  #         c.change_extant_by(
-  #           MsgTypes::_DOES_NOT_MATCH_KINDS.values.map{ (
-  #             (.+:_dispatches) =>
-  #               { |s| dispatches_cleanup(s, _) }
-  #           ) }.to_h
-  #         )
-  #       }
-  #       default { c }
-  #     }
-  #   }
-  # ).last)(
-  #   { 'output: '.say(_) }
-  #   { _ }
-  # ).last
 }
 
 func classify (String msg) is cached -> (String, Object) {
