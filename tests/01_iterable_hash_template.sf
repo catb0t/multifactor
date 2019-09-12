@@ -8,7 +8,7 @@ include sidefext::iterable
       :change_me => true,
       :dont_change_me => false,
       :here => 1
-    ).clobber_existing_by(
+    ).change_truthy_by(
       Hash( :change_me => { :new_val }, :dont_change_me => { :okay_i_wont }, :here => { :there } )
     ),
 

@@ -20,9 +20,10 @@
 
 include lib::command
 include Command
+include lib::feature
 
 # `build.sh` bash functions
-# THEIR utilities, re-implemented in Sidef
+# mostly THEIR utilities, re-implemented in Sidef
 module BuildConst {
   define Regex VERSION_REGEX = /VERSION = ([0-9]+\.[0-9]+)/
   define Regex REPRODUCIBLE_REGEX = /REPRODUCIBLE/
@@ -30,8 +31,9 @@ module BuildConst {
   define File GNU_MAKEFILE = %f(GNUmakefile)
   define File N_MAKEFILE = %f(Nmakefile)
 
+  define FACTORCODE_GIT_URL = 'git://factorcode.org/git/factor.git/'
   define String NOT_A_GIT_REPO = '^~not a git repository~^'
-  const Array NOT_GIT_SYMS = [ BuildConst::NOT_A_GIT_REPO[0..2] ]
+  define Array NOT_GIT_SYMS = [ BuildConst::NOT_A_GIT_REPO[0..2] ]
 
   # branchname and file name
   define BASE_REMOTE_IMAGE_URL = 'http://downloads.factorcode.org/images/%s/%s'
@@ -45,11 +47,11 @@ class BuildSh {
     LWP_UA.new(show_progress => 1)
   }
   -> make_http_request (url) {
+    # can't be expressed so simply with if
     Combi::ifte(
       BuildSh.downloader.get(url),
       { .is_success }
       { .decoded_content }
-      { false }
     )
   }
   -> find_programs (String kind, Array ps) is cached -> String {
@@ -112,17 +114,17 @@ class BuildSh {
       if (Number($?) != 0)
 
     # NOTE: can't be const, or else the value will be discarded
-    var String ws = `./#{ws_binary}`
+    var String ws = `./#{ws_binary}` # `
     if (Number($?) != 0) {
       var e = $!
       ws_binary.remove
-      die "couldn't run the word size program: #{e}"
+      die "couldn't run the word size program: #{e}" # "
     }
     ws_binary.remove
     ws
   }
   -> intel_macosx_word_size () is cached -> String {
-    `#{BuildSh.find_programs(:sysctl, [:sysctl])} machdep.cpu.extfeatures | grep EM64T >/dev/null`
+    `#{BuildSh.find_programs(:sysctl, [:sysctl])} machdep.cpu.extfeatures | grep EM64T >/dev/null` # `
     (Number($?)==0 ? :64 : :32)
   }
   -> word_size () is cached -> String {
@@ -162,7 +164,7 @@ class BuildSh {
 
   # returning `nil` from these is not an option, because `nil` is an empty string
   -> _git_branch () is cached -> String {
-    static const branch = `git rev-parse --abbrev-ref HEAD`
+    static const branch = `git rev-parse --abbrev-ref HEAD` # `
     (Number($?)==0 ? branch.chomp : BuildConst::NOT_A_GIT_REPO)
   }
 
@@ -180,13 +182,38 @@ class BuildSh {
     }
   }
 
-  -> git_branch () is cached -> (Bool, String) {
+  -> git_branch () is cached -> String { BuildSh._git_branch }
+
+  -> git_branch_test ( Bool _ { _ } ) is cached -> (Bool, String) {
     with ( BuildSh._git_branch ) {
       Combi::rescope( _, BuildSh.is_git_ref_name(_) )
     }({
         |name, is_git|
-      (i, i ? n : :master)
+      (is_git, is_git ? name : :master)
     })
+  }
+
+  # does not require a git directory, does require an internet connection
+  # git ls-remote https://factorcode.org/git/factor.git/refs/heads/
+  # Index of /git/factor.git/refs/heads/
+  -> git_ls_remote (String remote) is cached -> Set {
+    with ( `git ls-remote #{remote} 2>&1` ) {
+        |refs|
+      # say refs
+      if ( refs =~ /^fatal: unable to (access|look up) / ) {
+          |error|
+        with (Feature::ANSIColor) {
+          say (.RED '[WARN]  Cannot ', .YELLOW, error, .RED ' the Factor git repository: \'', remote, "'", .RESET)
+        }
+        Set()
+      } else {
+        refs.lines.to_set.map{ . =~ /^(?<hash>[[:alnum:]]{40})\t(?<name>.*)$/ -> captures }
+      }
+    }
+  }
+
+  -> true_remote_branches () is cached -> Set {
+    BuildSh.git_ls_remote(BuildConst::FACTORCODE_GIT_URL)
   }
 
   -> is_git () is cached -> Bool {
@@ -272,24 +299,35 @@ class BuildSh {
     )
   }
 
-  -> make_clean_factor (/* BuiltObj */ bo_target, Bool no_clean = false, Bool output = false) {
+  -> make_clean_factor (/* BuiltObj */ bo_target, Bool no_clean = false, Bool output = false) { # */
     ( no_clean ? true : BuildSh.make_clean(output: output) ) && BuildSh.make_factor(bo_target, output: output)
   }
 
   # aka set_boot_image_vars
-  -> boot_image_urls () is cached {
-    -> curbranch_file_url (String filename, Bool use_non_master = true) is cached {
-      BuildConst::BASE_REMOTE_IMAGE_URL.sprintf(
-        (use_non_master ? BuildSh.try_git(:branch, __METHOD_NAME__) : :master),
-        filename
+  -> boot_image_urls (override_branch = nil) is cached {
+    with (override_branch) {
+      Hash(
+        :checksum => BuildConst::BASE_REMOTE_IMAGE_URL.sprintf(
+          override_branch, BuildConst::CHECKSUM_FILENAME ),
+
+        :boot_image_url => BuildConst::BASE_REMOTE_IMAGE_URL.sprintf(
+          override_branch, BuildSh.generate_make_targets(){:boot_image} )
+      )
+
+    } else {
+      -> curbranch_file_url (String filename, Bool use_non_master = true) is cached {
+        BuildConst::BASE_REMOTE_IMAGE_URL.sprintf(
+          (use_non_master ? BuildSh.try_git(:branch, __METHOD_NAME__) : :master),
+          filename
+        )
+      }
+
+      const non_master_branch_ok = Bool( BuildSh.make_http_request( curbranch_file_url(BuildConst::CHECKSUM_FILENAME) ) )
+      Hash(
+        :checksum => curbranch_file_url( BuildConst::CHECKSUM_FILENAME, use_non_master: non_master_branch_ok ),
+        :boot_image_url => curbranch_file_url( BuildSh.generate_make_targets(){:boot_image}, use_non_master: non_master_branch_ok )
       )
     }
-
-    const non_master_branch_ok = Bool( BuildSh.make_http_request( curbranch_file_url(BuildConst::CHECKSUM_FILENAME) ) )
-    Hash(
-      :checksum => curbranch_file_url(BuildConst::CHECKSUM_FILENAME, use_non_master: non_master_branch_ok),
-      :boot_image_url => curbranch_file_url( BuildSh.generate_make_targets(){:boot_image}, use_non_master: non_master_branch_ok )
-    )
   }
 
   # failure case?
@@ -322,7 +360,7 @@ class BuildSh {
 
   # TODO: allow the checksum of local boot image to fail due to no internet, but not break the build
   # TODO: allow the checksum of local boot image to be stored locally
-  -> update_boot_image (Bool assume_lbi_ok = false) -> ??? {
+  -> update_boot_image (Bool assume_lbi_ok = false) {
     const MN = __METHOD_NAME__
     given ( BuildSh.git_branch ) {
       when (BuildConst::NOT_A_GIT_REPO) { continue }

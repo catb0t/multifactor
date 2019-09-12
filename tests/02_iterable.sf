@@ -27,7 +27,7 @@ assert_ne( b, ImmutableHash() )
   )
 
   assert_eq(
-    Hash( :c => :b, :a => :d ).change_extant_keys( :( :a => { _.uc }, :c => { _.lc }, :x => { die "don't call this" } ) ),
+    Hash( :c => :b, :a => :d ).change_extant_by( :( :a => { _.uc }, :c => { _.lc }, :x => { die "don't call this" } ) ),
     Hash( :c => :b, :a => :D )
   )
 

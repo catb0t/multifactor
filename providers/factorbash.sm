@@ -3,19 +3,20 @@ include lib::feature
 include lib::guardio
 include lib::shell_words
 include lib::withdirectory
-import BuildSh
 
-include providers::builtobj
+import lib::shell_words::BuildSh
 
 module FactorBashStateless {
-  import BuildSh
+  include providers::builtobj
+  import lib::shell_words::BuildSh
+
+  # verify a boot image exists and has a matching checksum
   -> _test_boot_image_strict (builtobj::BuiltObj bo, File test_name) -> Bool {
     test_name.exists && (bo.blob_sums.boot == BuildSh.blob_file_contents_sum(test_name, bo.blob_sums.algo) )
   }
 
-  # TODO rewrite
-  -> _test_stored_boot_image (BuiltObj bo) -> Bool {
-    false
+  # -> _test_stored_boot_image (BuiltObj bo) -> Bool {
+
     # bo_target.stored_boot_image.cleave(
     #   { Bool( .data.len ) },
     #   { .data.base64_decode.method( .algo ) },
@@ -24,31 +25,53 @@ module FactorBashStateless {
     # ).rescope{
     #   .first && .last && Combi::binop(.[1, 2])('==') # '
     # }
+  # }
+
+  -> _remote_boot_image_to_file (String url) -> File {
+
   }
 
   -> _choose_boot_image (builtobj::BuiltObj bo_target, File default_name) -> File {
-    ...
-    func curry_strict (File _) { _test_boot_image_strict(bo_target, _) }
+
+    func curry_test_strict (File _)  { _test_boot_image_strict(bo_target, _) }
+    func remote_master_image_to_file { _remote_boot_image_to_file( BuildSh.boot_image_urls(override_branch: :master){:boot_image_url} ) }
     # if the specific one exists use it
-    if ( curry_strict(bo_target.boot_fullname) ) {
+    if ( curry_test_strict(bo_target.boot_fullname) ) {
       return bo_target.boot_fullname
     }
-
     const make_targets = BuildSh.generate_make_targets
     const default_boot_image = make_targets{:boot_image}
-
-    if ( curry_strict(default_boot_image) ) {
+    if ( curry_test_strict(default_boot_image) ) {
       return default_boot_image
     }
-
     if ( make_targets{:boot_image_branch}.exists ) {
       return make_targets{:boot_image_branch}
     }
 
+    # NOTE: ensure we have exhausted all local boot image files before downloading
 
-    # if (:master == BuildSh.try_git(:branch, __FUNC_NAME__, fatal: false)) {
+    const is_git = BuildSh.is_git
+    if ( !is_git ) {
+      # we don't have a local history and we can't use the remote one
+      # because this is not a git repository
+      # so just assume that remote HEAD will work OK
+      return remote_master_image_to_file()
+    }
 
-    # }
+    const branch = BuildSh.git_branch
+    const true_remote_branches = BuildSh.true_remote_branches
+    if (true_remote_branches.has(branch)) {
+      return _remote_boot_image_to_file( BuildSh.boot_image_urls(){:boot_image_url} )
+
+      # the remote stored one for this branch
+    } else {
+      say "no local / stored boot image found anywhere for local/downstream branch\nnow falling back to official master image"
+      # this is a local / downstream only branch
+      # the official server does not have official boot image builds for downstream branches
+      return remote_master_image_to_file()
+    }
+    ... # ??????????
+
     # func curried_tcbi (File c) -> Bool { .retry({ _test_candidate_boot_image(bo_target, c) }, { }) }
     # [
     #   bo_target.boot_fullname,
@@ -65,7 +88,7 @@ module FactorBashStateless {
 
 func _spoof (String m) -> Bool {
   with ( Feature::ANSIColor ) {
-    say( .color('bold bright_green'), "[SPOOF] faking #{m}", .color(:reset) );
+    say( .color('bold bright_green'), "[SPOOF] faking #{m}", .RESET );
   }
   true
 }
@@ -78,6 +101,7 @@ define DIR_REGEXES = Hash(
 
 class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_output = false, Bool spoof_build = false) < lib::withdirectory::WithDirectory { # < CapturedWriter??
 
+  import lib::shell_words::BuildSh
 
   # TODO: compare egrep with PCRE to figure out which files are being matched differently
   -> git_files_matching (Dir d) is cached -> Array {

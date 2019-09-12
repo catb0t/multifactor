@@ -23,9 +23,21 @@ module Combi {
     cond(obj) ? then(obj) : els(obj)
   }
   func ifte (Block cond, Block then, Block els) {
-    const c = [cond()]
-    if ( c.all ) { then(c...) } else { els(c...) }
+    with ( [cond()] ) {
+      .all ? then(_...) : els(_...)
+    }
+    # if ( c.all ) { then(c...) } else { els(c...) }
   }
+
+  # implied: else = false
+  func ifte (obj, Block cond, Block then) {
+    if ( cond(obj) ) { then(obj) }
+  }
+  func ifte (Block cond, Block then) {
+    const c = [cond()]
+    if ( c.all ) { then(c...) }
+  }
+
   # travelling in a fighter Combi(nators)
   # similar to with, but allows more arguments and doesn't care about definedness
   func rescope (*args) {

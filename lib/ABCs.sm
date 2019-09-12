@@ -68,7 +68,7 @@ module SProcess {
         .remove(:custom_blocks) if (WANT_EXCLUDE_BLOCKS.refaddr == want_vals.refaddr)
         call_blocks_kv( _ )
       } else {
-        want_vals.clobber_existing_by( _ )
+        want_vals.change_truthy_by( _ )
       }
     }
   }

@@ -244,7 +244,7 @@ module MultiFactor {
 
     # todo: collect generated methods that don't appear in .methods
 
-    has Array known_actions = _mfr_known_actions
+    has Set known_actions = _mfr_known_actions
     has Array field_groups = _mfr_fg
     has Array serial_property_generator_mfruntime = _mfr_sprop_gen
     has Array init_steps_10_mfruntime = _mfr_init

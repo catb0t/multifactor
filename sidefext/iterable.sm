@@ -19,7 +19,7 @@ func complex_typecheck (Object obj, Object basetp, cdids, subtps) -> (Bool, Obje
     cdid => (cdids ? { cdids.any{ |c| .is_a(c) } } : { true }),
     single_etype => ((do_subtps && subtps.has_key(:element_type)) ? { .all{ .is_a(subtps{:element_type}) } } : { true }),
     multi_etype => ((do_subtps && subtps.has_key(:element_types)) ? { .all{ subtps{:element_type}.any{ |t| .is_a(t) } } } : { true })
-    # subset checks here
+    # subset checks go here
   ).rescope{
     if (.values.all) {
       (true, obj)
@@ -63,18 +63,19 @@ class Hash {
     }.map{ .[1].run(.[0]) }
   }
 
-  method change_extant_keys (Hash spec) {
+  #
+  method change_extant_by (Hash spec) {
     const Hash shared_keys = (self & spec).keys
     self{ shared_keys... } = shared_keys.map{
         |k|
-      # this is v, k because it's more likely you only care about the v
+      # this is in the order (v, k) because it's more likely you only care about the v
       spec{k}.run( self{k}, k )
     }...
     self
   }
 
   # inverse of + / merge: only update keys that are already truthy in the LHS
-  method clobber_existing_by (other) -> Hash {
+  method change_truthy_by (other) -> Hash {
     self.map_kv{
         |k, v|
       ((k) => if ( v && other.has_key(k) ) {
