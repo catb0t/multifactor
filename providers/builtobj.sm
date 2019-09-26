@@ -25,19 +25,24 @@ module _exported {
 
   include lib::shell_words
   import lib::shell_words::BuildSh
+  import lib::shell_words::BuildConst
 
+  # dirsum serial properties
   define Hash DS_SPROPS = [:algo, :names, :contents].map{ ( (_) => Str ) }.to_h
   class DirSum (Str algo = '', Str names = '', Str contents = '') < SeriallyEquatable {
     has Hash serial_properties = DS_SPROPS
   }
 
-  define Hash SS_SPROPS = Hash( :basis_ignored => Bool, [:vm, :core, :basis].map{ ( (_) => DirSum ) }... )
+  # srcsums serial properties
+  define Hash SS_SPROPS = Hash( :basis_ignored => Bool, BuildConst.PERTINENT_RESOURCE_PATHS.map{ ( (_) => DirSum ) }... )
   class SrcSums (DirSum vm = DirSum(), DirSum core = DirSum(), DirSum basis = DirSum(), Bool basis_ignored = false ) < SeriallyEquatable {
     has Hash serial_properties = SS_SPROPS
   }
 
+  # blobsums serial properties
   define Hash BS_SPROPS = [:algo, :vm, :lib, :boot].map{ ( (_) => Str ) }.to_h
 
+  # blobsums serial match block
   define Block BS_SMATCH_BLOCK = func (self) -> Block { func (_) -> Bool { self._serial_eq(_, excl: Set(:boot)) } }
 
   class BlobSums (Str algo = '', Str vm = '', Str lib = '', Str boot = '') < SeriallyEquatable {
@@ -56,6 +61,8 @@ module _exported {
   class TimeSpec < SeriallyAccessible {
     has Hash serial_properties = TS_SPROPS
   }
+
+  # class builtobj definitions follow
 
   define Array BO_BLOB_TARGETS = [:vm, :lib, :image, :boot]
 

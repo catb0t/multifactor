@@ -31,13 +31,15 @@ module BuildConst {
   define File GNU_MAKEFILE = %f(GNUmakefile)
   define File N_MAKEFILE = %f(Nmakefile)
 
-  define FACTORCODE_GIT_URL = 'git://factorcode.org/git/factor.git/'
+  define String FACTORCODE_GIT_URL = 'git://factorcode.org/git/factor.git/'
   define String NOT_A_GIT_REPO = '^~not a git repository~^'
-  define Array NOT_GIT_SYMS = [ BuildConst::NOT_A_GIT_REPO[0..2] ]
+  define Array  NOT_GIT_SYMS = [ BuildConst::NOT_A_GIT_REPO[0..2] ]
 
   # branchname and file name
-  define BASE_REMOTE_IMAGE_URL = 'http://downloads.factorcode.org/images/%s/%s'
-  define CHECKSUM_FILENAME = 'checksums.txt'
+  define String BASE_REMOTE_IMAGE_URL = 'http://downloads.factorcode.org/images/%s/%s'
+  define String CHECKSUM_FILENAME = 'checksums.txt'
+
+  define Set PERTINENT_RESOURCE_PATHS = Set(:vm, :core, :basis)
 }
 
 class BuildSh {
@@ -304,28 +306,51 @@ class BuildSh {
   }
 
   # aka set_boot_image_vars
-  -> boot_image_urls (override_branch = nil) is cached {
-    with (override_branch) {
+  # force_branch_name allows to use remote master instead of local current branch
+  #   useful when this is not a git repo or when the branch is local only
+  #
+  # force_current_branch_exists_remotely prevents redundant calculation of git ls-remote
+  #   if the caller already knows it
+  # don't use this option if you're not 100% sure it exists remotely
+
+  # NOTE: force_current_branch_exists_remotely is technically susceptible to a race condition
+  #   if the remote branch disappears between the caller's calculation and our request
+  #   but that's a necessary tradeoff
+  # just don't leave too many cycles between the steps please
+  -> boot_image_urls (force_branch_name = nil, Bool force_current_branch_exists_remotely = false) is cached {
+    with (force_branch_name) {
       Hash(
         :checksum => BuildConst::BASE_REMOTE_IMAGE_URL.sprintf(
-          override_branch, BuildConst::CHECKSUM_FILENAME ),
+          _, BuildConst::CHECKSUM_FILENAME ),
 
         :boot_image_url => BuildConst::BASE_REMOTE_IMAGE_URL.sprintf(
-          override_branch, BuildSh.generate_make_targets(){:boot_image} )
+          _, BuildSh.generate_make_targets(){:boot_image} )
       )
 
     } else {
-      -> curbranch_file_url (String filename, Bool use_non_master = true) is cached {
-        BuildConst::BASE_REMOTE_IMAGE_URL.sprintf(
-          (use_non_master ? BuildSh.try_git(:branch, __METHOD_NAME__) : :master),
-          filename
-        )
+      const status = [BuildSh.test_git_branch(true)]
+      const Bool is_git = status[0]
+      const String initial_use_branch = status[1]
+
+      # if we are not a git repo, we use branch master, which exists remotely of course
+      # if we are git repo, it is either forced (promised) to exist, or we really check for real
+      const current_branch_exists_remotely = ( (!is_git) || (
+        force_current_branch_exists_remotely || BuildSh.true_remote_branches.has( use_branch )
+      ) )
+
+      const use_branch = current_branch_exists_remotely ? initial_use_branch : :master
+
+      # simply make a full url out of a filename
+      -> current_branch_file_url (String filename) is cached {
+        BuildConst::BASE_REMOTE_IMAGE_URL.sprintf( use_branch, filename )
       }
 
-      const non_master_branch_ok = Bool( BuildSh.make_http_request( curbranch_file_url(BuildConst::CHECKSUM_FILENAME) ) )
+      # OLD: test if the remote server has a checksums.txt for the current branch, i.e. if it exists
+      # const non_master_branch_ok = Bool( BuildSh.make_http_request( curbranch_file_url(BuildConst::CHECKSUM_FILENAME) ) )
+
       Hash(
-        :checksum => curbranch_file_url( BuildConst::CHECKSUM_FILENAME, use_non_master: non_master_branch_ok ),
-        :boot_image_url => curbranch_file_url( BuildSh.generate_make_targets(){:boot_image}, use_non_master: non_master_branch_ok )
+        :checksum => current_branch_file_url( BuildConst::CHECKSUM_FILENAME ),
+        :boot_image_url => current_branch_file_url( BuildSh.generate_make_targets(){:boot_image} )
       )
     }
   }
