@@ -23,7 +23,7 @@ include Command
 include lib::feature
 
 # `build.sh` bash functions
-# mostly THEIR utilities, re-implemented in Sidef
+# mostly THEIR (upstream) utilities, re-implemented in Sidef
 module BuildConst {
   define Regex VERSION_REGEX = /VERSION = ([0-9]+\.[0-9]+)/
   define Regex REPRODUCIBLE_REGEX = /REPRODUCIBLE/
@@ -34,8 +34,9 @@ module BuildConst {
   define String FACTORCODE_GIT_URL = 'git://factorcode.org/git/factor.git/'
   define String NOT_A_GIT_REPO = '^~not a git repository~^'
   define Array  NOT_GIT_SYMS = [ BuildConst::NOT_A_GIT_REPO[0..2] ]
+  define String DEFAULT_GIT_BRANCH = :master
 
-  # branchname and file name
+  # branchname and file name are to be replaced
   define String BASE_REMOTE_IMAGE_URL = 'http://downloads.factorcode.org/images/%s/%s'
   define String CHECKSUM_FILENAME = 'checksums.txt'
 
@@ -49,7 +50,7 @@ class BuildSh {
     LWP_UA.new(show_progress => 1)
   }
   -> make_http_request (url) {
-    # can't be expressed so simply with if
+    # this can't be expressed so simply with if {}
     Combi::ifte(
       BuildSh.downloader.get(url),
       { .is_success }
@@ -191,13 +192,13 @@ class BuildSh {
       Combi::rescope( _, BuildSh.is_git_ref_name(_) )
     }({
         |name, is_git|
-      (is_git, is_git ? name : :master)
+      (is_git, is_git ? name : BuildConst::DEFAULT_GIT_BRANCH)
     })
   }
 
   # does not require a git directory, does require an internet connection
   # git ls-remote https://factorcode.org/git/factor.git/refs/heads/
-  # Index of /git/factor.git/refs/heads/
+  # -> Index of /git/factor.git/refs/heads/
   -> git_ls_remote (String remote) is cached -> Set {
     with ( `git ls-remote #{remote} 2>&1` ) {
         |refs|
@@ -306,8 +307,9 @@ class BuildSh {
   }
 
   # aka set_boot_image_vars
-  # force_branch_name allows to use remote master instead of local current branch
+  # force_branch_name allows to use a different remote branch instead of local current branch
   #   useful when this is not a git repo or when the branch is local only
+  #   set to true for DEFAULT_GIT_BRANCH, or a string for that branch name
   #
   # force_current_branch_exists_remotely prevents redundant calculation of git ls-remote
   #   if the caller already knows it
@@ -317,28 +319,30 @@ class BuildSh {
   #   if the remote branch disappears between the caller's calculation and our request
   #   but that's a necessary tradeoff
   # just don't leave too many cycles between the steps please
-  -> boot_image_urls (force_branch_name = nil, Bool force_current_branch_exists_remotely = false) is cached {
+  -> boot_image_urls (force_branch = nil, Bool force_current_branch_exists_remotely = false) is cached -> Hash {
     with (force_branch_name) {
-      Hash(
-        :checksum => BuildConst::BASE_REMOTE_IMAGE_URL.sprintf(
-          _, BuildConst::CHECKSUM_FILENAME ),
+      (. == true) ? BuildConst::DEFAULT_GIT_BRANCH : force_branch_name -> rescope{
+        Hash(
+          :checksum => BuildConst::BASE_REMOTE_IMAGE_URL.sprintf(
+            _, BuildConst::CHECKSUM_FILENAME ),
 
-        :boot_image_url => BuildConst::BASE_REMOTE_IMAGE_URL.sprintf(
-          _, BuildSh.generate_make_targets(){:boot_image} )
-      )
-
+          :boot_image_url => BuildConst::BASE_REMOTE_IMAGE_URL.sprintf(
+            _, BuildSh.generate_make_targets(){:boot_image} )
+        )
+      }
     } else {
-      const status = [BuildSh.test_git_branch(true)]
-      const Bool is_git = status[0]
+      const Array status              = [BuildSh.test_git_branch(true)]
+      const Bool is_git               = status[0]
       const String initial_use_branch = status[1]
 
       # if we are not a git repo, we use branch master, which exists remotely of course
       # if we are git repo, it is either forced (promised) to exist, or we really check for real
+      # NOTE: a network request must occur somewhere in this branch; it's right here
       const current_branch_exists_remotely = ( (!is_git) || (
         force_current_branch_exists_remotely || BuildSh.true_remote_branches.has( use_branch )
       ) )
 
-      const use_branch = current_branch_exists_remotely ? initial_use_branch : :master
+      const use_branch = current_branch_exists_remotely ? initial_use_branch : BuildConst::DEFAULT_GIT_BRANCH
 
       # simply make a full url out of a filename
       -> current_branch_file_url (String filename) is cached {
@@ -389,7 +393,7 @@ class BuildSh {
     const MN = __METHOD_NAME__
     given ( BuildSh.git_branch ) {
       when (BuildConst::NOT_A_GIT_REPO) { continue }
-      when (:master) {  }
+      when (BuildConst::DEFAULT_GIT_BRANCH) {  }
       default { }
     }
     ...

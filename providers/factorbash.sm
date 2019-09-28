@@ -39,11 +39,11 @@ module FactorBashStateless {
     ( name, func () -> Bool { name.remove } )
   }
 
-  -> _choose_boot_image (builtobj::BuiltObj bo_target, File default_name) -> File {
+  -> _choose_boot_image (builtobj::BuiltObj bo_target, File default_name) -> (File, Block) {
 
     func curry_test_strict (File _)  { _test_boot_image_strict(bo_target, _) }
-    func remote_master_image_to_file {
-      _remote_boot_image_to_file( BuildSh.boot_image_urls(override_branch: :master){:boot_image_url} )
+    func remote_master_image_to_file () -> (File, Block) {
+      _remote_boot_image_to_file( BuildSh.boot_image_urls(force_branch: true){:boot_image_url} )
     }
     # if the specifically named one exists, use it
     if ( curry_test_strict(bo_target.boot_fullname) ) {
@@ -55,10 +55,11 @@ module FactorBashStateless {
     if ( curry_test_strict(default_boot_image) ) {
       return default_boot_image
     }
-    # boot_master_.unix-x86.64.image
+    # including the branch name, boot_master_.unix-x86.64.image
     if ( make_targets{:boot_image_branch}.exists ) {
       return make_targets{:boot_image_branch}
     }
+    # TODO: stored_boot_image
 
     # NOTE: ensure we have exhausted all local boot image files before downloading
 
@@ -74,15 +75,15 @@ module FactorBashStateless {
     # otherwise, we can try to do better
     const branch = BuildSh.git_branch
     const true_remote_branches = BuildSh.true_remote_branches
-    if (true_remote_branches.has(branch)) {
-      return _remote_boot_image_to_file( BuildSh.boot_image_urls(){:boot_image_url} )
-
+    return if (true_remote_branches.has(branch)) {
       # the remote stored one for this branch
+      _remote_boot_image_to_file( BuildSh.boot_image_urls(force_current_branch_exists_remotely: true){:boot_image_url} )
+
     } else {
       say "no local / stored boot image found anywhere for local/downstream branch\nnow falling back to official master image"
       # this is a local / downstream only branch
       # the official server does not have official boot image builds for downstream branches
-      return remote_master_image_to_file()
+      remote_master_image_to_file()
     }
     ... # ??????????
 
@@ -102,7 +103,7 @@ module FactorBashStateless {
 
 func _spoof (String m) -> Bool {
   with ( Feature::ANSIColor ) {
-    say( .color('bold bright_green'), "[SPOOF] faking #{m}", .RESET );
+    say( .color('bold bright_green'), "[SPOOF] faking #{m}", .RESET )
   }
   true
 }
