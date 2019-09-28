@@ -1,10 +1,10 @@
-# multifactor v0.3 [![Travis build status](https://api.travis-ci.org/catb0t/multifactor.svg?branch=master)](https://travis-ci.org/catb0t/multifactor) 
+# multifactor v0.3 [![Travis build status](https://api.travis-ci.org/catb0t/multifactor.svg?branch=master)](https://travis-ci.org/catb0t/multifactor)
 
 To end the hassle of having to manage [Factor](https://github.com/factor/factor) images and executables for different branches / revisions.
 
 ## Overview
 
-Written in Trizen's [Sidef](https://github.com/trizen/sidef); HEAD is preferred but 3.70 should work.
+Written in Trizen's [Sidef](https://github.com/trizen/sidef); requires my [`hack`](https://github.com/catb0t/sidef/tree/hack) branch at HEAD because of features I haven't PR'd into upstream yet.
 
 Trying to use as few (3rd party) CPAN modules as possible. Depends on the core modules `forks` and `JSON::XS` (but `JSON::PP` will be used if it's found).
 
