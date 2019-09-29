@@ -2,6 +2,7 @@
 
 # todo: Set ~~ and ~~ Set
 # todo: subsets can't be chained
+# todo: is_a and similar on Subsets (this is marked as todo elsewhere in the codebase)
 subset ExtantArrStr < Array, String { .len && (.~~ Array ? .all{ .len } : true) }
 define ITER_TYPES = Set(Array, String, Set, Bag, Matrix, Hash, Set, Pair, Range, RangeNum, RangeString)
 

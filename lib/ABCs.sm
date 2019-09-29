@@ -305,6 +305,18 @@ class ModularInit {
   }
 }
 
+class Lockable {
+  has Bool _impl_locked = false
+  has Array _impl_err_write_locked = ['attempt of write to locked ', ' object!']
+
+  -> locked { self._impl_locked }
+  -> unlocked { !self._impl_locked }
+  -> state (String s) { s ~~ /^unl/ ? !self._impl_locked : self._impl_locked }
+  -> lock { self._impl_locked = true; self }
+  -> lock (Bool b) { self._impl_locked = b; self }
+  -> unlock { self._impl_locked = false; self }
+}
+
 # if this is defined in SeriallyAccessible and inherited, its contents will be
 #   duplicated or buggy, and will cause infinite recursion in subclasses
 define Array global_init_steps_sa_base = [
@@ -347,45 +359,53 @@ class SeriallyAccessible << ModularInit, SeriallyEquatable {
         # say "#{__METHOD_NAME__}: set _#{field_name} to #{self{:_ + field_name}.dump}"
 
         const Block setter_prelude = {
-          .is_a(typename) \
-            || die(
-              "#{__FILE__}:#{__LINE__}: #{__METHOD_NAME__}:  ",
-              "type mismatch in generated setter '#{field_name}': want '#{typename}'; got '#{_.class}'  ('#{_.dump.first(200)} ...')"
+          .is_a(typename) || die(
+            "#{__FILE__}:#{__LINE__}: #{__METHOD_NAME__}:  ",
+            "type mismatch in generated setter '#{field_name}': want '#{typename}'; got '#{_.class}'  ('#{_.dump.first(200)} ...')"
           )
         }
 
-
-        func acc (self) {
-          # say "get field #{field_name}"
-          # say "custom_blocks: #{custom_blocks}"
-          static var custom_getter = custom_blocks{:get}
+        const Block getter_block = (custom_blocks{:get} || {
+            |_self|
           # say "get field #{field_name} (#{typename}) with #{custom_getter}"
-          if (custom_getter) {
-            custom_getter.run(self)
-          } else {
-            *(sidefext::checked::checkedref([MN, :V_gen_accessor, :V_gen_getter, :V_builtin_getter], self, :_ + field_name, { die "getter #{field_name}" } ).ref)
-          }
+          *(sidefext::checked::checkedref(
+            [MN, :V_gen_accessor, :V_gen_getter, :V_builtin_getter],
+            _self,
+            # note the underscore
+            :_ + field_name,
+            { die "getter #{field_name}" }
+          ).ref)
+
+        })._returns( new_value => [typename] )
+
+        const Block setter_block = (custom_blocks{:set} || {
+            |_self, new_val|
+          # say "\tset field #{field_name} to #{new_val} (#{typename})"
+          *(sidefext::checked::checkedref(
+            [MN, :V_gen_accessor, :V_gen_setter, :V_builtin_setter],
+            _self,
+            # note the underscore
+            :_ + field_name,
+            { die "setter #{field_name}" }
+          ).ref) = new_val
+          # self{:_ + field_name} = new_val; self
+          _self
+        })._returns( new_value => [__CLASS__] )
+
+        const Block lockable_check = {
+            |_|
+          .is_a(Lockable) && ._impl_locked && die ._impl_err_write_locked.join(self.ref.mref)
         }
 
-        func acc (self, new_val) -> __CLASS__ {
-          static var custom_setter = custom_blocks{:set}
+        # NOTE: we would like lockable_check to declare a separate function because this is a performance hit
+        #   but binding the dispatch returned from the if statement apparently triggers a Sidef bug or something
+        func acc (_self) { getter_block.run(_self) }
+        func acc (_self, new_val) -> __CLASS__ {
+          lockable_check.run(_self)
           setter_prelude.run(new_val)
-          # say "\tset field #{field_name} to #{new_val} (#{typename})"
-          if (custom_setter) {
-            custom_setter.run(self, new_val) \\ self
-          } else {
-            # say "\tnew value for #{field_name}: #{new_val}"
-            *(sidefext::checked::checkedref(
-              [MN, :V_gen_accessor, :V_gen_setter, :V_builtin_setter],
-              self,
-              # note the underscore
-              :_ + field_name,
-              { die "setter #{field_name}" }
-            ).ref) = new_val
-            self
-            # self{:_ + field_name} = new_val; self
-          }
+          (setter_block.run(_self, new_val) \\ _self)
         }
+
         __CLASS__.def_method(field_name, acc)
         # say "declared accessor for #{field_name}"
       }
@@ -403,18 +423,6 @@ class SeriallyAccessible << ModularInit, SeriallyEquatable {
       }
   }
 
-}
-
-class Lockable {
-  has Bool _impl_locked = false
-  has String _impl_err_write_locked = 'attempt of write to locked '+__CLASS_NAME__+' object!'
-
-  -> locked { self._impl_locked }
-  -> unlocked { !self._impl_locked }
-  -> state (String s) { s ~~ /^unl/ ? !self._impl_locked : self._impl_locked }
-  -> lock { self._impl_locked = true; self }
-  -> lock (Bool b) { self._impl_locked = b; self }
-  -> unlock { self._impl_locked = false; self }
 }
 
 class Object { -> is_serializable (*_) { self.is_a(Serializable) } }

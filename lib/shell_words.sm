@@ -24,6 +24,7 @@ include lib::feature
 
 # `build.sh` bash functions
 # mostly THEIR (upstream) utilities, re-implemented in Sidef
+
 module BuildConst {
   define Regex VERSION_REGEX = /VERSION = ([0-9]+\.[0-9]+)/
   define Regex REPRODUCIBLE_REGEX = /REPRODUCIBLE/
@@ -307,7 +308,7 @@ class BuildSh {
   }
 
   # aka set_boot_image_vars
-  # force_branch_name allows to use a different remote branch instead of local current branch
+  # force_branch allows to use a different remote branch instead of local current branch
   #   useful when this is not a git repo or when the branch is local only
   #   set to true for DEFAULT_GIT_BRANCH, or a string for that branch name
   #
@@ -320,8 +321,8 @@ class BuildSh {
   #   but that's a necessary tradeoff
   # just don't leave too many cycles between the steps please
   -> boot_image_urls (force_branch = nil, Bool force_current_branch_exists_remotely = false) is cached -> Hash {
-    with (force_branch_name) {
-      (. == true) ? BuildConst::DEFAULT_GIT_BRANCH : force_branch_name -> rescope{
+    with (force_branch) {
+      (. == true) ? BuildConst::DEFAULT_GIT_BRANCH : force_branch -> rescope{
         Hash(
           :checksum => BuildConst::BASE_REMOTE_IMAGE_URL.sprintf(
             _, BuildConst::CHECKSUM_FILENAME ),
@@ -339,10 +340,10 @@ class BuildSh {
       # if we are git repo, it is either forced (promised) to exist, or we really check for real
       # NOTE: a network request must occur somewhere in this branch; it's right here
       const current_branch_exists_remotely = ( (!is_git) || (
-        force_current_branch_exists_remotely || BuildSh.true_remote_branches.has( use_branch )
+        force_current_branch_exists_remotely || BuildSh.true_remote_branches.has( initial_use_branch )
       ) )
 
-      const use_branch = current_branch_exists_remotely ? initial_use_branch : BuildConst::DEFAULT_GIT_BRANCH
+      const use_branch = (current_branch_exists_remotely ? initial_use_branch : BuildConst::DEFAULT_GIT_BRANCH)
 
       # simply make a full url out of a filename
       -> current_branch_file_url (String filename) is cached {

@@ -25,7 +25,6 @@ module _exported {
 
   include lib::shell_words
   import lib::shell_words::BuildSh
-  import lib::shell_words::BuildConst
 
   # dirsum serial properties
   define Hash DS_SPROPS = [:algo, :names, :contents].map{ ( (_) => Str ) }.to_h
@@ -34,7 +33,7 @@ module _exported {
   }
 
   # srcsums serial properties
-  define Hash SS_SPROPS = Hash( :basis_ignored => Bool, BuildConst.PERTINENT_RESOURCE_PATHS.map{ ( (_) => DirSum ) }... )
+  define Hash SS_SPROPS = Hash( :basis_ignored => Bool, BuildConst::PERTINENT_RESOURCE_PATHS.to_a.map{ ( (_) => DirSum ) }... )
   class SrcSums (DirSum vm = DirSum(), DirSum core = DirSum(), DirSum basis = DirSum(), Bool basis_ignored = false ) < SeriallyEquatable {
     has Hash serial_properties = SS_SPROPS
   }

@@ -81,29 +81,29 @@ module Explicit {
       # }
 
       var (user_pair, pre_ref) = if (obj.is_a(Pair)) {
-        var r = obj[0].ref
-        var l = like_user_pair(obj, r)
+        const r = obj[0].ref
+        const l = like_user_pair(obj, r)
         (l, l ? r : obj.ref)
       } else { (false, obj.ref) }
 
-      var (user_type, ref) = with (pre_ref) {
-        var u = ( .is_non_builtin_type && !user_pair )
+      var (is_user_type, ref) = with (pre_ref) {
+        const u = ( .is_non_builtin_type && !user_pair )
         (u, (user_pair || u) ? (USER_TYPE_MAGIC + .mref) : _bt_magic(_))
       }
-      # say "ref: #{ref}; want: #{ref.mref} pre_ref: #{pre_ref}; user_pair: #{user_pair}; user_type: #{user_type}"
+      # say "ref: #{ref}; want: #{ref.mref} pre_ref: #{pre_ref}; user_pair: #{user_pair}; is_user_type: #{is_user_type}"
       # say "obj: #{obj} last subtype: #{subtype}"
 
-      var _st =  if ( user_type )  { make_val(obj) }
+      const _st =  if ( is_user_type )  { make_val(obj) }
               elsif ( !user_pair ) { obj    }
               elsif ( user_pair )  { obj[1] }
 
-      var st = _bt_magic( _major_subtype_heuristic(_st) )
+      const st = _bt_magic( _major_subtype_heuristic(_st) )
 
-      var curried_tag = { |o| recurse_with(o, st) }
+      const curried_tag = { |o| recurse_with(o, st) }
       Explicit::make(
         !subtype && ref,
         given (obj) {
-          case ( user_type )     { _st.map_kv{ |k, v| ( (k) => curried_tag(v) ) } }
+          case ( is_user_type )  { _st.map_kv{ |k, v| ( (k) => curried_tag(v) ) } }
           case ( user_pair )     { .[1].map_kv{ |k, v| ( (k) => curried_tag(v) ) } }
           case ( .is_a(Pair) )   { continue }
           case ( .is_a(Set) )    { continue }
@@ -159,19 +159,19 @@ module Explicit {
     } elsif (obj{EXPL_TYP} == :typename) {
       _bt_unmagic( obj{EXPL_VAL} ).lookup_ref.to_type
     } else {
-      var curried_untag = func (Hash h) { recurse_with(h, obj{EXPL_STP} \\ false) }
-      var (user_type, type) = with (subtype || obj{EXPL_TYP}) {
+      const curried_untag = func (Hash h) { recurse_with(h, obj{EXPL_STP} \\ false) }
+      var (is_user_type, type) = with (subtype || obj{EXPL_TYP}) {
         ( .starts_with(USER_TYPE_MAGIC),
           (_bt_unmagic( . =~ USER_TYPE_ERASER -> caps[0] ).lookup_ref \\> :to_type) \
             \\ die "typename #{_.dump} not known or not in scope" )
       } else { die obj.dump+' wtf ??? (was the input data encoded properly / did you forget to call untag_hash?)' }
 
-      var pre_val = obj{EXPL_VAL}
+      const pre_val = obj{EXPL_VAL}
 
-      # say "obj: #{obj.dump.lines.map{ 9.chr+_ }.join(10.chr)}\n\tref: '#{obj{EXPL_TYP}}' last subtype: #{subtype} type: #{type} user_type: #{user_type}\n"
+      # say "obj: #{obj.dump.lines.map{ 9.chr+_ }.join(10.chr)}\n\tref: '#{obj{EXPL_TYP}}' last subtype: #{subtype} type: #{type} is_user_type: #{is_user_type}\n"
 
       given ( type ) {
-        case ( user_type )     { make_val(_, pre_val.map_kv{ |k, v| ( (k) => curried_untag(v) ) } ) }
+        case ( is_user_type )  { make_val(_, pre_val.map_kv{ |k, v| ( (k) => curried_untag(v) ) } ) }
         case ( .is_a(Pair) )   { continue }
         case ( .is_a(Set) )    { continue }
         case ( .is_an(Array) ) { type( pre_val.map{ curried_untag(_) }... ) }

@@ -72,7 +72,7 @@ define JSON = 'JSON::XS'.require.new.pretty.utf8
 
 3.times{
   # say in_data
-  # say want_data
+  say want_data
   const j_want = JSON.encode(want_data)
   const rt_want = JSON.decode(j_want)
 
@@ -88,7 +88,7 @@ define JSON = 'JSON::XS'.require.new.pretty.utf8
   # doesn't roundtrip, this is the problem we are solving
   assert_ne(JSON.decode(JSON.encode(in_data)), in_data)
 
-  # say expl_data_in
+  say expl_data_in
   assert_eq(untag_hash(rt_want), in_data)
   assert_eq(untag_hash(rt_expl), in_data)
   assert_eq(untag_hash(rt_want), untag_hash(rt_expl))

@@ -24,7 +24,8 @@ module Combi {
   }
   func ifte (Block cond, Block then, Block els) {
     # __FUNC__._returns(new_value => [])
-    ([cond()].all ? then : els)(_...)
+    const c = [cond()]
+    (c.all ? then : els)(c...)
     # if ( c.all ) { then(c...) } else { els(c...) }
   }
 

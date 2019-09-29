@@ -1,0 +1,20 @@
+class A {
+  method g () {
+    const v = if (10.rand < 5) {
+      func x (_self) { say "top #{_self}" }
+      func x (_self, b) { say "top #{_self} #{b}" }
+    } else {
+      func x (_self) { say "bottom #{_self}" }
+      func x (_self, b) { say "bottom #{_self} #{b}" }
+    }
+    __CLASS__.def_method(:abcde, v)
+  }
+}
+
+
+8.times{
+  const a = A()
+  a.g
+  a.abcde()
+  a.abcde(2)
+}

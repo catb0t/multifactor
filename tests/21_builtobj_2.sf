@@ -26,4 +26,15 @@ var bo2 = BuiltObj().id(:1234) # .vm_format([ '', :fvm_, BuildSh.platform_vm_ext
 assert_eq("fvm_1234#{BuildSh.platform_vm_ext}", bo2.vm_fullname)
 say "vm fullname: #{bo2.vm_fullname}"
 
+# is this platform specific? 
 assert_eq(:factor, bo2.vm_format.ordered_run_keys(:pfx_platform, :ext).join( :factor ) )
+
+bo2.lock
+try {
+  bo2.id(:111111111111)
+} catch {
+    |_, msg|
+  assert( msg.starts_with('attempt of write to locked _exported::BuiltObj object!') )
+}
+bo2.unlock
+bo2.id(:asdasd)

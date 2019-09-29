@@ -189,7 +189,7 @@ module MultiFactor {
       ) )
     } )
 
-    # need a way for the consumer ofthe ArgParse API to know the exact syntax of the command line
+    # TODO: need a way for the consumer ofthe ArgParse API to know the exact syntax of the command line
     self.known_actions.has(self.action) \
       || die "[FATAL] #{__FILE__, __LINE__}: init_steps_mfruntime: don\'t know action '#{self.action}' [--action | -a]"
 

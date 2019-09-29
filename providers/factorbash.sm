@@ -64,7 +64,7 @@ module FactorBashStateless {
     # NOTE: ensure we have exhausted all local boot image files before downloading
 
     # TODO: get a boot image from approximately the right date, using our git hash and its date
-    # and the modified times of upstream's master images 
+    # and the modified times of upstream's master images
 
     const is_git = BuildSh.is_git
     if ( !is_git ) {

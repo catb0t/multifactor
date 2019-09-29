@@ -29,7 +29,7 @@ module Command {
           { .autoflush(true) },
           { "\n\t\t".print if (output) },
           {
-            # if we increased the scope of c and co then the cleave is redundant
+            # if we increased the scope of c and co then the cleave is redundant, but that would be slower
             var c = ''
             const Block co = { |b| _char_op(\c, b) }
             .each_char(co)
