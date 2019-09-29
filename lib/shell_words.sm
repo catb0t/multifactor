@@ -390,8 +390,8 @@ class BuildSh {
 
   # TODO: allow the checksum of local boot image to fail due to no internet, but not break the build
   # TODO: allow the checksum of local boot image to be stored locally
-  -> update_boot_image (Bool assume_lbi_ok = false) {
-    const MN = __METHOD_NAME__
+  -> update_boot_image (Bool _assume_lbi_ok = false) {
+    # const MN = __METHOD_NAME__
     given ( BuildSh.git_branch ) {
       when (BuildConst::NOT_A_GIT_REPO) { continue }
       when (BuildConst::DEFAULT_GIT_BRANCH) {  }

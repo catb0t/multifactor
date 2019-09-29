@@ -4,7 +4,6 @@ include lib::guardio
 include lib::shell_words
 include lib::withdirectory
 
-import lib::shell_words::BuildConst
 import lib::shell_words::BuildSh
 
 module FactorBashStateless {
@@ -30,7 +29,7 @@ module FactorBashStateless {
 
   # TODO: use a cross-platform tmpfile implementation? or would we rather not write outside our tree?
   # download a URL to a file, give the name of the file, and a block which will remove it
-  -> _remote_boot_image_to_tmpfile (String url) -> (File, Block) {
+  -> _remote_boot_image_to_file (String url) -> (File, Block) {
     const name = File(url.split('/').last)
     name.open_w.cleave(
       { .write( BuildSh.make_http_request(url) ) },
@@ -111,7 +110,7 @@ func _spoof (String m) -> Bool {
   true
 }
 
-define DIR_REGEXES = BuildConst.PERTINENT_RESOURCE_PATHS.to_a.map{ _ ： Regex( '^' + _ + '/' ) }.to_h
+define DIR_REGEXES = BuildConst::PERTINENT_RESOURCE_PATHS.to_a.map{ _ ： Regex( '^' + _ + '/' ) }.to_h
 
 class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_output = false, Bool spoof_build = false) < lib::withdirectory::WithDirectory { # < CapturedWriter??
 
@@ -152,7 +151,7 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
     self.with_directory{
       builtobj::SrcSums(
         # .push( single_dirsum(:basis, self.basis_dev) )...,
-        BuildConst.PERTINENT_RESOURCE_PATHS.map{
+        BuildConst::PERTINENT_RESOURCE_PATHS.map{
           single_dirsum(_, .== :basis && self.basis_dev)
         }...,
         basis_ignored: self.basis_dev
