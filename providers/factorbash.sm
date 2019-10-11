@@ -27,23 +27,24 @@ module FactorBashStateless {
     # }
   # }
 
-  # TODO: use a cross-platform tmpfile implementation? or would we rather not write outside our tree?
-  # download a URL to a file, give the name of the file, and a block which will remove it
-  -> _remote_boot_image_to_file (String url) -> (File, Block) {
-    const name = File(url.split('/').last)
-    name.open_w.cleave(
-      { .write( BuildSh.make_http_request(url) ) },
-      { .close }
-    )
-    ( name, func () -> Bool { name.remove } )
-  }
+  # implementation moved to shell_words::BuildSh._remote_boot_image_to_file
+  # -> _remote_boot_image_to_file (String url) -> (File, Block) {
+  #   const name = File(url.split('/').last)
+  #   name.open_w.cleave(
+  #     { .write( BuildSh.make_http_request(url) ) },
+  #     { .close }
+  #   )
+  #   ( name, func () -> Bool { name.remove } )
+  # }
 
-  -> _choose_boot_image (builtobj::BuiltObj bo_target, File default_name) -> (File, Block) {
+  # half this function doesn't rely on bo_target and thus can be moved to shell_words, later
+  -> _choose_boot_image (builtobj::BuiltObj bo_target, File default_name) -> Hash {
 
     func curry_test_strict (File _)  { _test_boot_image_strict(bo_target, _) }
-    func remote_master_image_to_file () -> (File, Block) {
-      _remote_boot_image_to_file( BuildSh.boot_image_urls(force_branch: true){:boot_image_url} )
+    func remote_master_image_to_file () -> Hash {
+      BuildSh._remote_boot_image_to_file( BuildSh.boot_image_urls(force_branch: true) )
     }
+
     # if the specifically named one exists, use it
     if ( curry_test_strict(bo_target.boot_fullname) ) {
       return bo_target.boot_fullname
@@ -65,8 +66,7 @@ module FactorBashStateless {
     # TODO: get a boot image from approximately the right date, using our git hash and its date
     # and the modified times of upstream's master images
 
-    const is_git = BuildSh.is_git
-    if ( !is_git ) {
+    if ( !BuildSh.is_git ) {
       # we don't have a local history (not a git repo)
       #   and we can't use the remote one
       #   because we have no reference point
@@ -77,9 +77,9 @@ module FactorBashStateless {
     # otherwise, we can try to do better
     const branch = BuildSh.git_branch
     const true_remote_branches = BuildSh.true_remote_branches
-    return if (true_remote_branches.has(branch)) {
+    return if ( true_remote_branches.has(branch) ) {
       # the remote stored one for this branch
-      _remote_boot_image_to_file( BuildSh.boot_image_urls(force_current_branch_exists_remotely: true){:boot_image_url} )
+      BuildSh._remote_boot_image_to_file( BuildSh.boot_image_urls(force_current_branch_exists_remotely: true) )
 
     } else {
       say "no local / stored boot image found anywhere for local/downstream branch\nnow falling back to official master image"
@@ -159,18 +159,19 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
     }
   }
 
-  -> delegate (String name) is cached {
+  -> delegate (String name, *args) is cached {
     const MN = __METHOD_NAME__
     # say "#{name} #{[@|args]}"
     if ( self.has_public_concrete_method([MN, :V_self_method, :V_ + name], name) ) {
-      self.method( name )()
+      self.method( name )(args...)
     } elsif ( BuildSh.has_public_concrete_method([MN, :V_buildsh_method, :V_ + name], name) ) {
       # with ( Feature::ANSIColor ) {
       #   say( .color('bold blue'), "[CALL] #{__METHOD_NAME__}: BuildSh staticmethod #{name} FIXME???", .RESET )
       # }
-      self.with_directory{ BuildSh.method(name)(BuildSh) }
+      self.with_directory{ BuildSh.method(name)(BuildSh, args...) }
     } else {
       nil
+      # die "[ERROR] Undefined method `#{name}' called from #{self.class}.#{__METHOD_NAME__}()"
     }
   }
 
@@ -195,6 +196,7 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
     say "arch_name=#{self.delegate(:arch_name)}"
     say "word_size=#{self.delegate(:word_size)}"
     say()
+    say "wd=#{self.wd.abs}"
     say "is_git=#{self.delegate(:is_git)}"
     say "git_branch=#{self.delegate(:git_branch)}"
     say "git_hash=#{self.delegate(:git_hash)}"
@@ -242,12 +244,8 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
       bo_target.lock
 
       const make_targets = BuildSh.generate_make_targets
-      # const File default_boot_image_file = make_targets{:boot_image}
 
-      # try the local one with our id
       const using_boot_image = FactorBashStateless::_choose_boot_image(bo_target, make_targets{:boot_image})
-      # this side-effecting code will be deferred until used, except that isn't acutally what we want
-      # using_boot_image
 
       -> run_boot_image -> Bool {
         Combi::first( Command::spawn_se("echo \"USE: system 255 (exit)\"", '|', './' + bo_target.vm_fullname, '-no-user-init' "-i='#{using_boot_image}'", output: self.subcommand_output) )

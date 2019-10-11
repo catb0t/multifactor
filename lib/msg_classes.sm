@@ -50,7 +50,7 @@ module MsgTypes {
     MsgTypes::NO_ERROR ： /^$/
     MsgTypes::NO_ERROR ： /^The operation completed successfully\.$/i,
     MsgTypes::NO_METHOD ：
-      /^(?:\[AUTOLOAD\] )?Undefined method `(?<method_name>.*)' called from (?<method_invoked_from>.+\(\))/,
+      /^(?:\[AUTOLOAD\] | \[ERROR\] )?Undefined method `(?<method_name>.*)' called from (?<method_invoked_from>.+\(\))(?:\n\[\?\] Did you mean: (?<method_did_you_mean>.+))?/,
 
     MsgTypes::_DOES_NOT_MATCH_KINDS.map{
       DOES_NOT_MATCH{_} ： Regex( [
@@ -192,6 +192,9 @@ Unimplemented at multifactor.sm line 541
 [ERROR] Invalid return-type for value[0] from func `__FUNC__`: got `Number`, but expected `Hash`
 %
 Wrong number of return values from func `Maybe::_unmaybe`: got 0, but expected 1
+%
+[AUTOLOAD] Undefined method `String.endode' called from main()
+[?] Did you mean: encode
 EOT
 
     TEST_MSGS.split("\n%\n").each{

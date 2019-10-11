@@ -33,7 +33,7 @@ module Maybe {
   # a is a Maybe, but actually Maybe is a Define, so the precise type of a at `use constant` time is Maybe_Type
   define Block unmaybe = func _unmaybe (Maybe_Type a, Block b = Block.null_identity) { # < MaybeVal
     # say "a: #{dump(a)}
-    a.nothing ? b(a) : (a.just.is_a(a.just_type) ? a.just : a.just_type()(a.just))
+    a.nothing ? b(a) : ( (a.just.is_a(a.just_type) ? a.just : a.just_type()(a.just)) )
   }
 
   func is_just ( Maybe_Type _ )    { ! .nothing }

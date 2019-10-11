@@ -10,5 +10,6 @@ assert_eq( 'Maybe( [1] )', Maybe::dump(a) )
 
 assert_eq( 1, Maybe::unmaybe( Maybe::maybe( Num, Maybe::maybe( Num, 1 ) ) ) )
 assert_eq( "1", Maybe::unmaybe( Maybe::MaybeStr( Maybe::MaybeStr( :1 ) ) ) )
+assert_eq( :failure_block, Maybe::unmaybe( Maybe::maybe( Num, nil ), { :failure_block } ) )
 
 # assert_eq(  )

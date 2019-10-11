@@ -54,7 +54,7 @@ module SProcess {
       if (obj.len == 1) {
         __FUNC__([@|callers, :V_recursing] name, obj[0], want_vals )
       } else {
-        defined(obj[2]) && ( obj[2].is_an_object(Hash) \
+        defined(obj[2]) && ( obj[2].is_an_object(Hash) ->
           || die "#{__FILE__}:#{__LINE__}: #{FN}: malformed custom get/set blocks in RHS when declaring field '#{name}': RHS item \#3: want type 'Hash'; got '#{obj[2].ref}'"
         )
         Hash(

@@ -1,0 +1,13 @@
+include lib::shell_words
+import lib::shell_words::BuildSh
+
+include lib::withdirectory
+import lib::withdirectory::WithDirectory
+
+const d = WithDirectory( %d(.) )
+# const d = WithDirectory( %d(../factor) )
+# const d = WithDirectory( %d(/home/cat/Downloads/old_compress/factor-windows-098-release/factor) )
+
+d.with_directory{
+  say BuildSh.factor_directory_kind
+}

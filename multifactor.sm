@@ -43,29 +43,53 @@ module Factor {
 
   define File RC_FILE = Dir.home+%f(.factor-rc)
 
-  define Hash _config_lines_cache = []
+  define Array _config_lines_cache = []
 
+  # an array is a define-able variable that we can still mutate the contents of
+  #   outside its own define statement
+  # we basically have a non-const data pointer in a const name
   define Block rc_config_lines = func () -> Hash {
     Factor::_config_lines_cache[0] \\= Factor::RC_FILE.open_r.map{
       [ (.=~ /^! multifactor:(.+)\s*=?\s*(.*)/)[0, 1] ]
     }.grep.map{ _... }.to_h
   }
 
+  # same here except we're actually using the hash functionality, not just exploiting it
   define Hash _config_cache = :()
 
-  define Block find_config = func find_config (name, Bool must_exist = true) -> String {
-    Factor::_config_cache{name} \\= (Factor::rc_config_lines(){name} \\ do {
-      must_exist && die "Required config '! multifactor:#{name}' not found in #{Factor::RC_FILE}"
+  define Block find_config = func find_config (name, Bool required = false) -> String {
+    Factor::_config_cache{ name } \\= (Factor::rc_config_lines(){ name } \\ do {
+      required && die "Required config '! multifactor:#{name}' not found in #{Factor::RC_FILE}"
       ''
     })
   }
 
-  define Maybe::Maybe FACTOR_DIR = Maybe::MaybeDir(  Factor::find_config('factor-dir', false) )
-  define Maybe::Maybe QUIET_PIPE = Maybe::MaybeBool( Factor::find_config('quiet-pipe', false) )
-  define Maybe::Maybe ASSUME_LBI_OK = Maybe::MaybeBool( Factor::find_config('assume-lbi-ok', false) )
-  define Maybe::Maybe DEFAULT_CHECKSUM = Maybe::MaybeStr(
-    Factor::find_config('default-checksum', false) || Feature::DEFAULT_CHECKSUM
+  define Block find_config_alias = func find_config_alias (Array names, Bool one_required = false) -> String {
+    with (Factor::_config_cache & names -> to_a.first) {
+      .second
+    } else {
+      with ( names.find{ Factor::rc_config_lines(){_} } ) {
+          |found_names|
+        Factor::_config_cache{found_names} = Factor::rc_config_lines(){ found_names }
+      } else {
+        one_required && die "Required config '! multifactor:#{names[0]}' or one of its alias (#{names.join(', ')}) not found in #{Factor::RC_FILE}"
+        ''
+      }
+    }
+  }
+
+  define Maybe::Maybe ASSUME_LOCAL_BOOT_IMAGE_OK = Maybe::MaybeBool(
+    Factor::find_config_alias(%w{assume-local-boot-image-ok, assume_lbi_ok})
   )
+  define Maybe::Maybe DEFAULT_CHECKSUM = Maybe::MaybeStr(
+    Factor::find_config('default-checksum') || Feature::DEFAULT_CHECKSUM
+  )
+  define Maybe::Maybe DEVEL_MODE = Maybe::MaybeBool( Factor::find_config('devel-mode') )
+  define Maybe::Maybe DEVEL_OPTIONS = Maybe::MaybeArr( Factor::find_config('devel-options').split(' ') )
+  define Maybe::Maybe FACTOR_SETUP = Maybe::MaybeArr( Factor::find_config('factor-setup').split(' ') )
+  define Maybe::Maybe FACTOR_DIR = Maybe::MaybeDir( Factor::find_config('factor-dir') )
+  define Maybe::Maybe SIDEF_OPTIONS = Maybe::MaybeArr( Factor::find_config('sidef-options').split(' ') )
+  define Maybe::Maybe QUIET_PIPE = Maybe::MaybeBool( Factor::find_config('quiet-pipe') )
 
   # ???
   define Block say_stderr = func (String color, *args) {
@@ -143,7 +167,7 @@ module MultiFactor {
 
   define Array _mfr_sprop_gen = [ {
     .field_groups.map{
-      const tn =
+      # const tn =
       .second.map{ |k| ((k) => .first) }.to_h
     }.reduce('merge')
   } ]
@@ -159,14 +183,14 @@ module MultiFactor {
       |self|
     self.uuid( GuardIO::make_uuid() )
     say "MFRuntime: #{self.uuid}"
-    self.wd( Dir.cwd )
+
     # need to use field_groups here
     Hash(
       :action => Block.identity, # identity constructor
       :sum_algo => String
     ).merge(
       [:force, :dry_run, :info, :clean, :basis_dev, :spoof_build] \
-        .map{ ( (_) => Bool ) }.to_h # all these parentheses are important
+        .map{ ( (_) => Bool ) }.to_h
     ).each_kv{
         |name, convert|
       self.method( name )( convert( self.options(){ name.replace_all("_", "-") } ) )
@@ -176,9 +200,12 @@ module MultiFactor {
       self.algos = AlgoBox( [ _ ]*2 ... )
     }
 
+    say self.options
     const Dir factor_dir = Dir( with ( 'factor-dir' ) {
-        self.options(){_} || Maybe::unmaybe(Factor::FACTOR_DIR, { absent_config(_) } )
+        self.options(){_} || Maybe::unmaybe(Factor::FACTOR_DIR, { absent_config(_) } ) # absent_config doesn't appear to run?
     } )
+    # die if not dev factor-dir: BuildSh.factor_directory_kind
+    self.wd( factor_dir ) # Dir.cwd )
 
     const Bool is_trace = ( [:trace, :verbose, 'dry-run'].any{ self.options(){_} } )
     const Bool is_verbose = ( [:verbose, 'dry-run'].any{ self.options(){_} } )

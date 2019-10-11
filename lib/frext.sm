@@ -149,6 +149,8 @@ module FRExt {
       self.grep_sorted_methods(g, s).map{ m.run( .key, .value ) }
     }
   }
+
+  # TODO: func autoload_did_you_mean
 }
 
 -> _test_frext {

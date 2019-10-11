@@ -57,6 +57,7 @@ module Feature {
   define (
     ANSIColor = 'Term::ANSIColor'.frequire # '
     ReadKey   = 'Term::ReadKey'.frequire # '
+    UserAgent = 'LWP::UserAgent'.require
     DEFAULT_CHECKSUM = :sha256 # TODO: stop using sha256 in most places; allow xxHash & FNV etc
     # other non-dependent code goes here ...
     Set _INSTALLED_MODULES = Feature::_INSTALLED_MODULES_THREADS.map{ .wait... }.to_set

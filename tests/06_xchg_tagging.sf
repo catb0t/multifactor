@@ -58,7 +58,7 @@ const want_data = :(
   j => :( EXPL_TYP, :typename EXPL_VAL, _bt_magic(Str.ref) )
   k => :( EXPL_TYP, :typename EXPL_VAL, MyClass.ref.mref )
   l => :( (EXPL_TYP) => _bt_magic(Array.ref), (EXPL_STP) => _bt_magic(Str.ref), (EXPL_VAL) => [
-    :( (EXPL_VAL) => '0.99' ) # '
+    :( (EXPL_VAL) => '0.99' ), # '
     :( (EXPL_VAL) => '1.0123123123123123123123' ) # '
   ] )
   m => :( (EXPL_TYP) => USER_TYPE_MAGIC+MyClass.ref.mref, (EXPL_STP) => _bt_magic(Num.ref), (EXPL_VAL) => :( x => :( EXPL_VAL 1 ) ) )
@@ -68,13 +68,15 @@ const want_data = :(
   ) )
 )
 
-define JSON = 'JSON::XS'.require.new.pretty.utf8
+define JSON = 'JSON::XS'.require.new.pretty
 
 3.times{
   # say in_data
   # say want_data
   const j_want = JSON.encode(want_data)
   const rt_want = JSON.decode(j_want)
+  # say j_want
+  # say rt_want
 
   const expl_data_in = tag_hash(in_data)
   # say want_data.dump

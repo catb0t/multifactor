@@ -161,10 +161,10 @@ class ArgParse (Array argv) {
     die "already registered option with short name #{short_name}" \
       if ( self.long_name_from_short(short_name) )
 
-    negate && negate.flatten!.any { ! defined(_) } \
+    negate && negate.flatten!.any { ! defined(_) } ->
       && die "non-nil 'negate' must have non-nil values: #{negate}"
 
-    param && param.flatten!.any { ! defined(_) } \
+    param && param.flatten!.any { ! defined(_) } ->
       && die "non-nil 'param' must have non-nil values: #{param}"
 
     # TODO: parameterise this
@@ -474,9 +474,9 @@ class ArgParse (Array argv) {
         var expect_no_args = self.prog_args.is_empty
         # unexpected arguments are filtered out, the point is to only give the wanted data
         if (
-            expect_no_args \ # if we wanted 0 but got N
-            || (in_args.len >= self.prog_args.len) \ # if we already have the expected ones
-            || (! self.prog_args.grep_val{ .repeatable }) # but not if we wanted infinite arguments
+            expect_no_args -> # if we wanted 0 but got N
+              || (in_args.len >= self.prog_args.len) -> # if we already have the expected ones
+              || (! self.prog_args.grep_val{ .repeatable }) # but not if we wanted infinite arguments
         ) {
           unknown_argument(param, current_index + 1)
           next
