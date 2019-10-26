@@ -73,7 +73,7 @@ class BuildSh {
   -> downloader {
     Feature::UserAgent.new(show_progress => 1)
   }
-  -> make_http_request (url) {
+  -> make_http_request (url) -> String {
     # this can't be expressed so simply with if {}
     Combi::ifte(
       BuildSh.downloader.get(url),
@@ -82,7 +82,7 @@ class BuildSh {
     )
   }
   -> find_programs (String kind, Array ps) is cached -> String {
-    STDERR.say("Look for '#{kind}': #{ps.join(', ')}...")
+    STDERR.say("Look for '#{kind}': #{ps.join(', ')}...") # '
     for p in ps {
       const s = `which #{p.quotemeta}`.chomp
       if (Number($?) == 0) {
@@ -294,7 +294,9 @@ class BuildSh {
     Bool( BuildSh.platform_makefile_lines.find{ _ ~~ BuildConst::REPRODUCIBLE_REGEX } )
   }
 
-  -> factor_directory_kind () is cached -> String {
+  -> factor_directory_kind (logger = class {}.def_method(:vbs, Block.null_identity) ) is cached -> String {
+    const MN = __METHOD_NAME__
+    const FL = __METHOD_NAME__
     const Dir d = %d(.)
     const DirHandle dh = d.open_r
     const Array props = %w{dirs files}
@@ -303,11 +305,12 @@ class BuildSh {
     }.to_h
     dh.close
 
-    say status
+    # say status
 
+    logger.vbs(FL, __LINE__, MN, "grep entry")
     (DirKind::DIR_CONTENTS.grep_kv{
         |_k, v|
-      say "#{_k} #{v}"
+        logger.vbs(FL, __LINE__, MN, "#{_k} #{v}")
       :(:exist => Block.identity, :not_exist => {Set()}).map_kv{
           |e_type, cmp_with|
         ((e_type) => props.map{
@@ -315,13 +318,13 @@ class BuildSh {
           const kind_data = v{ e_type }{ prop }
           const state = status{ prop }
           # kind_data&status{ prop } == cmp_with(kind_data)
-          say "\t#{e_type} #{prop}"
+          logger.vbs(FL, __LINE__, MN, "\t#{e_type} #{prop}")
           const res = ( kind_data&state == cmp_with(kind_data) )
-          say "\treason:\n\t\tkind_data: #{kind_data}\n\n\t\tstate: #{state}\n\n\t\tkind_data & state: #{kind_data & state}\n\n\t\tcmp_with(kind_data): #{cmp_with(kind_data)}\n\t\t== kind_data: #{res}"
+          logger.vbs(FL, __LINE__, MN, "\treason:\n\t\tkind_data: #{kind_data}\n\n\t\tstate: #{state}\n\n\t\tkind_data & state: #{kind_data & state}\n\n\t\tcmp_with(kind_data): #{cmp_with(kind_data)}\n\t\t== kind_data: #{res}")
           res
         }.all)
       }.values.all
-    }.keys.first) \\ :none
+    }.keys.first \\ :none)
   }
 
   # -> platform_make (*args) {
@@ -443,8 +446,8 @@ class BuildSh {
       || return { say "#{MN}: Can't retrieve the boot image checksum at #{url_spec{:checksum}}"; :(status => false) }()
     )
 
-    const image_data = ( BuildSh.make_http_request( boot_image_urls{:boot_image_url} ) ->
-      || return { say "#{MN}: Can't retrieve the boot image at #{url_spec{:checksum}}"; :(status => false) }()
+    const image_data = ( BuildSh.make_http_request( url_spec{:boot_image_url} ) ->
+      || return { say "#{MN}: Can't retrieve the boot image at #{url_spec{:boot_image_url}}"; :(status => false) }()
     )
 
     const remote_md5 = BuildSh._process_checksums_file(remote_checksum_data, image_file)

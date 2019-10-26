@@ -44,7 +44,7 @@ module GuardIO {
     # }
   }
 
-  -> read_binary_b64 (name) {
+  -> read_binary_b64 (name) -> String {
     name.open('< :raw :bytes', \var fh)
     const res = fh.slurp.encode_utf8.encode_base64
     res
@@ -52,7 +52,7 @@ module GuardIO {
     res
   }
 
-  -> write_binary_b64 (name, b64) {
+  -> write_binary_b64 (name, b64) -> String {
     name.touch
     name.open('> :raw :bytes', \var fh)
     const res = fh.spurt(b64.decode_base64.decode_utf8)

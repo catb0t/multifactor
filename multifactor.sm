@@ -197,15 +197,8 @@ module MultiFactor {
     }
 
     with (self.sum_algo || Maybe::unmaybe(Factor::DEFAULT_CHECKSUM, { absent_config('default-checksum', :sum_algo) }) ) {
-      self.algos = AlgoBox( [ _ ]*2 ... )
+      self.algos = AlgoBox( _ , _ )
     }
-
-    say self.options
-    const Dir factor_dir = Dir( with ( 'factor-dir' ) {
-        self.options(){_} || Maybe::unmaybe(Factor::FACTOR_DIR, { absent_config(_) } ) # absent_config doesn't appear to run?
-    } )
-    # die if not dev factor-dir: BuildSh.factor_directory_kind
-    self.wd( factor_dir ) # Dir.cwd )
 
     const Bool is_trace = ( [:trace, :verbose, 'dry-run'].any{ self.options(){_} } )
     const Bool is_verbose = ( [:verbose, 'dry-run'].any{ self.options(){_} } )
@@ -218,15 +211,29 @@ module MultiFactor {
 
     # TODO: need a way for the consumer ofthe ArgParse API to know the exact syntax of the command line
     self.known_actions.has(self.action) \
-      || die "[FATAL] #{__FILE__, __LINE__}: init_steps_mfruntime: don\'t know action '#{self.action}' [--action | -a]"
+      || { self.log.wrn(__FILE__, __LINE__, '_mfr_init[0]', "don't know action '#{self.action}' [--action | -a]"); die() }()
 
     self.commit_db( Set('run-factor', 'spoof-exists').has(self.action) )
 
-    # initialise helper objects
+    # initialise a helper object that's needed now
     self.log = GuardIO::SLog( is_trace: is_trace, is_verbose: is_verbose, logger: Factor::say_stderr )
 
+    { # the scope of the variable `factor_dir` is reduced
+      const Dir factor_dir = Dir( with ( 'factor-dir' ) {
+          self.options(){_} || Maybe::unmaybe(Factor::FACTOR_DIR, { absent_config(_) } )
+      } )
+
+      self.wd( factor_dir )
+      # die if not dev factor-dir
+      with ( self.with_directory{ BuildSh.factor_directory_kind } ) {
+          |kind|
+        (kind == :dev) || { self.log.wrn(__FILE__, __LINE__, '_mfr_init[0]', "factor-dir kind must be 'dev', not '#{kind}' [--factor-dir | -w] (.factor.rc: `multifactor:factor-dir`)\n\tgot '#{factor_dir}' (aka '#{factor_dir.abs}') of kind '#{kind}'\n\t(limited user dir support is not implemented yet)") ; die() }()
+      }
+    }()
+
+    # initialise the rest of the helpers
     self.fbash = providers::factorbash::FactorBash(
-      factor_dir,
+      self.wd,
       self.algos.src,
       self.basis_dev,
       subcommand_output: subcommand_output,

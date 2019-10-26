@@ -1,0 +1,87 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "multifactor",
+  "title": "Multifactor DB JSON Schema",
+  "description": "structure of multifactor DB JSON",
+
+  "definitions": {
+    "dir_sum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algo", "names", "contents"],
+      "properties": {
+        "algo": { "type": "string" },
+        "names": { "type": "string" },
+        "contents": { "type": "string" }
+      }
+    },
+    "src_sums": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vm", "core", "basis"],
+      "properties": {
+        "vm": { "$ref": "#/definitions/dir_sum" },
+        "core": { "$ref": "#/definitions/dir_sum" },
+        "basis": { "$ref": "#/definitions/dir_sum" },
+        "basis_ignored": { "type": "boolean" }
+      }
+    },
+    "blob_sums": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algo", "vm", "lib", "boot"],
+      "properties": {
+        "algo": { "type": "string" },
+        "vm": { "type": "string" },
+        "lib": { "type": "string" },
+        "boot": { "type": "string" }
+      }
+    },
+    "virtual_base64_blob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["data", "algo", "sum"],
+      "properties": {
+        "data": { "type": "string" },
+        "algo": { "type": "string" },
+        "sum": { "type": "string" }
+      }
+    },
+    "timespec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accessed", "modified", "created", "tombstoned"],
+      "properties": {
+        "created": { "type": "integer" },
+        "accessed": { "type": "integer" },
+        "modified": { "type": "integer" },
+        "tombstoned": { "type": "integer" }
+      }
+    }
+  },
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "factor_version", "is_git", "git_branch", "git_hash", "os_type", "os_name", "arch_name", "word_size", "stored_boot_image", "src_sums", "blob_sums", "blob_algorithm", "timespec"],
+
+  "properties": {
+    "id": { "type": "string" },
+    "factor_version": { "type": "string", "pattern": "\\d\\.\\d{2}" },
+
+    "is_git": { "type": "boolean" },
+    "git_branch": { "type": "string" },
+    "git_hash": { "type": "string" },
+
+    "os_type": { "type": "string" },
+    "os_name": { "type": "string" },
+    "arch_name": { "type": "string" },
+    "word_size": { "type": "string" },
+
+    "stored_boot_image": { "$ref": "#/definitions/virtual_base64_blob" },
+    "src_sums": { "$ref": "#/definitions/src_sums" },
+    "blob_sums": { "$ref": "#/definitions/blob_sums" },
+    "blob_algorithm": { "type": "string" },
+
+    "timespec": { "$ref": "#/definitions/timespec" }
+  }
+}

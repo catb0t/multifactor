@@ -41,7 +41,7 @@ module _exported {
   # blobsums serial properties
   define Hash BS_SPROPS = [:algo, :vm, :lib, :boot].map{ ( (_) => Str ) }.to_h
 
-  # blobsums serial match block
+  # blobsums serial match block, just so that the boot checksum is excluded from the equality test
   define Block BS_SMATCH_BLOCK = func (self) -> Block { func (_) -> Bool { self._serial_eq(_, excl: Set(:boot)) } }
 
   class BlobSums (Str algo = '', Str vm = '', Str lib = '', Str boot = '') < SeriallyEquatable {

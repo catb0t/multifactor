@@ -8,13 +8,15 @@ module Breakpoint {
       # #{callers? ' < '+callers.join(' < ') : ''}
       say "\n#{.YELLOW}[BREAK]\t#{_bn(f)}:#{l}: #{n}::#{c}::#{fm}: #{args.dump}#{.RESET}"
       Feature::ReadKey.ReadMode(4)
-      say "Press any key to continue (q to stop)..."
+      say "Press any key to continue (q or Ctrl+C to exit)..."
       var c
       while (! defined( c = Feature::ReadKey.ReadKey )) {
         Sys.sleep(1)
       }
       Feature::ReadKey.ReadMode(0)
-      if (c == 'q') {
+      if ( Set('q', '').has(c) ) {
+        say "Exiting!"
+        die 'breakpoint'
         Sys.exit(0)
       }
       say "Continuing!"

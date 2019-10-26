@@ -38,6 +38,7 @@ module FactorBashStateless {
   # }
 
   # half this function doesn't rely on bo_target and thus can be moved to shell_words, later
+  # return type is the same as BuildSh._remote_boot_image_to_file
   -> _choose_boot_image (builtobj::BuiltObj bo_target, File default_name) -> Hash {
 
     func curry_test_strict (File _)  { _test_boot_image_strict(bo_target, _) }
@@ -247,8 +248,10 @@ class FactorBash (Dir wd, String sum_src_algo, Bool basis_dev, Bool subcommand_o
 
       const using_boot_image = FactorBashStateless::_choose_boot_image(bo_target, make_targets{:boot_image})
 
+      using_boot_image{:status} || die "couldn't choose a boot image, can't continue"
+
       -> run_boot_image -> Bool {
-        Combi::first( Command::spawn_se("echo \"USE: system 255 (exit)\"", '|', './' + bo_target.vm_fullname, '-no-user-init' "-i='#{using_boot_image}'", output: self.subcommand_output) )
+        Combi::first( Command::spawn_se("echo \"USE: system 255 (exit)\"", '|', './' + bo_target.vm_fullname, '-no-user-init' "-i='#{using_boot_image{:file}}'", output: self.subcommand_output) )
       }
       var count_refresh = 1
       # NOTE: STEP 1: run from boot image
